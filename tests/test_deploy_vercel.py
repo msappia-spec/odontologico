@@ -48,6 +48,20 @@ def test_requirements_permite_detectar_fastapi() -> None:
     assert re.search(r"^fastapi==", contenido, flags=re.MULTILINE)
 
 
+def test_requirements_sin_bom() -> None:
+    """Sin BOM (``EF BB BF``) o Vercel no puede parsear el archivo.
+
+    La CLI de Vercel aborta con *"could not parse requirements.txt: Unexpected
+    '\\ufeff'"* si el primer byte es el BOM: el archivo debe guardarse como
+    UTF-8 **sin** BOM (por ejemplo con ``Out-File -Encoding utf8NoBOM`` o
+    ``[IO.File]::WriteAllLines`` y ``UTF8Encoding($false)``).
+    """
+    primeros_bytes = (RAIZ / "requirements.txt").read_bytes()[:3]
+    assert primeros_bytes != b"\xef\xbb\xbf", (
+        "requirements.txt tiene BOM: el build de Vercel falla al parsearlo."
+    )
+
+
 def test_python_version_fijada() -> None:
     """El runtime toma la versión de ``.python-version``."""
     version = (RAIZ / ".python-version").read_text(encoding="utf-8").strip()

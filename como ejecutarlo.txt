@@ -49,18 +49,53 @@ El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistem
 
 > ⚙️ Si tocás el código **del backend** (archivos `.py`), hay que **reiniciar** uvicorn para que tome los cambios. El **HTML/CSS/JS** de la vista móvil se recarga solo con F5 (los sirve desde disco).
 
-## ☁️ Subirlo a internet (Vercel)
+## ☁️ Ya está subido a internet (Vercel)
 
-El código ya está en GitHub (`github.com/msappia-spec/odontologico`, rama `main`),
-así que falta sólo importarlo en Vercel (no hay que instalar nada en la PC):
+**La agenda del celular, desde cualquier red (sin depender del Wi‑Fi ni del firewall):**
 
-1. Entrá a <https://vercel.com/new> e iniciá sesión con la cuenta de GitHub.
-2. Elegí **Import Git Repository** → **msappia-spec/odontologico**.
-3. En **Environment Variables** cargá `DATABASE_URL` con la cadena de una base
-   PostgreSQL gratuita (por ejemplo <https://neon.tech>). Sin eso la app igual
-   arranca, pero guarda los datos en un SQLite temporal (`/tmp`) y **se borran**
-   cuando Vercel reinicia la instancia.
-4. Tocá **Deploy**. En un minuto tenés una URL tipo
-   `https://odontologico-xxxx.vercel.app`, y la agenda del celular te queda en
-   `https://odontologico-xxxx.vercel.app/medico` (esa sí funciona desde
-   cualquier red, sin depender del Wi‑Fi de la PC ni del firewall).
+```
+https://odontologico-omega.vercel.app/medico
+```
+
+Panel de la secretaría: `https://odontologico-omega.vercel.app/`
+Documentación de la API: `https://odontologico-omega.vercel.app/docs`
+Salud del servicio: `https://odontologico-omega.vercel.app/health` → `{"status":"ok",...}`
+
+El proyecto en Vercel es **`marcozface-2235/odontologico`** (deploy hecho por CLI
+el 13/10/2026, *Ready in 35s*). Para volver a subir cambios alcanza con:
+
+```powershell
+cd c:\Sistema\Odontologico
+vercel --prod --yes
+```
+
+### ⚠️ Falta conectar una base PostgreSQL (importante)
+
+Tal como está ahora, en Vercel la app usa un **SQLite temporal en `/tmp`**: la
+página abre perfecto, pero **está vacía** (`/api/v1/doctores` devuelve `[]`) y todo
+lo que cargues **se borra** cuando Vercel reinicia la instancia (los archivos de
+un servidor serverless son de sólo lectura, salvo `/tmp`).
+
+Para que guarde de verdad:
+
+1. Creá una base gratis en <https://neon.tech> y copiá la cadena de conexión
+   (`postgresql://usuario:clave@host/db?sslmode=require`).
+2. En Vercel: **Project → Settings → Environment Variables** → agregá
+   `DATABASE_URL` con esa cadena (entorno *Production*) y tocá **Redeploy**.
+   También podés hacerlo por CLI: `vercel env add DATABASE_URL production`.
+3. Cargá los odontólogos/pacientes: `python scripts/seed.py` apuntando a la base
+   nueva (con `DATABASE_URL` en el `.env` local) o cargándolos desde el panel.
+
+### 🔧 Dos problemas que ya quedaron resueltos (por si reaparecen)
+
+- **`requirements.txt` con BOM** (`EF BB BF`): Vercel aborta con
+  *"could not parse requirements.txt: Unexpected '\ufeff'"*. El archivo debe estar
+  en UTF-8 **sin** BOM. No lo generes con `pip freeze > requirements.txt` en
+  PowerShell (`>` y `Out-File` escriben BOM). Hay un test que lo controla:
+  `tests/test_deploy_vercel.py::test_requirements_sin_bom`.
+- **`pip freeze` completo**: incluía paquetes de desarrollo y versiones que no
+  existen en PyPI (`pygments==2.21.1`), y el build moría con *"No solution found
+  when resolving dependencies"*. `requirements.txt` ahora lista sólo las
+  dependencias **directas**; las de desarrollo (pytest, esprima) están en
+  `requirements-dev.txt`.
+

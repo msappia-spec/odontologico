@@ -1,0 +1,7 @@
+# Herramientas de desarrollo y pruebas (no se instalan en Vercel).
+#
+# Uso:  pip install -r requirements-dev.txt
+-r requirements.txt
+pytest==9.1.1
+esprima==4.0.1
+

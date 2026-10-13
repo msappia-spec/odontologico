@@ -31,3 +31,8 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# --- Vercel (CLI) ---
+.vercel/
+.vercel
+.env*

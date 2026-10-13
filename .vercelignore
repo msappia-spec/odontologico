@@ -1,0 +1,38 @@
+# ============================================================
+#  Archivos que NO se suben en un deploy con la CLI de Vercel
+#  (equivalente a .gitignore; se evita empaquetar el entorno
+#  virtual, la base local y los artefactos de pruebas).
+# ============================================================
+
+.venv/
+venv/
+env/
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.cache/
+.coverage
+htmlcov/
+
+# Base de datos local y sus respaldos
+*.db
+*.sqlite3
+*.db.bak-*
+
+# Logs
+*.log
+
+# Pruebas y scripts auxiliares (no se usan en runtime)
+tests/
+scripts/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Configuración local del propio CLI
+.vercel/

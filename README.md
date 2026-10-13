@@ -154,16 +154,32 @@ uvicorn app.main:app --reload
 
 ## ☁️ Despliegue en Vercel (opcional)
 
-El repositorio está preparado para desplegarse en Vercel **sin `vercel.json`**:
-Vercel detecta FastAPI por `requirements.txt` y busca la instancia `app` en los
-*entrypoints* soportados (`app.py`, `index.py`, `server.py`, `main.py`,
-`wsgi.py`, `asgi.py` — y los mismos nombres dentro de `app/` o `src/`). Como el
-proyecto ya define `app = FastAPI(...)` en `app/main.py`, el despliegue es
-*zero-config*.
+El repositorio está preparado para desplegarse en Vercel: `requirements.txt`
+declara FastAPI y el proyecto define `app = FastAPI(...)` en `app/main.py`, que
+es uno de los *entrypoints* que Vercel reconoce (`app.py`, `index.py`,
+`server.py`, `main.py`, `wsgi.py`, `asgi.py` — y los mismos nombres dentro de
+`app/` o `src/`). El `vercel.json` sólo declara el preset:
+
+```json
+{ "$schema": "https://openapi.vercel.sh/vercel.json", "framework": "fastapi" }
+```
 
 > ⚠️ **No usar `vercel.json` con `builds`/`routes`**: ese formato (API v2) está
 > obsoleto y hace fallar el *build*. El contrato se verifica en
 > `tests/test_deploy_vercel.py`.
+
+### 0) Deploy por CLI (lo que se usó acá)
+
+```powershell
+npm install -g vercel     # una sola vez (requiere Node.js)
+vercel login              # elegir "Continue with GitHub"
+vercel --prod --yes       # desde c:\Sistema\Odontologico
+```
+
+La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
+`scripts/`). Si el proyecto ya existía creado como *static*, borrar el
+`vercel.json` viejo y redeployar es lo que fuerza el preset `fastapi`.
+
 
 ### 1) Importar el proyecto
 
