@@ -18,3 +18,15 @@ class EstadoWhatsApp(str, enum.Enum):
     ENVIADO = "ENVIADO"
     FALLIDO = "FALLIDO"
     RESPONDIDO = "RESPONDIDO"
+
+
+class TipoDisponibilidadEspecifica(str, enum.Enum):
+    """Efecto de un tramo horario cargado para **una fecha concreta**.
+
+    Se usa en ``DisponibilidadEspecifica`` (excepciones de agenda): un rango
+    ``HABILITADO`` suma atención ese día y uno ``BLOQUEADO`` la resta, sin
+    tocar la agenda semanal del odontólogo (``DisponibilidadDoctor``).
+    """
+
+    HABILITADO = "HABILITADO"
+    BLOQUEADO = "BLOQUEADO"

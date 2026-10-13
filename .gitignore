@@ -24,6 +24,9 @@ dist/
 .coverage
 htmlcov/
 
+# --- Logs de ejecución del servidor ---
+*.log
+
 # --- IDEs ---
 .idea/
 .vscode/

@@ -9,6 +9,10 @@ Concentra las reglas de negocio del registro de pacientes, en línea con
   ``ConflictoError`` (HTTP 409).
 * Los campos administrativos vacíos llegan normalizados a ``None`` desde el
   esquema Pydantic (:class:`app.schemas.paciente.PacienteDatosAdministrativos`).
+* La **cobertura** se guarda como clave foránea (``obra_social_id``): el servicio
+  traduce el texto heredado ``obra_social`` al catálogo
+  (:mod:`app.services.obra_social_service`) y valida que la obra social enviada
+  exista (``404`` si no).
 """
 
 import logging
@@ -21,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import ConflictoError, RecursoNoEncontradoError
 from app.models.paciente import Paciente
 from app.schemas.paciente import PacienteCreate, PacienteUpdate
+from app.services import obra_social_service
 
 logger = logging.getLogger("app.services.pacientes")
 
@@ -31,6 +36,37 @@ def obtener_paciente(db: Session, paciente_id: int) -> Paciente:
     if paciente is None:
         raise RecursoNoEncontradoError(f"No existe un paciente con id={paciente_id}.")
     return paciente
+
+
+def _resolver_cobertura(db: Session, cambios: dict) -> None:
+    """Traduce la cobertura recibida a la clave foránea ``obra_social_id``.
+
+    Reglas (de mayor a menor prioridad):
+
+    * Si el payload trae un ``obra_social_id`` informado se usa tal cual; un id
+      inexistente responde ``404``.
+    * Si sólo trae el texto heredado ``obra_social``, el nombre se resuelve
+      contra el catálogo (se vincula la cobertura existente o se crea una con
+      ese nombre).
+    * Si la cobertura llega vacía/nula (por cualquiera de las dos vías) el
+      paciente queda sin obra social.
+
+    El texto nunca se persiste: ``obra_social`` ya no es una columna.
+    """
+    enviado_texto = "obra_social" in cambios
+    nombre = cambios.pop("obra_social", None)
+
+    if cambios.get("obra_social_id") is not None:
+        obra_social_service.obtener_obra_social(db, cambios["obra_social_id"])
+        return
+
+    if nombre:
+        cambios["obra_social_id"] = obra_social_service.resolver_por_nombre(
+            db, nombre
+        ).id
+    elif enviado_texto or "obra_social_id" in cambios:
+        cambios["obra_social_id"] = None
+
 
 
 def _validar_dni_unico(
@@ -50,10 +86,15 @@ def _validar_dni_unico(
 
 
 def crear_paciente(db: Session, data: PacienteCreate) -> Paciente:
-    """Crea un paciente validando que su DNI (si viene) no esté repetido."""
+    """Crea un paciente validando el DNI único y resolviendo su cobertura."""
     _validar_dni_unico(db, data.dni)
 
-    paciente = Paciente(**data.model_dump())
+    datos = data.model_dump()
+    # ``obra_social`` (texto heredado) se traduce a ``obra_social_id`` antes de
+    # construir el ORM: el nombre ya no es una columna del paciente.
+    _resolver_cobertura(db, datos)
+
+    paciente = Paciente(**datos)
     db.add(paciente)
     try:
         db.commit()
@@ -85,13 +126,16 @@ def actualizar_paciente(db: Session, paciente_id: int, data: PacienteUpdate) -> 
     """Actualiza parcialmente un paciente (``PATCH``).
 
     Sólo se aplican los campos enviados; si llega un ``dni`` distinto se
-    revalida su unicidad contra el resto de los pacientes.
+    revalida su unicidad contra el resto de los pacientes y la cobertura se
+    resuelve contra el catálogo de obras sociales.
     """
     paciente = obtener_paciente(db, paciente_id)
     cambios = data.model_dump(exclude_unset=True)
 
     if "dni" in cambios:
         _validar_dni_unico(db, cambios["dni"], excluir_paciente_id=paciente.id)
+
+    _resolver_cobertura(db, cambios)
 
     for campo, valor in cambios.items():
         setattr(paciente, campo, valor)

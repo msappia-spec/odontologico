@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Vista móvil: ancho real del dispositivo, sin zoom inicial y con
+       ``viewport-fit=cover`` para respetar el "notch" en pantallas recortadas. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d8578" />
+  <meta name="description" content="Agenda diaria del odontólogo: turnos del día, horarios libres, cancelación rápida y alta de pacientes desde el celular." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Mi agenda" />
+  <title>OdontoCare Móvil · Mi agenda</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A6%B7%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eefbf8', 100: '#d3f4ee', 200: '#a9e9df', 300: '#74d7c9',
+              400: '#3fbfae', 500: '#17a394', 600: '#0d8578', 700: '#106a61',
+              800: '#12554f', 900: '#134742'
+            }
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+        }
+      }
+    };
+  </script>
+  <!-- Componentes compartidos con el panel (botones, badges…) y los ajustes
+       propios del celular (áreas táctiles, hojas deslizantes, safe-area). -->
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/medico.css" />
+  <script src="/static/medico.js" defer></script>
+</head>
+<body>
+  <!-- Avisos efímeros (éxito / error / info). En el celular viajan arriba y a
+       todo el ancho, para que no queden tapados por el pulgar. -->
+  <div id="toasts" class="m-toasts" role="status" aria-live="polite"></div>
+
+  <!-- ===================== ENCABEZADO (con profesional) ===================== -->
+  <header id="m-header" class="m-header hide">
+    <div class="m-header-inner">
+      <span id="m-doctor-avatar" class="m-avatar">--</span>
+      <div class="m-header-texto">
+        <p id="m-doctor-nombre" class="m-header-nombre">Odontólogo</p>
+        <p id="m-doctor-especialidad" class="m-header-especialidad"></p>
+      </div>
+      <button type="button" id="btn-refrescar-agenda" class="m-icon-btn" aria-label="Actualizar la agenda" title="Actualizar">
+        <svg id="ico-refrescar" class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M21 3v6h-6"/></svg>
+      </button>
+      <button type="button" id="btn-cambiar-medico" class="m-icon-btn" aria-label="Cambiar de odontólogo" title="Cambiar de odontólogo">
+        <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3.1a4 4 0 0 1 0 7.8"/><path d="M21 21v-2a4 4 0 0 0-3-3.9"/><path d="M8 21v-2a4 4 0 0 1 4-4h1"/><circle cx="9" cy="7" r="4"/><path d="M17 17l4 4M21 17l-4 4"/></svg>
+      </button>
+    </div>
+  </header>
+  <main class="m-main">
+
+    <!-- =================== PANTALLA 1 · QUIÉN ATIENDE =================== -->
+    <section id="pantalla-profesional" class="m-pantalla">
+      <div class="m-hero">
+        <p class="m-hero-eyebrow">OdontoCare Móvil</p>
+        <h1 class="m-hero-titulo">¿Quién atiende hoy?</h1>
+        <p class="m-hero-sub">Elegí tu nombre para ver tu agenda del día. La elección queda guardada en este celular.</p>
+      </div>
+      <div id="lista-profesionales" class="m-lista-profesionales">
+        <p class="m-cargando">Cargando odontólogos…</p>
+      </div>
+      <p class="m-nota">¿Necesitás el panel completo? <a href="/" class="m-link">Ir al panel de la secretaría</a></p>
+    </section>
+
+    <!-- =================== PANTALLA 2 · AGENDA DEL DÍA =================== -->
+    <section id="pantalla-agenda" class="m-pantalla hide">
+      <!-- Navegador de fechas: se puede consultar cualquier día del calendario
+           con las flechas, la tira de la semana, «Hoy» o el selector de fecha. -->
+      <div class="m-dia">
+        <div class="m-nav-dia">
+          <button type="button" id="btn-dia-anterior" class="m-icon-btn" aria-label="Día anterior" title="Día anterior">
+            <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="m-nav-dia-centro">
+            <p id="m-fecha" class="m-dia-fecha"></p>
+            <p id="m-fecha-extra" class="m-dia-extra"></p>
+          </div>
+          <button type="button" id="btn-dia-siguiente" class="m-icon-btn" aria-label="Día siguiente" title="Día siguiente">
+            <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+
+        <!-- Tira de la semana: un botón por día, con la cantidad de turnos. -->
+        <div class="m-semana">
+          <button type="button" id="btn-semana-anterior" class="m-semana-flecha" data-semana="-7" aria-label="Semana anterior">&#8249;</button>
+          <div id="tira-semana" class="m-tira-semana" role="group" aria-label="Días de la semana"></div>
+          <button type="button" id="btn-semana-siguiente" class="m-semana-flecha" data-semana="7" aria-label="Semana siguiente">&#8250;</button>
+        </div>
+
+        <div class="m-dia-fila">
+          <p id="m-resumen" class="m-dia-resumen">—</p>
+          <span id="m-origen" class="badge badge-brand hide">Agenda habitual</span>
+        </div>
+
+        <!-- Salto directo a una fecha concreta (vacaciones, controles lejanos). -->
+        <div class="m-fecha-form">
+          <input type="date" id="input-fecha" class="m-input" aria-label="Ir a una fecha" />
+          <button type="button" id="btn-hoy" class="m-btn m-btn-ghost m-btn-compacto">Hoy</button>
+        </div>
+      </div>
+
+      <!-- Lista cronológica: turnos ocupados y horarios libres intercalados. -->
+      <div id="agenda-lista" class="m-timeline"></div>
+
+      <!-- Turnos cancelados del día: informativos y fuera de la línea de tiempo,
+           para no mostrar dos veces el mismo horario. -->
+      <section id="agenda-cancelados" class="hide">
+        <h2 class="m-seccion-titulo">Cancelados del día</h2>
+        <div id="lista-cancelados" class="m-timeline"></div>
+      </section>
+
+      <p id="agenda-ayuda" class="m-nota">Tocá un <strong>horario libre</strong> para agendar, el <strong>lápiz</strong> para editar un turno y el <strong>cesto</strong> para cancelarlo.</p>
+    </section>
+  </main>
+  <!-- ========= HOJA DESLIZANTE · AGENDAR / EDITAR PACIENTE Y HORARIO ========= -->
+  <!-- Una sola hoja para las dos acciones: agendar en un horario libre y editar
+       un turno ya asignado (cambiar paciente, día, hora, duración o estado). -->
+  <div id="hoja-nuevo-turno" class="m-sheet hide" role="dialog" aria-modal="true" aria-labelledby="nuevo-titulo">
+    <div class="m-sheet-backdrop" data-cerrar-hoja></div>
+    <div class="m-sheet-panel">
+      <div class="m-sheet-handle"></div>
+      <div class="m-sheet-cabecera">
+        <div class="m-sheet-cabecera-texto">
+          <h2 id="nuevo-titulo" class="m-sheet-titulo">Agendar paciente</h2>
+          <p id="nuevo-horario" class="m-sheet-sub">—</p>
+        </div>
+        <button type="button" class="m-icon-btn" data-cerrar-hoja aria-label="Cerrar el formulario">
+          <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-nuevo-turno" class="m-form" novalidate>
+        <input type="hidden" id="nuevo-doctor-id" />
+        <input type="hidden" id="nuevo-turno-id" />
+
+        <!-- Paciente: se elige de la lista completa de fichas ya registradas. -->
+        <div class="m-campo">
+          <label class="m-label" for="nuevo-buscar">Paciente</label>
+
+          <div id="paciente-elegido" class="m-elegido hide">
+            <span id="elegido-iniciales" class="m-elegido-avatar">--</span>
+            <span class="m-elegido-datos">
+              <span id="elegido-nombre" class="m-elegido-nombre">—</span>
+              <span id="elegido-detalle" class="m-elegido-detalle"></span>
+            </span>
+            <button type="button" id="btn-cambiar-paciente" class="m-icon-btn m-icon-btn-chico" aria-label="Elegir otro paciente" title="Elegir otro paciente">
+              <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <div id="bloque-buscar" class="m-buscar">
+            <input class="m-input" id="nuevo-buscar" type="search" autocomplete="off"
+                   enterkeyhint="search" placeholder="Buscar por nombre, DNI o teléfono" />
+            <!-- Lista de pacientes registrados (se filtra mientras se escribe). -->
+            <div id="lista-pacientes" class="m-lista-pacientes" role="listbox" aria-label="Pacientes registrados"></div>
+            <button type="button" id="btn-paciente-nuevo" class="m-btn m-btn-ghost m-btn-mini">
+              Registrar un paciente nuevo
+            </button>
+          </div>
+        </div>
+
+        <!-- Alta de paciente nuevo: se muestra al pedirla o si no hay fichas. -->
+        <div id="bloque-paciente-nuevo" class="m-alta hide">
+          <div class="m-alta-cabecera">
+            <p class="m-alta-titulo">Paciente nuevo</p>
+            <button type="button" id="btn-buscar-existente" class="m-link-btn">Elegir uno ya registrado</button>
+          </div>
+          <div>
+            <label class="m-label" for="nuevo-nombre">Nombre del paciente</label>
+            <input class="m-input" id="nuevo-nombre" name="nombre" maxlength="120"
+                   autocomplete="name" enterkeyhint="next" placeholder="Juan Pérez" />
+          </div>
+          <div>
+            <label class="m-label" for="nuevo-telefono">Teléfono</label>
+            <input class="m-input" id="nuevo-telefono" name="telefono" type="tel"
+                   inputmode="tel" autocomplete="tel" enterkeyhint="next" placeholder="+5491122334455" />
+          </div>
+          <div>
+            <label class="m-label" for="nuevo-dni">DNI <span class="m-label-hint">(opcional)</span></label>
+            <input class="m-input" id="nuevo-dni" name="dni" inputmode="numeric" maxlength="20"
+                   enterkeyhint="done" placeholder="30123456" />
+          </div>
+        </div>
+
+        <!-- Horario: el día se puede cambiar (el backend revalida solapamientos). -->
+        <div class="m-grilla-2">
+          <div>
+            <label class="m-label" for="nuevo-fecha">Fecha</label>
+            <input class="m-input" id="nuevo-fecha" type="date" required />
+          </div>
+          <div>
+            <label class="m-label" for="nuevo-hora">Hora</label>
+            <input class="m-input" id="nuevo-hora" type="time" step="300" required />
+          </div>
+        </div>
+        <div>
+          <label class="m-label" for="nuevo-duracion">Duración</label>
+          <select class="m-input" id="nuevo-duracion">
+            <option value="15">15 minutos</option>
+            <option value="20">20 minutos</option>
+            <option value="30" selected>30 minutos</option>
+            <option value="45">45 minutos</option>
+            <option value="60">60 minutos</option>
+          </select>
+        </div>
+
+        <!-- Atajos: horarios que ese día quedan libres según la agenda vigente. -->
+        <div id="bloque-libres" class="m-campo hide">
+          <p class="m-label">Horarios libres de ese día</p>
+          <div id="nuevo-libres" class="m-chips-libres"></div>
+        </div>
+
+        <!-- Estado: sólo al editar (permite confirmar o reactivar un cancelado). -->
+        <div id="bloque-estado" class="hide">
+          <label class="m-label" for="nuevo-estado">Estado del turno</label>
+          <select class="m-input" id="nuevo-estado">
+            <option value="PENDIENTE">Pendiente</option>
+            <option value="CONFIRMADO">Confirmado</option>
+            <option value="CANCELADO">Cancelado</option>
+          </select>
+        </div>
+
+        <p id="nuevo-error" class="m-error hide" role="alert"></p>
+        <button type="submit" id="btn-agendar" class="m-btn m-btn-primary">Agendar turno</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ HOJA DESLIZANTE · CONFIRMAR CANCELACIÓN ============ -->
+  <div id="hoja-cancelar" class="m-sheet hide" role="dialog" aria-modal="true" aria-labelledby="cancelar-titulo">
+    <div class="m-sheet-backdrop" data-cerrar-hoja></div>
+    <div class="m-sheet-panel">
+      <div class="m-sheet-handle"></div>
+      <h2 id="cancelar-titulo" class="m-sheet-titulo">¿Cancelar el turno?</h2>
+      <p id="cancelar-detalle" class="m-sheet-sub">—</p>
+      <input type="hidden" id="cancelar-turno-id" />
+      <div class="m-sheet-acciones">
+        <button type="button" class="m-btn m-btn-ghost" data-cerrar-hoja>Volver</button>
+        <button type="button" id="btn-confirmar-cancelar" class="m-btn m-btn-danger">Sí, cancelar</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+
+

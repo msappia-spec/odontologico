@@ -159,9 +159,10 @@ def test_el_dashboard_actualiza_turnos_con_patch():
     assert '"PATCH"' in app_js and '"POST"' in app_js
 
     # Ningún recurso del dashboard usa PUT/DELETE contra /turnos: esa ruta sólo
-    # expone GET y PATCH. Los únicos PUT/DELETE del panel son los de la agenda
-    # semanal de los odontólogos (/doctores/{id}/disponibilidad), que la API sí
-    # declara (app/api/v1/endpoints/disponibilidad.py).
+    # expone GET y PATCH. Los PUT/DELETE del panel apuntan a `/doctores/`: la
+    # agenda semanal (/doctores/{id}/disponibilidad) y la gestión del profesional
+    # (PUT de edición y DELETE de baja lógica en /doctores/{id}), todos declarados
+    # por la API (app/api/v1/endpoints/disponibilidad.py y doctores.py).
     assert not re.search(r'method:\s*"(PUT|DELETE)"', calendar_js)
     assert not re.search(r'method:\s*"(PUT|DELETE)"', _leer_estatico("index.html"))
 

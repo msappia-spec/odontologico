@@ -2,8 +2,17 @@
 
 Además del CRUD, expone :func:`horarios_disponibles`, que arma los bloques de
 turnos que el calendario ofrece para un odontólogo y una fecha: parte los rangos
-configurados en ``DisponibilidadDoctor`` (varios tramos por día) y descarta los
+configurados en ``DisponibilidadDoctor`` (varios tramos por día), o en las
+excepciones de la fecha (``DisponibilidadEspecifica``) cuando el día tiene
+alguna cargada, y descarta los
 bloques que se cruzan con turnos vigentes.
+
+**Odontólogos dados de baja.** Un profesional con ``activo = False`` no puede
+recibir turnos nuevos ni ofrecer horarios: las operaciones que *asignan* un
+profesional (alta de turno, reasignación y ``horarios-disponibles``) lo tratan
+como inexistente (``404``, ver :func:`_obtener_doctor`). Los turnos que ya tenga
+agendados siguen existiendo —se pueden reprogramar y cancelar— para no perder
+historial.
 """
 
 import logging
@@ -15,30 +24,32 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.datetime_utils import rango_del_dia
+from app.core.datetime_utils import dia_semana_de, rango_del_dia
 from app.core.exceptions import (
     PacienteConTurnoSolapadoError,
     RecursoNoEncontradoError,
     TurnoSolapadoError,
     ValidacionError,
 )
-from app.models.disponibilidad import DisponibilidadDoctor
 from app.models.doctor import Doctor
 from app.models.enums import EstadoTurno
 from app.models.paciente import Paciente
 from app.models.turno import Turno
 from app.schemas.turno import TurnoCreate, TurnoUpdate
-from app.services import disponibilidad_service
+from app.services import disponibilidad_service, doctor_service
 
 
 logger = logging.getLogger("app.services.turnos")
 
 
-def _obtener_doctor(db: Session, doctor_id: int) -> Doctor:
-    doctor = db.get(Doctor, doctor_id)
-    if doctor is None:
-        raise RecursoNoEncontradoError(f"No existe un doctor con id={doctor_id}.")
-    return doctor
+def _obtener_doctor(db: Session, doctor_id: int, solo_activos: bool = False) -> Doctor:
+    """Valida que el doctor exista (y, si corresponde, que esté activo).
+
+    Delega en :mod:`app.services.doctor_service` para no duplicar la regla del
+    borrado lógico: con ``solo_activos=True`` un odontólogo dado de baja responde
+    ``404`` ("está dado de baja y no puede recibir turnos").
+    """
+    return doctor_service.obtener_doctor(db, doctor_id, solo_activos=solo_activos)
 
 
 def _obtener_paciente(db: Session, paciente_id: int) -> Paciente:
@@ -139,8 +150,11 @@ def _validar_paciente_ubicuo(
 def crear_turno(db: Session, data: TurnoCreate) -> Turno:
     """Crea un turno validando existencia de doctor/paciente, agenda del doctor
     y ubicuidad del paciente (no puede estar en otra agenda a la misma hora).
+
+    El odontólogo debe estar **activo**: un profesional dado de baja no recibe
+    turnos nuevos (``404``).
     """
-    _obtener_doctor(db, data.doctor_id)
+    _obtener_doctor(db, data.doctor_id, solo_activos=True)
     _obtener_paciente(db, data.paciente_id)
     _validar_paciente_ubicuo(
         db,
@@ -183,13 +197,35 @@ def listar_turnos(
     limit: int = 100,
     doctor_id: Optional[int] = None,
     paciente_id: Optional[int] = None,
+    fecha_desde: Optional[Date] = None,
+    fecha_hasta: Optional[Date] = None,
 ) -> Sequence[Turno]:
-    """Devuelve turnos con filtros opcionales por doctor y/o paciente."""
+    """Devuelve turnos con filtros opcionales de agenda.
+
+    Los filtros son acumulativos y todos opcionales: profesional, paciente y
+    **rango de fechas**. Ese último es el que usa la vista móvil del odontólogo
+    para consultar *cualquier* día del calendario —la tira de la semana pide los
+    siete días de una sola vez— sin traerse el historial completo.
+
+    El rango se interpreta por **solapamiento con los días pedidos**: se toman los
+    turnos cuyo horario cae dentro de ``[fecha_desde 00:00, fecha_hasta
+    23:59:59.999999]``, de modo que un turno que cruza la medianoche aparece en
+    los dos días. ``fecha_desde`` mayor que ``fecha_hasta`` responde ``422``.
+    """
+    if fecha_desde is not None and fecha_hasta is not None and fecha_hasta < fecha_desde:
+        raise ValidacionError(
+            "fecha_hasta no puede ser anterior a fecha_desde."
+        )
+
     stmt = select(Turno).order_by(Turno.fecha_hora_inicio)
     if doctor_id is not None:
         stmt = stmt.where(Turno.doctor_id == doctor_id)
     if paciente_id is not None:
         stmt = stmt.where(Turno.paciente_id == paciente_id)
+    if fecha_desde is not None:
+        stmt = stmt.where(Turno.fecha_hora_fin >= rango_del_dia(fecha_desde)[0])
+    if fecha_hasta is not None:
+        stmt = stmt.where(Turno.fecha_hora_inicio <= rango_del_dia(fecha_hasta)[1])
     stmt = stmt.offset(skip).limit(limit)
     return db.execute(stmt).scalars().all()
 
@@ -232,7 +268,10 @@ def actualizar_turno(db: Session, turno_id: int, data: TurnoUpdate) -> Turno:
         )
 
     if "doctor_id" in cambios:
-        _obtener_doctor(db, doctor_id)
+        # Reasignar a otro profesional exige que esté activo; reprogramar o
+        # cancelar un turno de alguien dado de baja sigue permitido (el turno ya
+        # existe y hay que poder gestionarlo).
+        _obtener_doctor(db, doctor_id, solo_activos=True)
     if "paciente_id" in cambios:
         _obtener_paciente(db, paciente_id)
 
@@ -270,25 +309,15 @@ def actualizar_turno(db: Session, turno_id: int, data: TurnoUpdate) -> Turno:
 
 
 # --------------------------------------------------------------------------- #
-# Disponibilidad: bloques de turnos ofrecidos a partir de la agenda semanal
+# Disponibilidad: bloques de turnos ofrecidos a partir de la agenda del día
 # --------------------------------------------------------------------------- #
 
 # Ancho por defecto de los bloques que ofrece el calendario (30 minutos).
 DURACION_BLOQUE_MIN = 30
 
 
-def dia_semana_de(fecha: Date) -> int:
-    """Día de la semana del calendario: **0 = domingo** … 6 = sábado.
-
-    Se usa la misma convención que ``DisponibilidadDoctor.dia_semana`` y que
-    ``Date.getDay()`` de JavaScript, de modo que el panel web no tenga que
-    convertir nada.
-    """
-    return (fecha.weekday() + 1) % 7
-
-
 def _bloques_de_rangos(
-    rangos: Sequence[DisponibilidadDoctor], duracion_minutos: int
+    rangos: Sequence["disponibilidad_service.RangoEfectivo"], duracion_minutos: int
 ) -> List[Tuple[Time, Time]]:
     """Parte cada rango habilitado en bloques consecutivos de ``duracion_minutos``.
 
@@ -332,29 +361,35 @@ def horarios_disponibles(
     doctor_id: int,
     fecha: Date,
     duracion_minutos: int = DURACION_BLOQUE_MIN,
-) -> Tuple[List[DisponibilidadDoctor], List[Tuple[Time, Time]]]:
+) -> Tuple[disponibilidad_service.DisponibilidadEfectivaDia, List[Tuple[Time, Time]]]:
     """Bloques que el odontólogo puede atender en ``fecha``.
 
     El cálculo es **estricto** respecto de la configuración: sólo se ofrecen
-    bloques que caigan íntegramente dentro de los rangos de ``DisponibilidadDoctor``
-    del día de la semana correspondiente (un doctor sin rangos ese día no ofrece
-    ningún horario). De esos bloques se descartan los que se cruzan con turnos
-    vigentes —los ``CANCELADO`` vuelven a liberar su horario—.
+    bloques que caigan íntegramente dentro de los rangos vigentes de esa fecha
+    (un doctor sin rangos ese día no ofrece ningún horario). Esos rangos salen de
+    la agenda semanal (``DisponibilidadDoctor``) o, si la fecha tiene excepciones
+    cargadas, de ``DisponibilidadEspecifica`` (ver
+    :func:`app.services.disponibilidad_service.rangos_efectivos_del_dia`). De los
+    bloques se descartan los que se cruzan con turnos vigentes —los ``CANCELADO``
+    vuelven a liberar su horario—.
 
     Returns:
-        Tupla ``(rangos, bloques)``: los rangos configurados para ese día de la
-        semana y los bloques libres como pares ``(hora_inicio, hora_fin)``.
+        Tupla ``(disponibilidad, bloques)``: la disponibilidad resuelta del día
+        (origen, rangos efectivos y excepciones aplicadas) y los bloques libres
+        como pares ``(hora_inicio, hora_fin)``.
     """
-    _obtener_doctor(db, doctor_id)
+    # Un odontólogo dado de baja no ofrece horarios (404): el calendario sólo
+    # lista profesionales activos, así que esta consulta llega —si acaso— desde
+    # una pestaña vieja del panel.
+    _obtener_doctor(db, doctor_id, solo_activos=True)
 
     if duracion_minutos <= 0:
         raise ValidacionError("La duración del bloque debe ser mayor que cero.")
 
-    dia_semana = dia_semana_de(fecha)
-    rangos = disponibilidad_service.rangos_del_dia(db, doctor_id, dia_semana)
-    candidatos = _bloques_de_rangos(rangos, duracion_minutos)
+    efectiva = disponibilidad_service.rangos_efectivos_del_dia(db, doctor_id, fecha)
+    candidatos = _bloques_de_rangos(efectiva.rangos, duracion_minutos)
     if not candidatos:
-        return rangos, []
+        return efectiva, []
 
     ocupados = _turnos_vigentes_del_dia(db, doctor_id, fecha)
     libres: List[Tuple[Time, Time]] = []
@@ -364,6 +399,6 @@ def horarios_disponibles(
         if any(t.fecha_hora_inicio < fin and t.fecha_hora_fin > inicio for t in ocupados):
             continue
         libres.append((hora_inicio, hora_fin))
-    return rangos, libres
+    return efectiva, libres
 
 

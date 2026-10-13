@@ -25,3 +25,13 @@ def rango_del_dia(fecha: date) -> tuple[datetime, datetime]:
     inicio = datetime.combine(fecha, time.min)
     fin = datetime.combine(fecha, time.max)
     return inicio, fin
+
+
+def dia_semana_de(fecha: date) -> int:
+    """Día de la semana del calendario: **0 = domingo** … 6 = sábado.
+
+    Se usa la misma convención que ``DisponibilidadDoctor.dia_semana`` y que
+    ``Date.getDay()`` de JavaScript, de modo que el panel web no tenga que
+    convertir nada. Equivale a ``(date.weekday() + 1) % 7``.
+    """
+    return (fecha.weekday() + 1) % 7

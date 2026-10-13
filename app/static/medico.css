@@ -1,0 +1,328 @@
+/* ==========================================================================
+   OdontoCare Móvil - Vista del odontólogo (mobile-first)
+   Ajustes complementarios a Tailwind (CDN) y a styles.css: áreas táctiles
+   cómodas, hojas deslizantes y respeto por las zonas seguras del celular.
+   ========================================================================== */
+
+:root {
+  --m-brand: #0d8578;
+  --m-borde: #e8edf3;
+  --m-radius: 1rem;
+  --m-verde: #16a34a;
+}
+
+body {
+  background: #f4f7fa;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Objetivo táctil cómodo: ningún control por debajo de 44 px de alto. */
+button, a, input, select, textarea { touch-action: manipulation; }
+
+.m-main { padding: .9rem .85rem calc(1.5rem + env(safe-area-inset-bottom)); }
+
+.m-pantalla { animation: mAparece .28s ease both; }
+@keyframes mAparece { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ------------------------------- Encabezado ------------------------------ */
+.m-header {
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(255, 255, 255, .94);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--m-borde);
+  padding-top: env(safe-area-inset-top);
+}
+.m-header-inner { display: flex; align-items: center; gap: .6rem; padding: .6rem .85rem; }
+.m-avatar {
+  display: flex; align-items: center; justify-content: center;
+  width: 42px; height: 42px; flex: none; border-radius: 999px;
+  background: var(--m-brand); color: #fff; font-weight: 800; font-size: .85rem;
+}
+.m-header-texto { flex: 1 1 auto; min-width: 0; }
+.m-header-nombre { font-size: .95rem; font-weight: 800; color: #0f1c24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-header-especialidad { font-size: .72rem; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; flex: none; border-radius: 999px;
+  border: 1px solid var(--m-borde); background: #fff; color: #33454f;
+  cursor: pointer; transition: transform .12s ease, background .18s ease;
+}
+.m-icon-btn:active { transform: scale(.94); background: #f1f5f9; }
+.m-icono { width: 20px; height: 20px; }
+.m-icono.girando { animation: mGirar .9s linear infinite; }
+@keyframes mGirar { to { transform: rotate(360deg); } }
+
+/* ---------------------------------- Hero --------------------------------- */
+.m-hero { padding: 1.1rem .25rem; }
+.m-hero-eyebrow { font-size: .7rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--m-brand); }
+.m-hero-titulo { margin-top: .35rem; font-size: 1.75rem; line-height: 1.15; font-weight: 800; color: #0f1c24; letter-spacing: -.02em; }
+.m-hero-sub { margin-top: .45rem; font-size: .875rem; color: #64748b; }
+
+/* ---------------------- Selección del profesional ----------------------- */
+.m-lista-profesionales { display: flex; flex-direction: column; gap: .7rem; }
+.m-doctor-card {
+  display: flex; align-items: center; gap: .8rem; width: 100%; min-height: 76px;
+  padding: .85rem .9rem; text-align: left; background: #fff;
+  border: 1px solid var(--m-borde); border-left: 5px solid var(--m-color, var(--m-brand));
+  border-radius: var(--m-radius); box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+  cursor: pointer; transition: transform .12s ease, box-shadow .2s ease;
+}
+.m-doctor-card:active { transform: scale(.985); }
+.m-doctor-avatar {
+  display: flex; align-items: center; justify-content: center;
+  width: 48px; height: 48px; flex: none; border-radius: 999px;
+  background: var(--m-color, var(--m-brand)); color: #fff; font-weight: 800; font-size: .95rem;
+}
+.m-doctor-datos { flex: 1 1 auto; min-width: 0; }
+.m-doctor-nombre { display: block; font-size: 1rem; font-weight: 700; color: #0f1c24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-doctor-esp { display: block; font-size: .78rem; color: #64748b; }
+.m-doctor-meta {
+  display: inline-block; margin-top: .35rem; padding: .12rem .5rem;
+  font-size: .7rem; font-weight: 700; border-radius: 999px;
+  background: #f4f7fa; color: var(--m-color, var(--m-brand));
+}
+.m-doctor-flecha { flex: none; font-size: 1.4rem; line-height: 1; color: #cbd5e1; }
+
+/* ------------------------ Cabecera del día (agenda) ---------------------- */
+.m-dia {
+  background: #fff; border: 1px solid var(--m-borde); border-radius: var(--m-radius);
+  padding: .8rem .9rem; margin-bottom: .85rem; box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+.m-dia-fecha { font-size: .78rem; font-weight: 700; text-transform: capitalize; color: var(--m-brand); }
+.m-dia-fila { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-top: .2rem; }
+.m-dia-resumen { font-size: 1.02rem; font-weight: 800; color: #0f1c24; }
+
+/* -------------------- Navegador de fechas (calendario) ------------------- */
+.m-nav-dia { display: flex; align-items: center; gap: .5rem; }
+.m-nav-dia-centro { flex: 1 1 auto; min-width: 0; text-align: center; }
+.m-dia-extra { margin-top: .1rem; font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; }
+
+.m-semana { display: flex; align-items: stretch; gap: .25rem; margin-top: .7rem; }
+.m-semana-flecha {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 26px; border: 0; border-radius: .6rem; cursor: pointer;
+  background: #f1f5f9; color: #64748b; font-size: 1rem; font-weight: 800;
+}
+.m-semana-flecha:active { background: #e2e8f0; }
+.m-tira-semana { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; flex: 1 1 auto; }
+.m-dia-chip {
+  display: flex; flex-direction: column; align-items: center; gap: .05rem;
+  padding: .4rem .1rem .35rem; border: 1.5px solid transparent; border-radius: .7rem;
+  background: #f8fafc; cursor: pointer;
+  transition: background .18s ease, border-color .18s ease;
+}
+.m-dia-chip-nombre { font-size: .6rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #94a3b8; }
+.m-dia-chip-numero { font-size: .95rem; font-weight: 800; color: #33454f; font-variant-numeric: tabular-nums; }
+.m-dia-chip-con-turnos .m-dia-chip-numero { color: #0f1c24; }
+.m-dia-chip-punto {
+  min-width: 16px; padding: 0 .25rem; border-radius: 999px;
+  background: #e2f5f1; color: var(--m-brand); font-size: .6rem; font-weight: 800;
+}
+.m-dia-chip-hoy { border-color: #b7e4dd; }
+.m-dia-chip-activo { background: #0f1c24; border-color: #0f1c24; }
+.m-dia-chip-activo .m-dia-chip-nombre { color: #9fb0b8; }
+.m-dia-chip-activo .m-dia-chip-numero { color: #fff; }
+.m-dia-chip-activo .m-dia-chip-punto { background: rgba(255, 255, 255, .18); color: #fff; }
+
+.m-fecha-form { display: flex; align-items: center; gap: .5rem; margin-top: .8rem; }
+.m-fecha-form .m-input { padding: .55rem .7rem; min-height: 44px; font-size: .9rem; }
+.m-fecha-form .m-btn { width: auto; flex: none; }
+
+/* --------------------- Línea de tiempo (turnos y libres) ----------------- */
+.m-timeline { display: flex; flex-direction: column; gap: .6rem; }
+.m-item {
+  display: flex; align-items: flex-start; gap: .7rem; width: 100%;
+  padding: .75rem .8rem; min-height: 64px; text-align: left;
+  background: #fff; border: 1px solid var(--m-borde); border-radius: var(--m-radius);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+.m-hora {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 58px; min-height: 40px; padding: .3rem .2rem; border-radius: .65rem;
+  background: #f1f5f9; color: #475569; font-size: .92rem; font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.m-item-cuerpo { flex: 1 1 auto; min-width: 0; }
+.m-paciente { display: block; font-size: .95rem; font-weight: 700; color: #0f1c24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-detalle { display: block; margin-top: .15rem; font-size: .74rem; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-item-badges { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .4rem; }
+
+/* Ocupado: la línea del tiempo arranca en el color del odontólogo y el
+   CONFIRMADO se pinta con fondo verde, igual que en el panel principal. */
+.m-turno.m-confirmado { background: #ecfdf5; border-color: #a7f3d0; border-left: 5px solid var(--m-verde); }
+.m-turno.m-confirmado .m-hora { background: var(--m-verde); color: #fff; }
+.m-turno.m-pendiente { border-left: 5px solid var(--m-color, #f59e0b); }
+.m-turno.m-pendiente .m-hora { background: #f1f5f9; color: var(--m-color, #b45309); }
+.m-turno.m-cancelado { background: #f8fafc; border-color: #e2e8f0; border-left: 5px solid #cbd5e1; }
+.m-turno.m-cancelado .m-paciente { text-decoration: line-through; color: #94a3b8; }
+.m-turno.m-cancelado .m-hora { background: #e2e8f0; color: #94a3b8; }
+
+/* Disponible: bloque punteado y cliqueable para agendar en dos toques. */
+.m-libre {
+  align-items: center; cursor: pointer; border-style: dashed; border-color: #cbd5e1;
+  background: #f8fafc; transition: background .18s ease, border-color .18s ease, transform .12s ease;
+}
+.m-libre:active { transform: scale(.99); background: #eefbf8; border-color: var(--m-brand); }
+.m-hora-libre { background: #fff; border: 1.5px dashed #cbd5e1; color: #64748b; }
+.m-libre .m-paciente { color: #475569; font-weight: 600; }
+.m-mas {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 38px; height: 38px; border-radius: 999px;
+  background: #eefbf8; color: var(--m-brand);
+}
+.m-mas svg { width: 20px; height: 20px; }
+
+/* Botón táctil de cancelación (cesto). */
+.m-cesto {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 44px; height: 44px; border-radius: 999px; cursor: pointer;
+  background: #fef2f2; border: 1px solid #fee2e2; color: #dc2626;
+  transition: transform .12s ease, background .18s ease;
+}
+.m-cesto:active { transform: scale(.92); background: #fee2e2; }
+.m-cesto svg { width: 20px; height: 20px; }
+.m-cesto:disabled { opacity: .5; }
+
+/* Botones de cada turno: editar (lápiz, también en cancelados) y cancelar. */
+.m-acciones-turno { display: flex; flex-direction: column; gap: .3rem; flex: none; }
+.m-editar {
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 999px; cursor: pointer;
+  background: #eef2ff; border: 1px solid #e0e7ff; color: #4338ca;
+  transition: transform .12s ease, background .18s ease;
+}
+.m-editar:active { transform: scale(.92); background: #e0e7ff; }
+.m-editar svg { width: 18px; height: 18px; }
+
+.m-seccion-titulo { margin: 1.4rem 0 .55rem; font-size: .7rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #94a3b8; }
+.m-nota { margin-top: 1.25rem; text-align: center; font-size: .75rem; line-height: 1.5; color: #94a3b8; }
+.m-link { color: var(--m-brand); font-weight: 700; text-decoration: underline; }
+
+/* -------------------- Hojas deslizantes (bottom sheets) ------------------ */
+.m-sheet { position: fixed; inset: 0; z-index: 60; }
+.m-sheet-backdrop { position: absolute; inset: 0; background: rgba(15, 28, 36, .5); animation: mAparece .2s ease both; }
+.m-sheet-panel {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  max-height: 92vh; overflow-y: auto;
+  padding: .6rem 1rem calc(1.1rem + env(safe-area-inset-bottom));
+  background: #fff; border-radius: 1.25rem 1.25rem 0 0;
+  box-shadow: 0 -18px 40px -20px rgba(16, 24, 40, .5);
+  animation: mSube .28s cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes mSube { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+.m-sheet-handle { width: 44px; height: 5px; margin: 0 auto .8rem; border-radius: 999px; background: #e2e8f0; }
+.m-sheet-cabecera { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; }
+.m-sheet-cabecera-texto { flex: 1 1 auto; min-width: 0; }
+.m-sheet-titulo { font-size: 1.1rem; font-weight: 800; color: #0f1c24; }
+.m-sheet-sub { margin-top: .15rem; font-size: .8rem; color: #64748b; }
+.m-sheet-acciones { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin-top: 1.1rem; }
+
+/* ------------------------------ Formularios ----------------------------- */
+.m-form { display: flex; flex-direction: column; gap: .8rem; margin-top: .9rem; }
+.m-label { display: block; margin-bottom: .3rem; font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #64748b; }
+.m-label-hint { font-weight: 500; text-transform: none; letter-spacing: 0; color: #94a3b8; }
+.m-input {
+  width: 100%; border: 1.5px solid #e2e8f0; border-radius: .85rem;
+  background: #f8fafc; padding: .8rem .9rem; color: #0f1c24;
+  /* 16px: evita el zoom automático de iOS al enfocar un campo. */
+  font-size: 1rem; outline: none;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.m-input::placeholder { color: #9aa8b8; }
+.m-input:focus { background: #fff; border-color: #3fbfae; box-shadow: 0 0 0 4px rgba(23, 163, 148, .14); }
+.m-error { padding: .6rem .75rem; border-radius: .7rem; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: .8rem; }
+.m-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  width: 100%; min-height: 50px; padding: .8rem 1rem;
+  border: 1px solid transparent; border-radius: .9rem;
+  font-size: .95rem; font-weight: 700; cursor: pointer;
+  transition: transform .12s ease, box-shadow .2s ease, filter .18s ease;
+}
+.m-btn:active { transform: translateY(1px); }
+.m-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+.m-btn-primary { background: linear-gradient(180deg, #17a394 0%, #0d8578 100%); color: #fff; box-shadow: 0 10px 22px -12px rgba(13, 133, 120, .9); }
+.m-btn-ghost { background: #fff; border-color: #e2e8f0; color: #33454f; }
+.m-btn-danger { background: #dc2626; color: #fff; box-shadow: 0 10px 22px -14px rgba(220, 38, 38, .95); }
+.m-btn-compacto { width: auto; min-height: 44px; padding: .55rem 1rem; font-size: .85rem; }
+.m-btn-mini { width: auto; min-height: 44px; padding: .55rem .9rem; font-size: .82rem; align-self: flex-start; }
+
+/* ------------------- Selección del paciente (fichas) -------------------- */
+.m-campo { display: block; }
+.m-grilla-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.m-buscar { display: flex; flex-direction: column; gap: .45rem; }
+.m-lista-pacientes {
+  display: flex; flex-direction: column; gap: .3rem; max-height: 13rem; overflow-y: auto;
+  padding: .3rem; background: #fff; border: 1px solid var(--m-borde); border-radius: .85rem;
+  -webkit-overflow-scrolling: touch;
+}
+.m-ficha {
+  display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 52px;
+  padding: .45rem .5rem; text-align: left; cursor: pointer;
+  background: #f8fafc; border: 1px solid transparent; border-radius: .7rem;
+}
+.m-ficha:active { background: #eefbf8; border-color: #b7e4dd; }
+.m-ficha-avatar,
+.m-elegido-avatar {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 34px; height: 34px; border-radius: 999px;
+  background: #e2f5f1; color: var(--m-brand); font-size: .72rem; font-weight: 800;
+}
+.m-elegido-avatar { background: var(--m-brand); color: #fff; }
+.m-ficha-datos { flex: 1 1 auto; min-width: 0; }
+.m-ficha-nombre { display: block; font-size: .88rem; font-weight: 700; color: #0f1c24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-ficha-detalle { display: block; font-size: .72rem; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-ficha-nota { padding: .5rem .55rem; font-size: .78rem; color: #94a3b8; }
+
+/* Ficha elegida: resumen compacto con la cruz para volver a la lista. */
+.m-elegido {
+  display: flex; align-items: center; gap: .6rem; padding: .55rem .6rem;
+  background: #f0fbf9; border: 1.5px solid #b7e4dd; border-radius: .85rem;
+}
+.m-elegido-datos { flex: 1 1 auto; min-width: 0; }
+.m-elegido-nombre { display: block; font-size: .92rem; font-weight: 800; color: #0f1c24; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-elegido-detalle { display: block; font-size: .74rem; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-icon-btn-chico { width: 34px; height: 34px; }
+.m-icon-btn-chico .m-icono { width: 16px; height: 16px; }
+
+/* Alta rápida del paciente nuevo. */
+.m-alta { display: flex; flex-direction: column; gap: .7rem; padding: .75rem; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: .9rem; }
+.m-alta-cabecera { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.m-alta-titulo { font-size: .8rem; font-weight: 800; color: #33454f; }
+.m-link-btn {
+  min-height: 44px; padding: .35rem .2rem; cursor: pointer;
+  background: none; border: 0; color: var(--m-brand);
+  font-size: .78rem; font-weight: 700; text-decoration: underline;
+}
+
+/* Atajos de horarios libres del día elegido en el formulario. */
+.m-chips-libres { display: flex; flex-wrap: wrap; gap: .35rem; }
+.m-chip-hora {
+  min-height: 40px; padding: .35rem .7rem; cursor: pointer;
+  background: #fff; border: 1.5px solid #e2e8f0; border-radius: 999px;
+  font-size: .82rem; font-weight: 700; color: #33454f; font-variant-numeric: tabular-nums;
+}
+.m-chip-hora-activo { background: #0f1c24; border-color: #0f1c24; color: #fff; }
+.m-chip-nota { font-size: .76rem; color: #94a3b8; }
+
+/* -------------------------------- Toasts -------------------------------- */
+.m-toasts { position: fixed; top: calc(.6rem + env(safe-area-inset-top)); left: .7rem; right: .7rem; z-index: 70; display: flex; flex-direction: column; gap: .5rem; pointer-events: none; }
+.m-toasts .toast { min-width: 0; max-width: none; width: 100%; pointer-events: auto; }
+
+/* --------------------------- Carga y vacíos ----------------------------- */
+.m-cargando { padding: 1.6rem 0; text-align: center; font-size: .85rem; color: #94a3b8; }
+.m-vacio { display: flex; flex-direction: column; align-items: center; gap: .5rem; padding: 1.6rem 1rem; text-align: center; background: #fff; border: 1px dashed #d8e0e8; border-radius: var(--m-radius); }
+.m-vacio-titulo { font-size: .95rem; font-weight: 700; color: #475569; }
+.m-vacio-sub { font-size: .78rem; color: #94a3b8; }
+.m-vacio svg { width: 34px; height: 34px; color: #cbd5e1; }
+
+/* ------------------- Pantallas grandes: columna centrada ----------------- */
+@media (min-width: 640px) {
+  .m-header-inner, .m-main { max-width: 480px; margin-left: auto; margin-right: auto; }
+  /* ``translate`` (no ``transform``) para no pisar la animación de entrada
+     de la hoja deslizante. */
+  .m-sheet-panel { width: 480px; left: 50%; right: auto; translate: -50% 0; }
+  .m-toasts { max-width: 480px; margin: 0 auto; }
+}
+
+

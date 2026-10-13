@@ -48,43 +48,56 @@ Odontologico/
 │   ├── models/
 │   │   ├── enums.py                # EstadoTurno, EstadoWhatsApp
 │   │   ├── doctor.py               # Modelo Doctor
-│   │   ├── paciente.py             # Modelo Paciente
+│   │   ├── paciente.py             # Modelo Paciente (obra_social_id → catálogo)
+│   │   ├── obra_social.py          # Modelo ObraSocial (catálogo de coberturas)
 │   │   ├── disponibilidad.py       # Modelo DisponibilidadDoctor (agenda semanal)
 │   │   └── turno.py                # Modelo Turno (+ constraints)
 │   ├── schemas/                    # Esquemas Pydantic v2 (I/O de la API)
 │   │   ├── doctor.py, paciente.py, turno.py, whatsapp.py
+│   │   ├── obra_social.py          # Catálogo de obras sociales
 │   │   └── disponibilidad.py       # Rangos semanales y bloques ofrecidos
 │   ├── services/                   # Lógica de negocio
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
+│   │   ├── doctor_service.py       # Alta, edición (PUT/PATCH) y baja lógica
+│   │   ├── paciente_service.py     # Alta/edición y resolución de la cobertura
+│   │   ├── obra_social_service.py  # CRUD del catálogo (nombre único, baja lógica)
 │   │   ├── disponibilidad_service.py # CRUD de la agenda semanal por odontólogo
 │   │   └── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
 │   └── api/v1/
 │       ├── router.py               # Router agregador
 │       └── endpoints/
-│           ├── doctores.py, pacientes.py, turnos.py
+│           ├── doctores.py         # Doctor: CRUD + baja lógica (DELETE)
+│           ├── pacientes.py, turnos.py
+│           ├── obras_sociales.py   # Catálogo de obras sociales: CRUD + baja lógica
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
 │           └── whatsapp.py         # Webhook + recordatorios Click-to-Chat
 │   ├── web/
-│   │   └── router.py               # Sirve el dashboard (página raíz /)
-│   └── static/                     # Interfaz web (dashboard de la secretaría)
+│   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
+│   └── static/                     # Interfaz web (panel de la secretaría + móvil)
 │       ├── index.html              # Estructura + Tailwind (CDN)
 │       ├── styles.css              # Componentes y animaciones
-│       └── app.js                  # Lógica: fetch contra /api/v1
+│       ├── app.js                  # Lógica: fetch contra /api/v1
+│       ├── medico.html             # Vista móvil del odontólogo (agenda del día)
+│       ├── medico.css              # Ajustes mobile-first (táctil, hojas, safe-area)
+│       └── medico.js               # Selección del profesional + agenda + acciones
 ├── scripts/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
 │   ├── migrar_turnos_unique_parcial.py  # Migración al índice único parcial de turnos
-│   └── migrar_pacientes_datos.py        # Migración: DNI y cobertura del paciente
+│   ├── migrar_pacientes_datos.py        # Migración: DNI y cobertura del paciente
+│   └── migrar_obra_social.py            # Migración: obra_social (texto) → catálogo
 ├── tests/
 │   ├── conftest.py                 # Fixtures (SQLite en memoria + TestClient)
 │   ├── test_contrato_http_turnos.py # Contrato HTTP: PATCH de turnos y CORS
 │   ├── test_disponibilidad.py      # Agenda semanal y bloques ofrecidos
+│   ├── test_doctores.py            # Edición, baja lógica y reactivación del doctor
+│   ├── test_obras_sociales.py      # Catálogo de coberturas y su vínculo con pacientes
 │   ├── test_pacientes.py
 │   ├── test_recordatorios_click_to_chat.py # Enlaces wa.me y recordatorios pendientes
 │   ├── test_turnos.py
 │   ├── test_turnos_actualizacion.py # PATCH /turnos/{id} (reprogramar, cancelar…)
 │   ├── test_turnos_paciente_ubicuo.py
-│   ├── test_web.py                 # Dashboard, estáticos y salud de la API
+│   ├── test_web.py                 # Panel Principal, estáticos y salud de la API
 │   └── test_whatsapp_flow.py
 ├── requirements.txt
 ├── pytest.ini
@@ -115,7 +128,8 @@ python -m scripts.seed
 uvicorn app.main:app --reload
 ```
 
-- **Dashboard (interfaz de la secretaría):** <http://127.0.0.1:8000/>
+- **Panel Principal (interfaz de la secretaría):** <http://127.0.0.1:8000/>
+- **Agenda móvil del odontólogo (celular):** <http://127.0.0.1:8000/medico>
 - Documentación interactiva (OpenAPI/Swagger): <http://127.0.0.1:8000/docs>
 - Health-check: <http://127.0.0.1:8000/health>
 
@@ -129,7 +143,7 @@ uvicorn app.main:app --reload
 > `/api/v1/turnos/{turno_id}`. En ese caso, detené el proceso (`Ctrl+C`) y
 > volvé a levantar el servidor.
 >
-> **¿El dashboard aparece sin datos?** Revisá `DATABASE_URL`: si la sesión de
+> **¿El panel aparece sin datos?** Revisá `DATABASE_URL`: si la sesión de
 > PowerShell quedó con la variable apuntando a una base de prueba (por ejemplo
 > `$env:DATABASE_URL = "sqlite:///./_e2e.db"`), el servidor arranca contra esa
 > base vacía en lugar de `odontologico.db`. Se resuelve con
@@ -138,34 +152,43 @@ uvicorn app.main:app --reload
 
 ---
 
-## 🖥️ Interfaz web (Dashboard de la secretaría)
+## 🖥️ Interfaz web (Panel Principal de la secretaría)
 
 Servida por la propia aplicación FastAPI, **sin pasos de build** ni dependencias
 nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 
-- **URL:** <http://127.0.0.1:8000/> — la raíz sirve el dashboard.
+- **URL:** <http://127.0.0.1:8000/> — la raíz sirve el panel principal.
 - **Archivos:** `app/static/index.html`, `app/static/styles.css`,
   `app/static/app.js` (datos, formularios y toasts) y
   `app/static/calendar.js` (grilla mensual, filtro por odontólogo y panel del
   día). El router que sirve la página está en `app/web/router.py` y el montaje
   de `/static` en `app/main.py`.
+- **Encabezado:** el `<h1>` (`text-3xl font-bold text-slate-800 tracking-tight`)
+  abarca todo el ancho del área de contenido y va **arriba de todo**, por encima
+  de la barra de acciones fija (*Recordatorios* / *Nuevo turno*) y del
+  calendario. Muestra el **nombre de la operación elegida** en el menú lateral
+  («Panel Principal», «Calendario», «Disponibilidad», «Doctores»…) y el subtítulo
+  de abajo (`#page-subtitle`) explica para qué sirve; `app.js` los reescribe en
+  cada cambio de pestaña. En el grupo *Operación* del menú, **Panel Principal va
+  primero**.
 
 ### Secciones
 
 | Sección | Función |
 |---------|---------|
-| **Dashboard** | KPIs (turnos de hoy, confirmados, pendientes, cancelados), agenda del día, próximos turnos, envío de recordatorios y tarjeta *Recordatorios por WhatsApp* con el contador de pendientes (lleva a esa pestaña). |
+| **Panel Principal** | KPIs (turnos de hoy, confirmados, pendientes, cancelados), **agenda del día en una columna por odontólogo** (cada columna trae el avatar, la especialidad y el cupo de turnos del profesional, con las tarjetas compactas del día y sus acciones *Editar* / *Cancelar* / *Reactivar*), próximos turnos, envío de recordatorios y tarjeta *Recordatorios por WhatsApp* con el contador de pendientes (lleva a esa pestaña). |
 | **Calendario** | Grilla mensual de turnos con **color por estado** (`CONFIRMADO` en verde, `PENDIENTE` con el color del odontólogo y `CANCELADO` en gris atenuado), *tooltip* con el detalle del turno, **filtro por odontólogo** (*Todos los odontólogos* + un botón por profesional) y panel del día con turnos ocupados y horarios disponibles. Los horarios disponibles salen de la **agenda semanal configurada por profesional**, no de una lista fija. Al hacer clic en un **horario disponible con un odontólogo filtrado**, el modal se abre con ese profesional ya seleccionado y **bloqueado** (con un aviso en pantalla), para que el turno no se agende por error en otra agenda. |
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
 | **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos —se pueden cargar **varios por día**, p. ej. lunes 08:00-13:00 y 15:00-19:00—, botón para eliminar cada rango, formulario *desde / hasta* para agregar otro y contador de rangos. Incluye **Restaurar plantilla sugerida** (lun-vie doble turno y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
-| **Doctores** | Formulario de alta estilizado + tabla de doctores (con cantidad de turnos). |
-| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social y Nº de afiliado) + tabla de pacientes con acción *Editar*. |
+| **Doctores** | Formulario de alta estilizado + tabla con la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT`), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
+| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**— y Nº de afiliado) + tabla de pacientes con acción *Editar*. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
+| **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. |
 
 ### Colores por estado del turno
 
 El estado clínico manda sobre el color del odontólogo, tanto en la grilla mensual
-(`calendar.js`) como en las tarjetas de turno del día y del dashboard (`app.js`):
+(`calendar.js`) como en las tarjetas de turno del día y del panel principal (`app.js`):
 
 | `estado_turno` | Color del bloque | Detalle |
 |----------------|------------------|---------|
@@ -226,7 +249,7 @@ mensaje ya redactado y lo envía desde el WhatsApp del consultorio.
 
 ### Conexión real con la API
 
-El dashboard consume los mismos endpoints del backend:
+El panel principal consume los mismos endpoints del backend:
 
 - `POST /api/v1/doctores` y `POST /api/v1/pacientes` → botones **Guardar** de los formularios.
 - `POST /api/v1/turnos` → modal *Nuevo turno* (doctor + paciente + fecha + hora + duración).
@@ -239,7 +262,7 @@ El dashboard consume los mismos endpoints del backend:
 - `GET /api/v1/doctores/{id}/horarios-disponibles?fecha=&duracion_minutos=` →
   probador de *bloques libres* de la pestaña **Disponibilidad** (el mismo cálculo
   que alimenta el panel *Horarios disponibles* del calendario).
-- `POST /api/v1/tareas/enviar-recordatorios` → botones de recordatorios del Dashboard.
+- `POST /api/v1/tareas/enviar-recordatorios` → botones de recordatorios del Panel Principal.
 - `GET /api/v1/whatsapp/recordatorios-pendientes?dias=N` → pestaña **Recordatorios
   Pendientes** (lista, contador del menú y de la cabecera).
 - `PATCH /api/v1/turnos/{id}` con `{"estado_whatsapp": "ENVIADO"}` → se envía al
@@ -250,14 +273,14 @@ El dashboard consume los mismos endpoints del backend:
   ciclo completo (enviado → respuesta → confirmado/cancelado) sin un teléfono real.
 
 > **Método HTTP de la actualización de turnos.** *Editar* y *Cancelar* comparten
-> el mismo endpoint: **`PATCH /api/v1/turnos/{id}`** (el `fetch` del dashboard
+> el mismo endpoint: **`PATCH /api/v1/turnos/{id}`** (el `fetch` del panel
 > envía `method: "PATCH"` con `Content-Type: application/json` y, al cancelar,
 > el cuerpo `{"estado_turno":"CANCELADO"}`). La ruta **no** expone `PUT` ni
 > `DELETE`: si se invocan, la API responde `405 Method Not Allowed`. Cancelar no
 > borra el turno (queda el historial con estado `CANCELADO`) y libera el bloque
 > en *Horarios disponibles* del calendario. Una suite de pruebas
 > (`tests/test_contrato_http_turnos.py`) fija este contrato por los dos lados
-> —API y JavaScript del dashboard— para que una desalineación falle en `pytest`
+> —API y JavaScript del panel principal— para que una desalineación falle en `pytest`
 > y no en el navegador.
 
 > **Errores visibles para la secretaría.** El rechazo por *solapamiento del
@@ -271,12 +294,59 @@ El dashboard consume los mismos endpoints del backend:
 
 ---
 
+## 📱 Vista móvil del odontólogo (`/medico`)
+
+Interfaz **exclusiva para celulares**, pensada para que cada profesional consulte
+y opere su propia agenda del día sin pasar por la recepción. Es otra página de la
+misma aplicación (`app/static/medico.html` + `medico.css` + `medico.js`), servida
+por `app/web/router.py` en **`/medico`** y **sin pasos de build**: Tailwind por
+CDN, HTML y `fetch` contra la misma API `v1`.
+
+- **Meta viewport móvil:** `width=device-width, initial-scale=1.0,
+  viewport-fit=cover` (más `theme-color` y `mobile-web-app-capable`), campos con
+  `font-size: 16px` para que iOS no haga zoom al enfocar y objetivos táctiles de
+  **44 px** como mínimo.
+- **Selección del profesional:** pantalla limpia con una tarjeta por odontólogo
+  activo (`GET /doctores?activos=true`), su especialidad y cuántos turnos tiene
+  hoy. La elección se guarda en **`localStorage`** (clave
+  `odonto.medico.doctorId`), así el celular entra directo a la agenda en la
+  próxima visita; el botón del encabezado permite cambiar de profesional.
+- **Agenda del día:** una **lista vertical cronológica** que intercala los turnos
+  ocupados (`GET /turnos?doctor_id=…`) con los **horarios disponibles** que
+  calcula el backend
+  (`GET /doctores/{id}/horarios-disponibles?fecha=hoy&duracion_minutos=30`), es
+  decir, la disponibilidad **regular y específica** de ese día. La cabecera
+  aclara si el día se rige por la *Agenda habitual* (semanal) o por un *Día
+  personalizado* (excepciones por fecha) y resume cuántos turnos y horarios
+  libres hay.
+- **Turnos ocupados:** nombre del paciente, teléfono, DNI, horario y estado. El
+  `CONFIRMADO` se pinta con **fondo verde**, el `PENDIENTE` toma el color del
+  odontólogo y los cancelados del día se listan aparte, en gris y tachados.
+- **Cancelar en un toque:** el botón de *cesto* abre una hoja de confirmación que
+  ejecuta `PATCH /api/v1/turnos/{id}` con `{"estado_turno": "CANCELADO"}` (el
+  mismo endpoint que el botón *Cancelar* del panel); el horario vuelve a quedar
+  libre.
+- **Agendar en un toque:** cada bloque *Horario disponible* es cliqueable y abre
+  un formulario móvil simplificado (**Nombre, Teléfono y DNI** opcional). Se crea
+  el paciente con `POST /api/v1/pacientes` —reutilizando la ficha si el DNI ya
+  existe— y el turno con `POST /api/v1/turnos` en el horario del bloque.
+- **Siempre sincronizado:** al usar los mismos endpoints y la misma base SQLite,
+  lo que se agenda o cancela desde el celular aparece al instante en el Panel
+  Principal de la recepción (y a la inversa). La agenda además se refresca al
+  volver a la app, cada 60 segundos y con el botón *Actualizar*. Los rechazos del
+  backend se explican en pantalla: `409` (el odontólogo ya tiene un turno en ese
+  horario), `400` (el paciente está citado en otra agenda) y los errores de
+  validación del alta.
+
+---
+
 ## 🗃️ Modelo de datos
 
 | Entidad      | Campos |
 |--------------|--------|
 | **Doctor**   | `id`, `nombre`, `especialidad`, `activo` |
-| **Paciente** | `id`, `nombre`, `telefono`, `email`, `dni`, `obra_social`, `numero_afiliado` |
+| **Paciente** | `id`, `nombre`, `telefono`, `email`, `dni`, `obra_social_id`, `numero_afiliado` |
+| **ObraSocial** | `id`, `nombre`, `codigo`, `activa` |
 | **Turno**    | `id`, `paciente_id`, `doctor_id`, `fecha_hora_inicio`, `fecha_hora_fin`, `estado_turno`, `estado_whatsapp`, `whatsapp_mensaje_id` |
 | **DisponibilidadDoctor** | `id`, `doctor_id`, `dia_semana`, `hora_inicio`, `hora_fin` |
 
@@ -314,8 +384,33 @@ El dashboard consume los mismos endpoints del backend:
   tantos `NULL` como pacientes sin documento haya (ni SQLite ni PostgreSQL
   consideran duplicados dos `NULL`), mientras que un DNI informado —normalizado
   sin puntos ni guiones— sí es excluyente.
-- `nombre` y `telefono` son obligatorios; `email`, `dni`, `obra_social` y
+- `nombre` y `telefono` son obligatorios; `email`, `dni`, `obra_social_id` y
   `numero_afiliado` se guardan como `NULL` cuando llegan vacíos.
+- `obra_social_id` es `ForeignKey(..., ondelete="SET NULL")` al catálogo
+  `obras_sociales` (índice `ix_pacientes_obra_social_id`). La cobertura se expone
+  también como nombre en la lectura (`obra_social`), resuelto desde la relación,
+  para que el panel muestre la tabla sin hacer *joins* en el navegador.
+
+**Restricciones de integridad del catálogo de obras sociales**
+
+- `uq_obra_social_nombre` → **índice único** sobre `nombre`: el nombre de la
+  cobertura no se repite (la verificación previa del servicio tampoco distingue
+  mayúsculas → `409`, y el índice cubre la condición de carrera).
+- `activa` implementa el **borrado lógico** del catálogo: `DELETE
+  /api/v1/obras-sociales/{id}` marca `activa = false` y la cobertura deja de
+  ofrecerse en el desplegable, pero la fila se conserva porque los pacientes que
+  la tenían siguen apuntándole (su nombre se sigue viendo en la ficha).
+- `codigo` es opcional (`VARCHAR(30)`) y sirve para identificar la cobertura ante
+  el financiador; enviarlo vacío se guarda como `NULL`.
+
+> **Sobre la baja de doctores.** `activo` en `Doctor` funciona igual que `activa`
+> en el catálogo: `DELETE /api/v1/doctores/{id}` marca `activo = false`
+> (`doctor_service.dar_de_baja`) sin borrar la fila, de modo que sus turnos y su
+> historial se conservan, deja de ofrecerse en las agendas y desplegables y se
+> reactiva con `PATCH {"activo": true}`. La regla se aplica en un solo lugar
+> (`doctor_service.obtener_doctor(..., solo_activos=True)`), que usan el alta y la
+> reprogramación de turnos: agendar con un profesional dado de baja responde
+> `404` con el detalle de que está inactivo.
 
 > **Sobre el solapamiento (nota de diseño).** Un índice único sólo puede
 > bloquear duplicados **exactos**; los solapamientos *parciales* (p. ej.
@@ -360,6 +455,24 @@ El dashboard consume los mismos endpoints del backend:
 >
 > También es idempotente, guarda una copia de seguridad del `.db` y documenta el
 > equivalente en PostgreSQL para quien cambie de motor.
+>
+> **Migración de la cobertura al catálogo.** Las bases creadas con el campo de
+> texto `Paciente.obra_social` necesitan el paso a la clave foránea
+> `obra_social_id` (tabla `obras_sociales`, nombre único sin distinguir
+> mayúsculas). Con la app detenida:
+>
+> ```bash
+> python -m scripts.migrar_obra_social
+> ```
+>
+> Crea la tabla del catálogo y su índice único, agrega la columna
+> `obra_social_id` (con su índice), **traslada** cada nombre distinto de texto al
+> catálogo vinculando a sus pacientes (backfill, no destructivo) y elimina la
+> columna heredada si el SQLite lo permite (3.35+). Verifica al final que la
+> cantidad de pacientes no cambió, guarda una copia del `.db` y es idempotente.
+> Si la base todavía no tenía ninguna de las dos columnas, el orden es primero
+> `migrar_pacientes_datos` (agrega `obra_social` de texto + `dni`) y después
+> `migrar_obra_social` (lo convierte en clave foránea).
 
 
 ---
@@ -371,12 +484,16 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| `GET`  | `/` | Sirve el **dashboard web** de la secretaría |
+| `GET`  | `/` | Sirve el **panel principal web** de la secretaría |
 | `GET`  | `/docs` | Documentación interactiva (Swagger UI) |
 | `GET`  | `/health` | Chequeo de estado |
 | `GET`  | `/static/*` | Recursos de la interfaz (CSS/JS) |
 | `POST` | `/doctores` | Crear doctor |
-| `GET`  | `/doctores` | Listar doctores (`?activos=true/false`) |
+| `GET`  | `/doctores` | Listar doctores (`?activos=true/false`; sin filtro devuelve también los dados de baja) |
+| `GET`  | `/doctores/{id}` | Obtener doctor |
+| `PUT`  | `/doctores/{id}` | Reemplazar doctor (payload completo: `nombre`, `especialidad`, `activo`) |
+| `PATCH`| `/doctores/{id}` | Actualizar doctor (parcial; `{"activo": false}` da de baja y `{"activo": true}` reactiva) |
+| `DELETE`| `/doctores/{id}` | **Baja lógica** del doctor (`activo = false`, conserva sus turnos) |
 | `GET`  | `/doctores/{id}/disponibilidad` | Listar la **agenda semanal** del odontólogo (varios rangos por día) |
 | `POST` | `/doctores/{id}/disponibilidad` | Agregar un rango horario (si se solapa con otro del mismo día → `409`) |
 | `PUT`  | `/doctores/{id}/disponibilidad` | Reemplazar la semana completa (rangos invertidos o solapados en el payload → `422`) |
@@ -386,6 +503,12 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `GET`  | `/pacientes` | Listar pacientes (`?telefono=...&dni=...`) |
 | `GET`  | `/pacientes/{id}` | Obtener paciente |
 | `PATCH`| `/pacientes/{id}` | Actualizar paciente (parcial: sólo los campos enviados) |
+| `POST` | `/obras-sociales` | Crear obra social (nombre único → `409`) |
+| `GET`  | `/obras-sociales` | Listar el catálogo (`?activas=true/false`, `?nombre=`) |
+| `GET`  | `/obras-sociales/{id}` | Obtener obra social |
+| `PUT`  | `/obras-sociales/{id}` | Reemplazar obra social (payload completo: `nombre`, `codigo`, `activa`) |
+| `PATCH`| `/obras-sociales/{id}` | Actualizar obra social (parcial; `{"activa": true}` la reactiva) |
+| `DELETE`| `/obras-sociales/{id}` | **Baja lógica** de la cobertura (`activa = false`, conserva a los pacientes) |
 | `POST` | `/turnos` | Crear turno (valida `400` paciente ya agendado en otra agenda y `409` solapamiento del odontólogo) |
 | `GET`  | `/turnos` | Listar turnos (`?doctor_id=&paciente_id=&skip=&limit=`) |
 | `GET`  | `/turnos/{id}` | Obtener turno |
@@ -398,15 +521,16 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 > **Métodos soportados.** Cada ruta acepta únicamente los métodos de esta tabla;
 > cualquier otro responde `405 Method Not Allowed` (p. ej. `PUT` o `DELETE` sobre
 > `/turnos/{id}`, porque reprogramar, cancelar y reactivar se hacen con `PATCH`).
-> Los verbos `PUT` y `DELETE` del panel se usan **sólo** en la agenda del
-> odontólogo (`/doctores/{id}/disponibilidad`), que sí los declara.
+> En cambio, `/doctores/{id}` y `/obras-sociales/{id}` **sí** exponen `PUT`,
+> `PATCH` y `DELETE` (este último como baja lógica), y la agenda del odontólogo
+> (`/doctores/{id}/disponibilidad`) usa `PUT`/`DELETE` para sus rangos.
 >
 > **CORS.** `app/main.py` registra `CORSMiddleware` con
 > `allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]` (la lista
 > se declara explícitamente porque es lo que responde al *preflight* del
 > navegador). Los orígenes se configuran con `CORS_ORIGINS` (`["*"]` por
 > defecto) y el envío de credenciales con `CORS_ALLOW_CREDENTIALS` (`false`).
-> El dashboard se sirve desde el mismo origen, así que no depende de CORS; queda
+> El panel principal se sirve desde el mismo origen, así que no depende de CORS; queda
 > habilitado para clientes externos (SPA, apps móviles, pruebas locales en otro
 > puerto).
 
@@ -419,14 +543,38 @@ API=http://127.0.0.1:8000/api/v1
 curl -X POST $API/doctores -H "Content-Type: application/json" \
   -d '{"nombre":"Dra. Ana Gómez","especialidad":"Ortodoncia"}'
 
+# Editar un doctor (PUT = reemplazo total; PATCH = sólo los campos enviados)
+curl -X PUT $API/doctores/1 -H "Content-Type: application/json" \
+  -d '{"nombre":"Dra. Ana Gómez","especialidad":"Endodoncia","activo":true}'
+
+curl -X PATCH $API/doctores/1 -H "Content-Type: application/json" \
+  -d '{"especialidad":"Ortodoncia"}'
+
+# Dar de baja / reactivar al doctor (baja lógica: conserva sus turnos)
+curl -X DELETE $API/doctores/1
+curl -X PATCH $API/doctores/1 -H "Content-Type: application/json" -d '{"activo":true}'
+
+# Catálogo de obras sociales (alimenta el desplegable del formulario de pacientes)
+curl -X POST $API/obras-sociales -H "Content-Type: application/json" \
+  -d '{"nombre":"OSDE","codigo":"OSDE-01"}'
+
+curl "$API/obras-sociales?activas=true"          # sólo las que se ofrecen
+curl -X PATCH $API/obras-sociales/1 -H "Content-Type: application/json" \
+  -d '{"nombre":"OSDE Binario"}'
+
 # Paciente (nombre y teléfono son obligatorios; el resto es opcional)
 curl -X POST $API/pacientes -H "Content-Type: application/json" \
   -d '{"nombre":"Juan Pérez","telefono":"+5491122334455","email":"juan@example.com",
-       "dni":"30123456","obra_social":"OSDE","numero_afiliado":"610012345678"}'
+       "dni":"30123456","obra_social_id":1,"numero_afiliado":"610012345678"}'
 
-# Actualizar los datos administrativos de un paciente
+# La cobertura también se acepta como texto heredado: se resuelve contra el
+# catálogo (vincula la existente o la crea) y nunca se guarda como texto.
+curl -X POST $API/pacientes -H "Content-Type: application/json" \
+  -d '{"nombre":"Ana Suárez","telefono":"+5491155667788","obra_social":"OSDE"}'
+
+# Actualizar los datos administrativos de un paciente (null quita la cobertura)
 curl -X PATCH $API/pacientes/1 -H "Content-Type: application/json" \
-  -d '{"obra_social":"Swiss Medical","numero_afiliado":"SM-998877"}'
+  -d '{"obra_social_id":2,"numero_afiliado":"SM-998877"}'
 
 # Agenda semanal del odontólogo 1: lunes con dos tramos (mañana y tarde)
 curl -X POST $API/doctores/1/disponibilidad -H "Content-Type: application/json" \
@@ -544,26 +692,37 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**105 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**169 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
 rango, **disponibilidad semanal por odontólogo** (`test_disponibilidad.py`),
-pacientes (alta, edición y DNI único), la tarea de recordatorios (incluida
-la verificación del log de envío), el webhook (confirmar / cancelar / no
-encontrado / inválido) y la interfaz web (`test_web.py`: dashboard en `/`,
-estáticos CSS/JS, pestaña de disponibilidad, colores por estado y salud de la API).
+pacientes (alta, edición y DNI único), **gestión de doctores**
+(`test_doctores.py`: `PUT` de reemplazo, `PATCH` parcial, baja lógica `DELETE` con
+sus turnos conservados, filtro `?activos=`, `404` al agendar con un profesional
+dado de baja y el modal/botones de la vista), **catálogo de obras sociales**
+(`test_obras_sociales.py`: CRUD, nombre único `409` sin distinguir mayúsculas,
+baja lógica y reactivación, filtros, vínculo por `obra_social_id`, compatibilidad
+con el texto heredado y la cobertura del paciente que sobrevive a la baja), la
+tarea de recordatorios (incluida la verificación del log de envío), el webhook
+(confirmar / cancelar / no encontrado / inválido) y la interfaz web
+(`test_web.py`: panel principal en `/`, el **encabezado** —el título de la
+operación elegida arriba de todo, a todo el ancho, fuera de las `<section>` que
+oculta la SPA, sin rastros de «Dashboard» y con *Panel Principal* primero en el
+menú de operaciones—, estáticos CSS/JS, pestañas de disponibilidad y obras
+sociales, **la agenda del día del Panel Principal en una columna por odontólogo**,
+colores por estado y salud de la API).
 
-El **contrato HTTP del dashboard** se verifica en
+El **contrato HTTP del panel** se verifica en
 `tests/test_contrato_http_turnos.py`: que `PATCH /api/v1/turnos/{id}` cancele y
 libere el horario, que `PUT` y `DELETE` respondan `405` en la ruta de turnos, que
 los archivos JavaScript usen exactamente los métodos que declara `app.openapi()`
-(los `PUT`/`DELETE` del panel sólo pueden apuntar a
-`/doctores/{id}/disponibilidad`, que sí los declara) y que el *preflight* de
+(los `PUT`/`DELETE` del panel sólo apuntan a rutas `/doctores/`: la agenda semanal
+y la gestión del profesional, declaradas por la API) y que el *preflight* de
 CORS autorice `GET, POST, PUT, PATCH, DELETE, OPTIONS`.
 
 La **disponibilidad flexible** se cubre en `tests/test_disponibilidad.py`
-(*23 pruebas*): alta de **varios rangos el mismo día**, rangos contiguos
+(*52 pruebas*): alta de **varios rangos el mismo día**, rangos contiguos
 permitidos, solape con uno existente → `409`, rango invertido y `dia_semana`
 fuera de `0..6` → `422`, reemplazo total de la semana (`PUT`, incluida la lista
 vacía) con validación de solapes en el payload → `422`, borrado `204` (`404` si el
@@ -572,6 +731,19 @@ rango no existe o es de otro odontólogo) y, sobre todo, los **bloques ofrecidos
 rangos que no se ofrecen, días sin rangos con lista vacía, descuento de los turnos
 agendados (incluido uno largo que cruza varios bloques), liberación del horario al
 cancelar el turno y que la agenda de otro profesional no descuente nada.
+
+Los **días personalizados por fecha** (`/doctores/{id}/disponibilidad-especifica`,
+la tarjeta *Gestionar un día específico* del panel) también se cubren ahí:
+precedencia `ESPECIFICO` sobre `SEMANAL` (lo que devuelve `origen`), un día con
+sólo tramos `BLOQUEADO` que queda cerrado, el reemplazo del día completo (`PUT`,
+incluido el bloqueo `00:00–23:59` y la lista vacía que devuelve el día a la
+semana), el borrado `204` y **la baja repetida de un tramo ya eliminado → `404`**:
+es el caso del doble clic en la cruz del chip. La baja se resuelve por `id` **y**
+`doctor_id`, así que nunca alcanza el tramo de otro profesional, y el contrato del
+panel se fija en los mismos tests: el chip inyecta el `id` real que devolvió la
+API, el `DELETE` apunta a la excepción concreta, el día se recarga del servidor
+después de cada cambio (con `forzar`, sin depender del cache) y un `404` se
+informa como aviso «ya estaba eliminado» en lugar de como error.
 
 Los **recordatorios por enlace** se cubren en
 `tests/test_recordatorios_click_to_chat.py`: normalización de los teléfonos

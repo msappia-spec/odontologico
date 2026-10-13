@@ -9,6 +9,7 @@ from app.db.base_class import Base
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.disponibilidad import DisponibilidadDoctor
+    from app.models.disponibilidad_especifica import DisponibilidadEspecifica
     from app.models.turno import Turno
 
 
@@ -36,6 +37,14 @@ class Doctor(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="DisponibilidadDoctor.dia_semana, DisponibilidadDoctor.hora_inicio",
+    )
+    # Excepciones de agenda por fecha: habilitan o bloquean horas de un día
+    # puntual sin tocar la agenda semanal (ver DisponibilidadEspecifica).
+    excepciones: Mapped[List["DisponibilidadEspecifica"]] = relationship(
+        back_populates="doctor",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="DisponibilidadEspecifica.fecha, DisponibilidadEspecifica.hora_inicio",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - representación de depuración

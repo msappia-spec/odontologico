@@ -5,8 +5,9 @@ Uso (desde la raíz del proyecto, con el venv activo)::
     python -m scripts.seed
 
 El script es **idempotente**: identifica cada registro por una clave natural
-(odontóloga por nombre, paciente por DNI y turno por odontóloga + fecha/hora de
-inicio), de modo que puede ejecutarse varias veces sin duplicar datos.
+(odontóloga por nombre, paciente por DNI, obra social por nombre y turno por
+odontóloga + fecha/hora de inicio), de modo que puede ejecutarse varias veces sin
+duplicar datos.
 
 Las odontólogas de ``ODONTOLOGAS`` son las que alimentan los botones de filtro
 del calendario (*Todos los odontólogos*, Cecilia, Fabiana y Florencia). Los
@@ -21,6 +22,10 @@ Además carga la **agenda semanal** de cada odontóloga en
 calendario usa para ofrecer bloques de turnos, y sólo se crea cuando la
 profesional todavía no tiene rangos, así el script nunca pisa una agenda editada
 desde la pestaña *Disponibilidad* del panel.
+
+También carga el catálogo de **obras sociales** (``OBRAS_SOCIALES``) que alimenta
+el desplegable del formulario de pacientes y vincula a cada paciente de ejemplo
+con su cobertura (``Paciente.obra_social_id``).
 """
 
 from datetime import datetime, timedelta
@@ -33,6 +38,7 @@ from app.db.session import SessionLocal
 from app.models.disponibilidad import DisponibilidadDoctor
 from app.models.doctor import Doctor
 from app.models.enums import EstadoTurno, EstadoWhatsApp
+from app.models.obra_social import ObraSocial
 from app.models.paciente import Paciente
 from app.models.turno import Turno
 
@@ -57,6 +63,18 @@ DISPONIBILIDAD = {
     5: (("09:00", "13:00"), ("15:00", "19:00")),          # viernes
     6: (("09:00", "13:00"),),                             # sábado
 }
+
+# (nombre, codigo) de las coberturas del catálogo de obras sociales. Es el
+# desplegable que usa el formulario de pacientes; las cuatro primeras son las que
+# tienen asignadas los pacientes de ejemplo.
+OBRAS_SOCIALES = (
+    ("Particular", None),
+    ("OSDE", "OSDE-01"),
+    ("Swiss Medical", "SM-100"),
+    ("IOMA", "IOMA-200"),
+    ("Medicus", "MED-300"),
+    ("Galeno", "GAL-400"),
+)
 
 # (nombre, telefono, email, dni, obra_social, numero_afiliado)
 PACIENTES = (
@@ -98,8 +116,8 @@ def run() -> None:
     init_db()
 
     with SessionLocal() as db:
-        creados = {"doctores": 0, "pacientes": 0, "turnos": 0}
-        omitidos = {"doctores": 0, "pacientes": 0, "turnos": 0}
+        creados = {"doctores": 0, "pacientes": 0, "turnos": 0, "obras": 0}
+        omitidos = {"doctores": 0, "pacientes": 0, "turnos": 0, "obras": 0}
 
         # --- Odontólogas (generan los botones de filtro del calendario) ------
         doctores = []
@@ -115,6 +133,21 @@ def run() -> None:
                 omitidos["doctores"] += 1
             doctores.append(doctor)
 
+        # --- Obras sociales (catálogo que alimenta el desplegable) -----------
+        obras_sociales: dict[str, ObraSocial] = {}
+        for nombre, codigo in OBRAS_SOCIALES:
+            obra_social = db.execute(
+                select(ObraSocial).where(ObraSocial.nombre == nombre)
+            ).scalars().first()
+            if obra_social is None:
+                obra_social = ObraSocial(nombre=nombre, codigo=codigo, activa=True)
+                db.add(obra_social)
+                creados["obras"] += 1
+            else:
+                omitidos["obras"] += 1
+            obras_sociales[nombre.lower()] = obra_social
+        db.commit()
+
         # --- Pacientes (con DNI y cobertura médica) --------------------------
         pacientes = []
         for nombre, telefono, email, dni, obra_social, numero_afiliado in PACIENTES:
@@ -122,12 +155,13 @@ def run() -> None:
                 select(Paciente).where(Paciente.dni == dni)
             ).scalars().first()
             if paciente is None:
+                cobertura = obras_sociales.get((obra_social or "").lower())
                 paciente = Paciente(
                     nombre=nombre,
                     telefono=telefono,
                     email=email,
                     dni=dni,
-                    obra_social=obra_social,
+                    obra_social_id=cobertura.id if cobertura else None,
                     numero_afiliado=numero_afiliado,
                 )
                 db.add(paciente)
@@ -214,8 +248,14 @@ def run() -> None:
             print(
                 f"                 id={paciente.id} {paciente.nombre} "
                 f"({paciente.telefono}) DNI={paciente.dni or '-'} "
-                f"OS={paciente.obra_social or '-'} Nro={paciente.numero_afiliado or '-'}"
+                f"OS={paciente.obra_social.nombre if paciente.obra_social else '-'} "
+                f"Nro={paciente.numero_afiliado or '-'}"
             )
+        print(
+            f"  Obras soc. -> {len(OBRAS_SOCIALES)} "
+            f"({creados['obras']} nuevas, {omitidos['obras']} ya existían): "
+            + ", ".join(obra_social for obra_social, _ in OBRAS_SOCIALES)
+        )
         print(
             f"  Turnos     -> {len(TURNOS)} "
             f"({creados['turnos']} nuevos, {omitidos['turnos']} ya existían)"

@@ -1,5 +1,5 @@
 /* =========================================================================
-   OdontoCare - Dashboard de la Secretaría
+   OdontoCare - Panel Principal de la Secretaría
    Conexión real con la API FastAPI (prefijo /api/v1).
    Vanilla JS + Fetch. Sin dependencias.
    ========================================================================= */
@@ -8,11 +8,25 @@
 
   const API = "/api/v1";
 
+  /* Ruta del catálogo de obras sociales. Se arma con una función (una sola
+     fuente de verdad) y se usa como argumento de ``api()`` en lugar de repetir
+     el *template literal* en cada llamada. */
+  const OBRAS_SOCIALES = "/obras-sociales";
+  function rutaObraSocial(id) {
+    return id ? `${OBRAS_SOCIALES}/${id}` : OBRAS_SOCIALES;
+  }
+
   /* ------------------------------- Estado ------------------------------- */
   const state = {
     doctores: [],
     pacientes: [],
     turnos: [],
+    // Catálogo de obras sociales (GET /obras-sociales): alimenta la vista
+    // "Gestión de Obras Sociales" y el desplegable del formulario de pacientes.
+    obrasSociales: [],
+    osMostrarInactivas: false,
+    obraSocialEditId: null,
+    doctorEditId: null,
     // Recordatorios pendientes (GET /whatsapp/recordatorios-pendientes):
     // la lista y la ventana de días que muestra la pestaña "Recordatorios".
     recordatorios: [],
@@ -31,6 +45,11 @@
     dispPorDoctor: {},
     dispCargada: false,
     dispDoctor: "",
+    // Excepciones por fecha de cada odontólogo (GET
+    // /doctores/{id}/disponibilidad-especifica): mapa doctor → { fecha → [tramos] }.
+    // Es la copia en memoria de lo que el backend aplica como precedencia, para
+    // que el calendario no ofrezca bloques de un día bloqueado.
+    excepcionesPorDoctor: {},
   };
 
   /* --------------------------- Utilidades fecha -------------------------- */
@@ -328,6 +347,77 @@
     );
   }
 
+  /* -------------------- Agenda del día por odontólogo -------------------- */
+  /* Reparte los turnos del día en una columna por profesional. Entran siempre
+     los doctores activos (aunque no tengan turnos, así la grilla muestra a todo
+     el consultorio de un vistazo) y también los dados de baja que todavía
+     conservan turnos, para no perder ningún renglón de la agenda. */
+  function agendaPorDoctor(turnos) {
+    const columnas = state.doctores
+      .filter((d) => d.activo || turnos.some((t) => t.doctor_id === d.id))
+      .map((d) => ({ doctor: d, turnos: turnos.filter((t) => t.doctor_id === d.id) }));
+    // Un turno cuyo odontólogo ya no está en el listado igual se muestra.
+    turnos.forEach((t) => {
+      if (columnas.some((c) => c.doctor.id === t.doctor_id)) return;
+      columnas.push({
+        doctor: { id: t.doctor_id, nombre: `Doctor #${t.doctor_id}`, especialidad: "" },
+        turnos: [t],
+      });
+    });
+    return columnas;
+  }
+
+  /* Tarjeta compacta de la columna: la hora, el paciente, su estado y los
+     atajos de edición/cancelación (los mismos data-* que resuelve calendar.js
+     por delegación). El nombre del odontólogo ya está en la cabecera. */
+  function turnoColumna(t) {
+    const paciente = nombrePaciente(t.paciente_id);
+    const color = clasesHora(t);
+    const cancelado = t.estado_turno === "CANCELADO";
+    const dur = duracionTexto(t.fecha_hora_inicio, t.fecha_hora_fin);
+
+    return (
+      `<div class="${color.fila}">` +
+      `<div class="${color.hora}" style="${color.estilo}">` +
+      `<div class="h">${esc(parteHora(t.fecha_hora_inicio))}</div>` +
+      (dur ? `<div class="d">${esc(dur)}</div>` : "") +
+      `</div>` +
+      `<div class="flex-1 min-w-0">` +
+      `<p class="font-semibold truncate ${cancelado ? "line-through text-slate-400" : "text-slate-900"}" ` +
+      `title="${esc(paciente)}">${esc(paciente)}</p>` +
+      `<div class="flex flex-wrap items-center gap-1.5 mt-1.5">` +
+      badgeTurno(t.estado_turno) +
+      badgeWhatsApp(t) +
+      `</div>` +
+      panelAccionesTurno(t) +
+      `</div></div>`
+    );
+  }
+
+  /* Cabecera y cuerpo de la columna de un odontólogo: avatar, nombre,
+     especialidad, cuántos turnos tiene hoy y la lista (o el aviso de que no hay
+     ninguno). La franja superior usa el color del profesional en el calendario. */
+  function columnaDoctor(doctor, turnos) {
+    const color = colorDe(doctor.id);
+    const cupo = `${turnos.length} turno${turnos.length === 1 ? "" : "s"}`;
+
+    return (
+      `<div class="agenda-doctor">` +
+      `<div class="agenda-doctor-cabecera" style="border-top-color:${color}">` +
+      avatar(doctor.nombre, doctor.id) +
+      `<div class="flex-1 min-w-0">` +
+      `<p class="font-bold text-slate-900 truncate" title="${esc(doctor.nombre)}">${esc(doctor.nombre)}</p>` +
+      `<p class="text-[11px] text-slate-500 truncate">${esc(doctor.especialidad || "Sin especialidad")}</p>` +
+      `</div>` +
+      `<span class="badge ${turnos.length ? "badge-brand" : "badge-slate"}">${esc(cupo)}</span>` +
+      `</div>` +
+      (turnos.length
+        ? `<div class="agenda-doctor-turnos">${turnos.map(turnoColumna).join("")}</div>`
+        : `<div class="agenda-doctor-vacio">Sin turnos agendados</div>`) +
+      `</div>`
+    );
+  }
+
   /* ------------------------------- Vistas -------------------------------- */
   function renderKPIs() {
     const hoy = hoyISO();
@@ -349,9 +439,14 @@
       .filter((t) => parteFecha(t.fecha_hora_inicio) === hoy)
       .sort((a, b) => a.fecha_hora_inicio.localeCompare(b.fecha_hora_inicio));
 
-    document.getElementById("dash-agenda-hoy").innerHTML = delDia.length
-      ? delDia.map(turnoCard).join("")
-      : vacio("No hay turnos agendados para hoy", "Usá el botón «Nuevo turno» para agendar una cita.");
+    document.getElementById("dash-hoy-total").textContent =
+      `${delDia.length} turno${delDia.length === 1 ? "" : "s"}`;
+
+    // Una columna por odontólogo con los turnos que tiene agendados hoy.
+    const columnas = agendaPorDoctor(delDia);
+    document.getElementById("dash-agenda-hoy").innerHTML = columnas.length
+      ? columnas.map((c) => columnaDoctor(c.doctor, c.turnos)).join("")
+      : vacio("Aún no hay odontólogos registrados", "Cargá un profesional para ver la agenda del día.");
 
     const ahora = ahoraISO();
     const proximos = state.turnos
@@ -387,7 +482,7 @@
     document.getElementById("count-doctores").textContent = state.doctores.length;
     const tbody = document.getElementById("lista-doctores");
     if (!state.doctores.length) {
-      tbody.innerHTML = `<tr><td colspan="4">${vacio("Aún no hay doctores registrados")}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5">${vacio("Aún no hay doctores registrados")}</td></tr>`;
       return;
     }
     tbody.innerHTML = state.doctores
@@ -396,11 +491,113 @@
         const estado = d.activo
           ? `<span class="badge badge-green">${ICON.check}Activo</span>`
           : `<span class="badge badge-slate">Inactivo</span>`;
+        /* Editar abre el modal (PUT completo) y el segundo botón da de baja
+           (DELETE: borrado lógico) o reactiva al profesional (PATCH). */
+        const alterno = d.activo
+          ? `<button type="button" class="btn btn-danger-soft btn-sm" data-baja-doctor="${d.id}" ` +
+            `title="Dar de baja a ${esc(d.nombre)} sin borrar su historial">Dar de baja</button>`
+          : `<button type="button" class="btn btn-soft btn-sm" data-reactivar-doctor="${d.id}" ` +
+            `title="Volver a ofrecer a ${esc(d.nombre)} en las agendas">Reactivar</button>`;
         return (
-          `<tr><td><div class="flex items-center gap-3">${avatar(d.nombre, d.id)}` +
+          `<tr${d.activo ? "" : ' class="opacity-70"'}>` +
+          `<td><div class="flex items-center gap-3">${avatar(d.nombre, d.id)}` +
           `<span class="font-semibold text-slate-800">${esc(d.nombre)}</span></div></td>` +
           `<td>${esc(d.especialidad)}</td><td>${estado}</td>` +
-          `<td><span class="badge badge-brand">${n}</span></td></tr>`
+          `<td><span class="badge badge-brand">${n}</span></td>` +
+          `<td><div class="flex items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-ghost btn-sm" data-editar-doctor="${d.id}" ` +
+          `title="Editar los datos de ${esc(d.nombre)}">Editar</button>` +
+          `${alterno}</div></td></tr>`
+        );
+      })
+      .join("");
+  }
+
+  /* --------------------------- Obras sociales ---------------------------- */
+  /* Catálogo que alimenta el desplegable del formulario de pacientes. La lista
+     llega completa (activas y dadas de baja) en una sola petición; el filtro de
+     la vista es local (``state.osMostrarInactivas``). */
+  function obrasSocialesActivas() {
+    return state.obrasSociales.filter((o) => o.activa);
+  }
+
+  function obraSocialPorId(id) {
+    return porId(state.obrasSociales, Number(id)) || null;
+  }
+
+  function nombreObraSocial(id) {
+    const obra = obraSocialPorId(id);
+    return obra ? obra.nombre : "—";
+  }
+
+  function renderObrasSociales() {
+    const contador = document.getElementById("count-obras-sociales");
+    const activas = obrasSocialesActivas();
+    if (contador) contador.textContent = `${activas.length} activa${activas.length === 1 ? "" : "s"}`;
+
+    // Insignia del menú con la cantidad de coberturas ofrecidas.
+    const navBadge = document.getElementById("nav-os-activas");
+    if (navBadge) {
+      navBadge.textContent = String(activas.length);
+      navBadge.classList.toggle("hide", activas.length === 0);
+    }
+
+    const sub = document.getElementById("os-subtitulo");
+    if (sub) {
+      const total = state.obrasSociales.length;
+      sub.textContent =
+        `${activas.length} de ${total} cobertura${total === 1 ? "" : "s"} disponibles ` +
+        "para asignar en el formulario de pacientes.";
+    }
+
+    const tbody = document.getElementById("lista-obras-sociales");
+    if (!tbody) return;
+
+    const visibles = state.osMostrarInactivas
+      ? state.obrasSociales
+      : obrasSocialesActivas();
+
+    if (!visibles.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="5">` +
+        vacio(
+          state.obrasSociales.length ? "No hay coberturas activas" : "Aún no hay obras sociales",
+          state.obrasSociales.length
+            ? "Activá el interruptor «Mostrar las dadas de baja» o registrá una nueva cobertura."
+            : "Usá el botón «Nueva obra social» para cargar la primera cobertura."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    const guion = '<span class="text-slate-400">—</span>';
+    tbody.innerHTML = visibles
+      .map((o) => {
+        const n = state.pacientes.filter(
+          (p) => String(p.obra_social_id) === String(o.id)
+        ).length;
+        const estado = o.activa
+          ? `<span class="badge badge-green">${ICON.check}Activa</span>`
+          : `<span class="badge badge-slate">Dada de baja</span>`;
+        // La baja es lógica (DELETE → activa=false) y se revierte con PATCH.
+        const alterno = o.activa
+          ? `<button type="button" class="btn btn-danger-soft btn-sm" data-baja-os="${o.id}" ` +
+            `title="Dejar de ofrecer ${esc(o.nombre)} sin borrar la cobertura">Desactivar</button>`
+          : `<button type="button" class="btn btn-soft btn-sm" data-reactivar-os="${o.id}" ` +
+            `title="Volver a ofrecer ${esc(o.nombre)} en el formulario de pacientes">Reactivar</button>`;
+        return (
+          `<tr${o.activa ? "" : ' class="opacity-70"'}>` +
+          `<td><div class="flex items-center gap-3">` +
+          `<span class="w-9 h-9 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center font-bold text-xs flex-none">` +
+          `${esc(iniciales(o.nombre))}</span>` +
+          `<span class="font-semibold text-slate-800">${esc(o.nombre)}</span></div></td>` +
+          `<td class="font-mono text-xs">${o.codigo ? esc(o.codigo) : guion}</td>` +
+          `<td>${estado}</td>` +
+          `<td><span class="badge badge-brand">${n}</span></td>` +
+          `<td><div class="flex items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-ghost btn-sm" data-editar-os="${o.id}" ` +
+          `title="Editar ${esc(o.nombre)}">Editar</button>` +
+          `${alterno}</div></td></tr>`
         );
       })
       .join("");
@@ -441,13 +638,49 @@
       .join("");
   }
 
+  /* Odontólogos que pueden recibir turnos: los que están activos. Las consultas
+     de selección del panel (filtros, modal de turno y editor de agenda) se
+     limitan a ellos; la vista "Doctores" sí lista también los dados de baja para
+     poder reactivarlos. */
+  function doctoresActivos() {
+    return state.doctores.filter((d) => d.activo);
+  }
+
+  /* Desplegable de obras sociales del formulario de pacientes: sólo activas, más
+     la opción "sin cobertura". Se preserva la selección actual. */
+  function cargarObrasSocialesSelect() {
+    const sel = document.getElementById("pac-obra-social");
+    if (!sel) return;
+    const valor = sel.value;
+    const activas = obrasSocialesActivas();
+    sel.innerHTML =
+      `<option value="">Sin cobertura / particular</option>` +
+      activas
+        .map(
+          (o) =>
+            `<option value="${o.id}">${esc(o.nombre)}` +
+            (o.codigo ? ` · ${esc(o.codigo)}` : "") +
+            `</option>`
+        )
+        .join("");
+    if (valor) sel.value = valor;
+  }
+
   function cargarSelectores() {
-    // Filtro de agenda (preserva la selección actual)
+    // Filtro de agenda (preserva la selección actual). Sólo profesionales
+    // activos: los dados de baja no pueden recibir turnos.
     const filtro = document.getElementById("agenda-doctor");
+    const activos = doctoresActivos();
     filtro.innerHTML =
       `<option value="">Todos los doctores</option>` +
-      state.doctores.map((d) => `<option value="${d.id}">${esc(d.nombre)}</option>`).join("");
+      activos.map((d) => `<option value="${d.id}">${esc(d.nombre)}</option>`).join("");
+    if (state.agendaDoctor && !porId(activos, Number(state.agendaDoctor))) {
+      state.agendaDoctor = "";
+    }
     filtro.value = state.agendaDoctor;
+
+    // Desplegable de coberturas del formulario de pacientes.
+    cargarObrasSocialesSelect();
 
     // Modal de nuevo turno
     const selPac = document.getElementById("turno-paciente");
@@ -466,7 +699,8 @@
           .join("")
       : `<option value="">— Registrá un paciente primero —</option>`;
 
-    const activos = state.doctores.filter((d) => d.activo);
+    // El modal de nuevo turno ofrece los mismos profesionales activos que el
+    // filtro de la agenda (los dados de baja no pueden recibir turnos).
     selDoc.innerHTML = activos.length
       ? activos.map((d) => `<option value="${d.id}">${esc(d.nombre)} — ${esc(d.especialidad)}</option>`).join("")
       : `<option value="">— Registrá un doctor activo primero —</option>`;
@@ -482,6 +716,7 @@
     renderRecordatorios();
     renderDoctores();
     renderPacientes();
+    renderObrasSociales();
     renderDisponibilidad();
     // Notifica a los módulos externos (calendar.js) que llegaron datos nuevos.
     document.dispatchEvent(new CustomEvent("odonto:datos"));
@@ -494,10 +729,14 @@
         api("/doctores"),
         api("/pacientes"),
         api("/turnos?limit=500"),
+        // El catálogo completo (activas y dadas de baja): la vista de gestión
+        // filtra localmente y el desplegable sólo ofrece las activas.
+        api(OBRAS_SOCIALES),
       ]);
       state.doctores = datos[0] || [];
       state.pacientes = datos[1] || [];
       state.turnos = datos[2] || [];
+      state.obrasSociales = datos[3] || [];
       renderTodo();
       estadoApi(true);
       // Los recordatorios pendientes se piden aparte para no demorar el panel.
@@ -550,22 +789,168 @@
     return state.dispPorDoctor[String(doctorId)] || [];
   }
 
+  /* Las excepciones se traen de la API por rango de fechas: se pide con holgura
+     (medio año atrás y un año adelante) para que el calendario pueda mostrar los
+     días personalizados sin consultar al navegar; las fechas de afuera se
+     completan on-demand (ver `cargarExcepcionesDeFecha`). */
+  const EXCEPCIONES_DESDE = sumarDiasISO(hoyISO(), -186);
+  const EXCEPCIONES_HASTA = sumarDiasISO(hoyISO(), 366);
+
+  /* Rangos de fechas cuyas excepciones ya se pidieron a la API (siempre de todos
+     los odontólogos a la vez). El calendario consulta los meses que se salen de
+     la ventana inicial y así no repite peticiones en cada render. */
+  let excepcionesCargadas = [];
+
+  function rangoCargado(desde, hasta) {
+    return excepcionesCargadas.some((r) => desde >= r.desde && hasta <= r.hasta);
+  }
+
+  /* Todas las fechas ISO entre dos extremos, inclusive (con tope de seguridad
+     para no armar listas infinitas si llega un rango inesperado). */
+  function fechasDelRango(desde, hasta) {
+    const fechas = [];
+    const fin = parteFecha(hasta);
+    let iso = parteFecha(desde);
+    for (let i = 0; iso <= fin && i < 400; i += 1) {
+      fechas.push(iso);
+      iso = sumarDiasISO(iso, 1);
+    }
+    return fechas;
+  }
+
+  /* --------------------- Excepciones de un día concreto ------------------- */
+  /* La precedencia final la resuelve el backend, pero el calendario necesita
+     saberla antes de pintar la grilla (si no, ofrecería bloques de la semana en
+     un día bloqueado). Estas funciones replican la misma regla sobre los datos
+     que ya están en memoria: si hay CUALQUIER excepción para esa fecha, la
+     agenda semanal se ignora y el día se calcula con la unión de los
+     HABILITADO menos la de los BLOQUEADO. */
+
+  function aMinutos(hhmm) {
+    const [h, m] = String(hhmm || "0:0").split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  }
+  function aHora(minutos) {
+    const h = Math.floor(minutos / 60);
+    const m = minutos % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+  function esTramoHabilitado(e) {
+    return String(e.tipo) === "HABILITADO";
+  }
+  /* Día de la semana de una fecha ISO en la convención del backend y de
+     Date.getDay(): 0 = domingo … 6 = sábado. */
+  function diaSemanaDe(iso) {
+    const [y, m, d] = parteFecha(iso).split("-").map(Number);
+    return new Date(y, m - 1, d).getDay();
+  }
+
+  /* Excepciones cargadas para un odontólogo en una fecha ([] si no hay). */
+  function excepcionesDeFecha(doctorId, iso) {
+    const mapa = state.excepcionesPorDoctor[String(doctorId)];
+    const fecha = parteFecha(iso);
+    return (mapa && mapa[fecha]) || [];
+  }
+
+  /* Une tramos solapados; los contiguos quedan separados a propósito (cada uno
+     conserva su propio compás de bloques, igual que el backend). */
+  function unirTramos(tramos) {
+    const ordenados = tramos.slice().sort((a, b) => a.inicio - b.inicio);
+    const unidos = [];
+    ordenados.forEach(function (t) {
+      const ultimo = unidos[unidos.length - 1];
+      if (ultimo && t.inicio < ultimo.fin) ultimo.fin = Math.max(ultimo.fin, t.fin);
+      else unidos.push({ inicio: t.inicio, fin: t.fin });
+    });
+    return unidos;
+  }
+
+  /* Devuelve `base` sin las porciones cubiertas por `quitar` (ambos ya unidos).
+     Un tramo partido por un bloqueo se devuelve como dos tramos. */
+  function restarTramos(base, quitar) {
+    let restante = base.slice();
+    quitar.forEach(function (bloque) {
+      const recortado = [];
+      restante.forEach(function (t) {
+        if (bloque.fin <= t.inicio || bloque.inicio >= t.fin) {
+          recortado.push(t); // sin contacto: queda igual
+          return;
+        }
+        if (bloque.inicio > t.inicio) recortado.push({ inicio: t.inicio, fin: bloque.inicio });
+        if (bloque.fin < t.fin) recortado.push({ inicio: bloque.fin, fin: t.fin });
+      });
+      restante = recortado;
+    });
+    return restante.filter((t) => t.inicio < t.fin);
+  }
+
+  /* Rangos que realmente rigen una fecha: las excepciones cargadas o, si no hay
+     ninguna, la agenda semanal del día de la semana correspondiente. `origen`
+     viaja con cada rango para que la UI aclare de dónde salió. */
+  function rangosVigentesDeFecha(doctorId, iso) {
+    const fecha = parteFecha(iso);
+    const excepciones = excepcionesDeFecha(doctorId, fecha);
+    if (!excepciones.length) {
+      const dia = diaSemanaDe(fecha);
+      return rangosDe(doctorId)
+        .filter((r) => Number(r.dia_semana) === dia)
+        .map((r) => ({ hora_inicio: r.hora_inicio, hora_fin: r.hora_fin, origen: "SEMANAL" }));
+    }
+    const habilitados = unirTramos(
+      excepciones.filter(esTramoHabilitado).map((e) => ({
+        inicio: aMinutos(e.hora_inicio),
+        fin: aMinutos(e.hora_fin),
+      }))
+    );
+    const bloqueados = unirTramos(
+      excepciones.filter((e) => !esTramoHabilitado(e)).map((e) => ({
+        inicio: aMinutos(e.hora_inicio),
+        fin: aMinutos(e.hora_fin),
+      }))
+    );
+    return restarTramos(habilitados, bloqueados).map((t) => ({
+      hora_inicio: aHora(t.inicio),
+      hora_fin: aHora(t.fin),
+      origen: "ESPECIFICO",
+    }));
+  }
+
   async function cargarDisponibilidad() {
     try {
-      const listas = await Promise.all(
-        state.doctores.map((d) => api(`/doctores/${d.id}/disponibilidad`))
-      );
+      const ventana = `?desde=${EXCEPCIONES_DESDE}&hasta=${EXCEPCIONES_HASTA}`;
+      const [listas, excepciones] = await Promise.all([
+        Promise.all(state.doctores.map((d) => api(`/doctores/${d.id}/disponibilidad`))),
+        // Las excepciones son un extra: si el endpoint falla, la agenda semanal
+        // igual se dibuja (el calendario simplemente no marca días especiales).
+        Promise.all(
+          state.doctores.map((d) =>
+            api(`/doctores/${d.id}/disponibilidad-especifica${ventana}`).catch(() => null)
+          )
+        ),
+      ]);
       const mapa = {};
       const plana = [];
+      state.excepcionesPorDoctor = {};
+      excepcionesCargadas = [];
+      let conExcepciones = 0;
       state.doctores.forEach(function (d, i) {
         const rangos = listas[i] || [];
         mapa[String(d.id)] = rangos;
         rangos.forEach((r) => plana.push(r));
+        if (excepciones[i] === null) return; // endpoint no disponible / caído
+        conExcepciones += 1;
+        indexarExcepciones(d.id, excepciones[i], null);
       });
+      // Si la API de excepciones respondió, toda la ventana inicial queda cacheada
+      // y el calendario no la vuelve a pedir al pintar sus meses.
+      if (conExcepciones) {
+        excepcionesCargadas.push({ desde: EXCEPCIONES_DESDE, hasta: EXCEPCIONES_HASTA });
+      }
       state.dispPorDoctor = mapa;
       state.disponibilidad = plana;
       state.dispCargada = true;
       renderDisponibilidad();
+      renderExcepciones();
       // calendar.js vuelve a dibujar la grilla y el panel del día.
       document.dispatchEvent(new CustomEvent("odonto:disponibilidad"));
     } catch (err) {
@@ -704,6 +1089,344 @@
     }
   }
 
+  /* ---------------- Excepciones por fecha (tarjeta "Gestionar un día") ------ */
+
+  /* Guarda las excepciones recibidas de la API en el índice doctor → fecha.
+     `fechas` indica qué días hay que descartar antes de volver a llenarlos:
+     `null` = todo el bloque traído del servidor; una lista = sólo esos días. */
+  function indexarExcepciones(doctorId, lista, fechas) {
+    const clave = String(doctorId);
+    const mapa = state.excepcionesPorDoctor[clave] || (state.excepcionesPorDoctor[clave] = {});
+    const objetivos = fechas ? fechas.map(parteFecha) : Object.keys(mapa);
+    objetivos.forEach(function (f) { delete mapa[f]; });
+    (lista || []).forEach(function (e) {
+      const f = parteFecha(e.fecha);
+      if (!mapa[f]) mapa[f] = [];
+      mapa[f].push(e);
+    });
+    Object.keys(mapa).forEach(function (f) {
+      mapa[f].sort((a, b) => String(a.hora_inicio).localeCompare(String(b.hora_inicio)));
+    });
+    return mapa;
+  }
+
+  /* Fecha que se está editando en la tarjeta "Gestionar un día específico". */
+  function fechaExcepciones() {
+    const input = document.getElementById("excep-fecha");
+    if (input && !input.value) input.value = hoyISO();
+    return (input && input.value) || hoyISO();
+  }
+
+  /* Chip de un tramo de la fecha: verde si abre horas, rojo si las cierra. */
+  function chipExcepcion(e) {
+    const abrir = esTramoHabilitado(e);
+    return (
+      `<span class="excep-chip ${abrir ? "abrir" : "bloquear"}">` +
+      `<span class="excep-chip-tipo">${abrir ? "Abre" : "Bloquea"}</span>` +
+      `<span>${esc(e.hora_inicio)} &ndash; ${esc(e.hora_fin)}</span>` +
+      `<button type="button" class="excep-chip-x" data-borrar-excepcion="${e.id}" ` +
+      `data-excepcion-doctor="${e.doctor_id}" data-excepcion-fecha="${esc(parteFecha(e.fecha))}" ` +
+      `title="Eliminar este tramo del día" ` +
+      `aria-label="Eliminar el tramo de ${esc(e.hora_inicio)} a ${esc(e.hora_fin)}">` +
+      `<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+      `stroke-width="2.6" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>` +
+      `</button></span>`
+    );
+  }
+
+  /* Dibuja la tarjeta del día elegido: estado (personalizado o no), los tramos
+     vigentes resultantes y los chips de los tramos cargados. */
+  function renderExcepciones() {
+    const lista = document.getElementById("excep-lista");
+    if (!lista) return;
+    const estado = document.getElementById("excep-estado");
+    const efectiva = document.getElementById("excep-efectiva");
+    const doctor = doctorDisponibilidad();
+    const fecha = fechaExcepciones();
+
+    if (!doctor) {
+      if (estado) {
+        estado.textContent = "Sin odontólogos";
+        estado.className = "badge badge-slate";
+      }
+      if (efectiva) efectiva.textContent = "";
+      lista.innerHTML = vacio(
+        "Aún no hay odontólogos registrados",
+        "Cargá un profesional para personalizar sus días."
+      );
+      return;
+    }
+
+    const excepciones = excepcionesDeFecha(doctor.id, fecha);
+    const vigentes = rangosVigentesDeFecha(doctor.id, fecha);
+    const personalizado = excepciones.length > 0;
+
+    if (estado) {
+      estado.className = `badge ${personalizado ? "badge-amber" : "badge-slate"}`;
+      estado.textContent = personalizado
+        ? `Día personalizado · ${excepciones.length} tramo${excepciones.length === 1 ? "" : "s"}`
+        : "Sin personalizar";
+    }
+    if (efectiva) {
+      const detalle = vigentes.length
+        ? `${vigentes.map((r) => `${r.hora_inicio}–${r.hora_fin}`).join(", ")} ` +
+          `(${personalizado ? "excepción del día" : "agenda semanal"})`
+        : "no se ofrece atención";
+      efectiva.textContent = `${fechaLarga(fecha)}: atiende ${detalle}.`;
+    }
+    lista.innerHTML = personalizado
+      ? excepciones.map(chipExcepcion).join("")
+      : `<span class="disp-sin-rangos">` +
+        `Ese día todavía se rige por la agenda semanal del ` +
+        `${nombreDia(diaSemanaDe(fecha)).toLowerCase()}.</span>`;
+  }
+
+  /* Trae de la API las excepciones de una fecha puntual. Sin `forzar` se apoya en
+     el bloque ya cargado en memoria (el calendario pide muchos días seguidos y no
+     tiene sentido golpear la API en cada render). Con `forzar` —lo que ocurre
+     siempre después de un alta, un reemplazo o una baja— consulta al servidor y
+     reemplaza en el índice los tramos cacheados de ese día: es la única fuente de
+     verdad y lo que hace que la lista se actualice sin recargar la página. */
+  async function cargarExcepcionesDeFecha(iso, forzar) {
+    const doctor = doctorDisponibilidad();
+    if (!doctor) return [];
+    const fecha = parteFecha(iso);
+    if (!forzar) {
+      if (fecha >= EXCEPCIONES_DESDE && fecha <= EXCEPCIONES_HASTA) {
+        return excepcionesDeFecha(doctor.id, fecha);
+      }
+      if (rangoCargado(fecha, fecha)) return excepcionesDeFecha(doctor.id, fecha);
+    }
+    let lista;
+    try {
+      lista = await api(
+        `/doctores/${doctor.id}/disponibilidad-especifica?desde=${fecha}&hasta=${fecha}`
+      );
+    } catch (err) {
+      // Si la petición falla se conserva lo que ya había en memoria: la tarjeta
+      // sigue mostrando los tramos y no se borra nada que exista en el servidor.
+      toast("error", "No se pudieron leer los tramos del día", err.message);
+      return excepcionesDeFecha(doctor.id, fecha);
+    }
+    indexarExcepciones(doctor.id, lista, [fecha]);
+    // La fecha queda recordada (aunque no tenga tramos) para no repetir el
+    // pedido si el calendario vuelve a pintarla.
+    if (!rangoCargado(fecha, fecha)) excepcionesCargadas.push({ desde: fecha, hasta: fecha });
+    return excepcionesDeFecha(doctor.id, fecha);
+  }
+
+  /* Pide a la API las excepciones de TODOS los odontólogos para un rango de
+     fechas (lo usa el calendario con el mes visible, que puede caer fuera de la
+     ventana inicial). Devuelve true si llegaron datos: hay que volver a dibujar. */
+  async function cargarExcepcionesDeRango(desde, hasta) {
+    const inicio = parteFecha(desde);
+    const fin = parteFecha(hasta);
+    if (!state.doctores.length || !inicio || !fin || inicio > fin) return false;
+    if (rangoCargado(inicio, fin)) return false;
+    // El rango se marca ANTES de pedir: si la API falla, un render posterior no
+    // vuelve a disparar la misma petición en cadena.
+    excepcionesCargadas.push({ desde: inicio, hasta: fin });
+    const ventana = `?desde=${inicio}&hasta=${fin}`;
+    const listas = await Promise.all(
+      state.doctores.map((d) =>
+        api(`/doctores/${d.id}/disponibilidad-especifica${ventana}`).catch(() => null)
+      )
+    );
+    const fechas = fechasDelRango(inicio, fin);
+    let llegaron = 0;
+    state.doctores.forEach(function (d, i) {
+      if (listas[i] === null) return; // ese odontólogo se queda con lo cacheado
+      llegaron += 1;
+      indexarExcepciones(d.id, listas[i], fechas);
+    });
+    return llegaron > 0;
+  }
+
+  /* Después de cada cambio: recarga el día desde el servidor (única fuente de
+     verdad), redibuja la tarjeta y avisa al calendario para que rehaga la grilla
+     del mes y los bloques del día. La recarga es FORZADA a propósito: la mutación
+     que recién ocurrió (alta, reemplazo del día o baja de un tramo) dejó el cache
+     desactualizado, y sin esto la lista seguiría mostrando el tramo borrado —o no
+     mostraría el nuevo— hasta recargar la página. */
+  async function refrescarDiaPersonalizado(fecha) {
+    await cargarExcepcionesDeFecha(fecha, true);
+    renderExcepciones();
+    document.dispatchEvent(new CustomEvent("odonto:disponibilidad"));
+  }
+
+  async function agregarExcepcion(ev) {
+    ev.preventDefault();
+    const doctor = doctorDisponibilidad();
+    if (!doctor) return;
+    const fecha = fechaExcepciones();
+    const tipo = document.getElementById("excep-tipo").value;
+    const desde = document.getElementById("excep-desde").value;
+    const hasta = document.getElementById("excep-hasta").value;
+    if (!desde || !hasta) {
+      toast("info", "Faltan horarios", "Indicá la hora de inicio y de fin del tramo.");
+      return;
+    }
+    const btn = ev.target.querySelector("button[type=submit]");
+    try {
+      bloquear(btn, true);
+      await api(`/doctores/${doctor.id}/disponibilidad-especifica`, {
+        method: "POST",
+        body: JSON.stringify({
+          fecha: fecha,
+          hora_inicio: desde,
+          hora_fin: hasta,
+          tipo: tipo,
+        }),
+      });
+      toast(
+        "exito",
+        tipo === "HABILITADO" ? "Tramo habilitado" : "Tramo bloqueado",
+        `${fechaCorta(fecha)} de ${desde} a ${hasta} · ${doctor.nombre}`
+      );
+      await refrescarDiaPersonalizado(fecha);
+    } catch (err) {
+      toast("error", "No se pudo agregar el tramo", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* Saca un tramo del índice en memoria (baja optimista): la tarjeta reacciona al
+     instante y después el servidor confirma; si dijera que ya no existe, la lista
+     queda igual porque el tramo ya se fue de la vista. */
+  function quitarExcepcionDelCache(doctorId, fecha, excepcionId) {
+    const restantes = excepcionesDeFecha(doctorId, fecha).filter(
+      (e) => String(e.id) !== String(excepcionId)
+    );
+    indexarExcepciones(doctorId, restantes, [parteFecha(fecha)]);
+  }
+
+  /* Baja de un tramo desde la cruz del chip: se envía el id REAL que devolvió la
+     API (``e.id``, guardado en ``data-borrar-excepcion`` junto con el odontólogo y
+     la fecha) y el tramo sale de la lista en el acto, sin recargar la página. El
+     botón se deshabilita mientras dura la petición porque un doble clic repetiría
+     el DELETE y el segundo respondería 404 (ese tramo ya no existe). Por eso un
+     404 acá se informa como aviso —«ya estaba eliminado»— y no como error. */
+  async function borrarExcepcion(doctorId, excepcionId, fecha, btn) {
+    const idDoctor = Number(doctorId);
+    const idExcepcion = Number(excepcionId);
+    const dia = parteFecha(fecha);
+    if (!idDoctor || !idExcepcion) {
+      // Chip sin id (p. ej. HTML viejo servido en el navegador): se relee el día.
+      toast("info", "Ese tramo ya no está", "Se actualizó la lista con lo que hay en el servidor.");
+      await refrescarDiaPersonalizado(dia);
+      return;
+    }
+    try {
+      if (btn) btn.disabled = true;
+      quitarExcepcionDelCache(idDoctor, dia, idExcepcion);
+      renderExcepciones();
+      document.dispatchEvent(new CustomEvent("odonto:disponibilidad"));
+      await api(`/doctores/${idDoctor}/disponibilidad-especifica/${idExcepcion}`, {
+        method: "DELETE",
+      });
+      toast("exito", "Tramo eliminado", `${fechaCorta(dia)} · ${nombreDoctor(idDoctor)}`);
+    } catch (err) {
+      if (err.status === 404) {
+        toast(
+          "info",
+          "El tramo ya estaba eliminado",
+          `${fechaCorta(dia)} · ${nombreDoctor(idDoctor)}`
+        );
+      } else {
+        toast("error", "No se pudo eliminar el tramo", err.message);
+      }
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+    // Pase lo que pase se relee el día del servidor: si la baja falló, el tramo
+    // reaparece en la lista en lugar de quedar oculto por el borrado optimista.
+    await refrescarDiaPersonalizado(dia);
+  }
+
+  /* Reemplazo total del día (PUT). Lo usan «Copiar la agenda semanal»,
+     «Bloquear todo el día» y «Volver a la agenda semanal». */
+  async function reemplazarExcepciones(fecha, rangos, mensaje) {
+    const doctor = doctorDisponibilidad();
+    if (!doctor) return;
+    try {
+      await api(`/doctores/${doctor.id}/disponibilidad-especifica/${fecha}`, {
+        method: "PUT",
+        body: JSON.stringify({ rangos: rangos }),
+      });
+      toast("exito", "Día actualizado", `${mensaje} · ${fechaCorta(fecha)} · ${doctor.nombre}`);
+      await refrescarDiaPersonalizado(fecha);
+    } catch (err) {
+      toast("error", "No se pudo guardar el día", err.message);
+    }
+  }
+
+  /* Copia los rangos de la agenda semanal del día de la semana de esa fecha como
+     tramos HABILITADO, para después ajustarlos (agregar o bloquear horas). */
+  function copiarAgendaSemanal() {
+    const doctor = doctorDisponibilidad();
+    if (!doctor) return;
+    const fecha = fechaExcepciones();
+    const dia = diaSemanaDe(fecha);
+    const rangos = rangosDe(doctor.id)
+      .filter((r) => Number(r.dia_semana) === dia)
+      .sort((a, b) => String(a.hora_inicio).localeCompare(String(b.hora_inicio)))
+      .map((r) => ({
+        hora_inicio: r.hora_inicio,
+        hora_fin: r.hora_fin,
+        tipo: "HABILITADO",
+      }));
+    if (!rangos.length) {
+      toast(
+        "info",
+        `Sin agenda semanal el ${nombreDia(dia).toLowerCase()}`,
+        `${doctor.nombre} no tiene rangos cargados ese día de la semana.`
+      );
+      return;
+    }
+    reemplazarExcepciones(
+      fecha,
+      rangos,
+      `Agenda semanal copiada (${rangos.length} tramo${rangos.length === 1 ? "" : "s"})`
+    );
+  }
+
+  /* Cierra el día completo (00:00 a 23:59) sin importar la agenda semanal. */
+  function bloquearDiaCompleto() {
+    const fecha = fechaExcepciones();
+    const ok = window.confirm(
+      `¿Bloquear todo el ${fechaLarga(fecha)}? El día queda cerrado de 00:00 a 23:59 ` +
+        "y no se ofrecerá ningún horario, aunque la agenda semanal tenga rangos."
+    );
+    if (!ok) return;
+    reemplazarExcepciones(
+      fecha,
+      [{ hora_inicio: "00:00", hora_fin: "23:59", tipo: "BLOQUEADO" }],
+      "Día bloqueado completo"
+    );
+  }
+
+  /* Borra los tramos de la fecha: el día vuelve a regirse por la semana. */
+  function volverAAgendaSemanal() {
+    const fecha = fechaExcepciones();
+    const ok = window.confirm(
+      `¿Borrar los tramos del ${fechaLarga(fecha)}? Ese día vuelve a regirse por la agenda semanal.`
+    );
+    if (!ok) return;
+    reemplazarExcepciones(fecha, [], "Vuelve a la agenda semanal");
+  }
+
+  /* «Ver ese día»: completa las excepciones si la fecha está fuera del bloque
+     cacheado, redibuja la tarjeta y sincroniza la vista previa de bloques. */
+  async function verDiaPersonalizado() {
+    const fecha = fechaExcepciones();
+    await cargarExcepcionesDeFecha(fecha);
+    renderExcepciones();
+    const input = document.getElementById("disp-fecha");
+    if (input) input.value = fecha;
+    await probarBloquesDisponibilidad();
+  }
+
   /* Reemplazo total de la semana del odontólogo (PUT): lo usan el botón de
      plantilla sugerida y el vaciado completo de la agenda. */
   async function reemplazarSemana(rangos, mensaje) {
@@ -767,7 +1490,7 @@
 
   /* ------------------------------ Navegación ----------------------------- */
   const VISTAS = {
-    dashboard: ["Dashboard", "Resumen del consultorio y estado de los recordatorios"],
+    dashboard: ["Panel Principal", "Resumen del consultorio y estado de los recordatorios"],
     calendario: ["Calendario", "Calendario mensual de turnos y disponibilidad por día"],
     disponibilidad: [
       "Disponibilidad médica",
@@ -776,7 +1499,19 @@
     recordatorios: ["Recordatorios pendientes", "Turnos próximos que todavía no recibieron el aviso de WhatsApp"],
     doctores: ["Doctores", "Registro de profesionales del consultorio"],
     pacientes: ["Pacientes", "Registro de pacientes y sus teléfonos de WhatsApp"],
+    "obras-sociales": [
+      "Obras Sociales",
+      "Catálogo de coberturas que se ofrecen al registrar un paciente",
+    ],
   };
+
+  /* Subtítulo del encabezado superior. El <h1> muestra la operación activa (la
+     pestaña «dashboard» se llama «Panel Principal») y el subtítulo explica para
+     qué sirve. */
+  function subtituloVista(v) {
+    const [, desc] = VISTAS[v] || ["", ""];
+    return desc;
+  }
 
   function cambiarVista(v) {
     if (!VISTAS[v]) return;
@@ -786,8 +1521,10 @@
     if (sec) sec.classList.remove("hide");
     document.querySelectorAll(".nav-link[data-view]").forEach((a) =>
       a.classList.toggle("active", a.dataset.view === v));
+    // El encabezado de arriba de todo sigue a la operación elegida en el menú:
+    // el <h1> lleva su nombre y el subtítulo, para qué sirve.
     document.getElementById("page-title").textContent = VISTAS[v][0];
-    document.getElementById("page-subtitle").textContent = VISTAS[v][1];
+    document.getElementById("page-subtitle").textContent = subtituloVista(v);
     document.getElementById("sidebar").classList.remove("open");
     if (v === "recordatorios") {
       // Al entrar a la pestaña se refresca la lista y el subtítulo con la
@@ -799,6 +1536,9 @@
       // La grilla semanal se redibuja con lo que ya haya en memoria; si todavía
       // no llegó la disposición del servidor, muestra el estado de carga.
       renderDisponibilidad();
+      // La tarjeta de días personalizados («Gestionar un día específico») usa el
+      // mismo odontólogo seleccionado y los tramos ya cacheados.
+      renderExcepciones();
     }
   }
 
@@ -841,9 +1581,202 @@
     }
   }
 
+  /* ------------------- Modales de gestión (edición y baja) --------------- */
+  /* Los modales de doctor y de obra social comparten el mismo patrón: abrir,
+     cerrar (botón, fondo y tecla Esc) y mostrar el error que devuelve la API
+     dentro del propio formulario, sin perder lo ya cargado. */
+  function mostrarModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove("hide");
+    const foco = el.querySelector("input:not([type=checkbox]), select, textarea");
+    if (foco && foco.focus) foco.focus();
+  }
+
+  function ocultarModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hide");
+  }
+
+  function mostrarAviso(id, msg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove("hide");
+  }
+
+  function ocultarAviso(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hide");
+  }
+
+  /* ------------------------- Edición de doctores ------------------------- */
+  /* El toggle "Activo" del modal permite reactivar a un profesional dado de baja
+     sin salir de la vista "Doctores". */
+  function abrirModalDoctor(id) {
+    const doctor = porId(state.doctores, Number(id));
+    if (!doctor) return;
+    state.doctorEditId = doctor.id;
+    const titulo = document.getElementById("modal-doctor-titulo");
+    if (titulo) titulo.textContent = `Editar ${doctor.nombre}`;
+    document.getElementById("doc-edit-nombre").value = doctor.nombre || "";
+    document.getElementById("doc-edit-especialidad").value = doctor.especialidad || "";
+    document.getElementById("doc-edit-activo").checked = Boolean(doctor.activo);
+    ocultarAviso("doctor-error");
+    mostrarModal("modal-doctor");
+  }
+
+  function cerrarModalDoctor() {
+    state.doctorEditId = null;
+    ocultarModal("modal-doctor");
+  }
+
+  /* PUT /doctores/{id}: reemplaza nombre, especialidad y estado del profesional. */
+  async function guardarEdicionDoctor(ev) {
+    ev.preventDefault();
+    if (!state.doctorEditId) return;
+    const btn = document.getElementById("modal-doctor-save");
+    const payload = {
+      nombre: document.getElementById("doc-edit-nombre").value.trim(),
+      especialidad: document.getElementById("doc-edit-especialidad").value.trim(),
+      activo: document.getElementById("doc-edit-activo").checked,
+    };
+    try {
+      bloquear(btn, true);
+      const doctor = await api(`/doctores/${state.doctorEditId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      cerrarModalDoctor();
+      toast("exito", "Doctor actualizado", `${doctor.nombre} · ${doctor.especialidad}`);
+      await cargarTodo();
+    } catch (err) {
+      mostrarAviso("doctor-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* DELETE /doctores/{id} es una baja lógica (``activo = false``) y PATCH la
+     revierte. Los turnos ya agendados se conservan: el profesional deja de
+     ofrecerse en las agendas pero su historial queda intacto. */
+  async function cambiarEstadoDoctor(id, activo) {
+    const doctor = porId(state.doctores, Number(id));
+    if (!doctor) return;
+    try {
+      if (activo) {
+        await api(`/doctores/${doctor.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ activo: true }),
+        });
+      } else {
+        await api(`/doctores/${doctor.id}`, { method: "DELETE" });
+      }
+      toast(
+        "exito",
+        `Doctor ${activo ? "reactivado" : "dado de baja"}`,
+        `${doctor.nombre} · ${doctor.especialidad}`
+      );
+      await cargarTodo();
+    } catch (err) {
+      toast("error", `No se pudo ${activo ? "reactivar" : "dar de baja"} al doctor`, err.message);
+    }
+  }
+
+  /* --------------------- Obras sociales (alta y edición) ----------------- */
+  /* El modal sirve para las dos operaciones: ``state.obraSocialEditId`` guarda el
+     id en edición (``null`` = cobertura nueva). */
+  function abrirModalObraSocial(id) {
+    const obra = id ? obraSocialPorId(id) : null;
+    state.obraSocialEditId = obra ? obra.id : null;
+    const titulo = document.getElementById("modal-os-titulo");
+    if (titulo) titulo.textContent = obra ? `Editar ${obra.nombre}` : "Nueva obra social";
+    document.getElementById("os-nombre").value = obra ? obra.nombre : "";
+    document.getElementById("os-codigo").value = obra && obra.codigo ? obra.codigo : "";
+    document.getElementById("os-activa").checked = obra ? Boolean(obra.activa) : true;
+    ocultarAviso("os-error");
+    mostrarModal("modal-obra-social");
+  }
+
+  function cerrarModalObraSocial() {
+    state.obraSocialEditId = null;
+    const form = document.getElementById("form-obra-social");
+    if (form) form.reset();
+    ocultarModal("modal-obra-social");
+  }
+
+  /* POST /obras-sociales (alta) o PUT /{id} (reemplazo). Si el nombre ya existe
+     el backend responde 409 y el mensaje se muestra dentro del modal. */
+  async function guardarObraSocial(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById("modal-os-save");
+    const editando = Boolean(state.obraSocialEditId);
+    const payload = {
+      nombre: document.getElementById("os-nombre").value.trim(),
+      codigo: document.getElementById("os-codigo").value.trim() || null,
+      activa: document.getElementById("os-activa").checked,
+    };
+    try {
+      bloquear(btn, true);
+      const obra = await api(rutaObraSocial(state.obraSocialEditId), {
+        method: editando ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      });
+      cerrarModalObraSocial();
+      toast("exito", editando ? "Obra social actualizada" : "Obra social creada", obra.nombre);
+      // Recarga el panel completo: cargarTodo → cargarSelectores rearma el
+      // desplegable de coberturas del formulario de pacientes.
+      await cargarTodo();
+    } catch (err) {
+      mostrarAviso("os-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* DELETE /obras-sociales/{id} da de baja la cobertura y PATCH la reactiva. Los
+     pacientes que la tenían conservan el vínculo: la fila nunca se borra. */
+  async function cambiarEstadoObraSocial(id, activa) {
+    const obra = obraSocialPorId(id);
+    if (!obra) return;
+    try {
+      if (activa) {
+        await api(rutaObraSocial(obra.id), {
+          method: "PATCH",
+          body: JSON.stringify({ activa: true }),
+        });
+      } else {
+        await api(rutaObraSocial(obra.id), { method: "DELETE" });
+      }
+      toast("exito", `Obra social ${activa ? "reactivada" : "desactivada"}`, obra.nombre);
+      await cargarTodo();
+    } catch (err) {
+      toast(
+        "error",
+        `No se pudo ${activa ? "reactivar" : "desactivar"} la obra social`,
+        err.message
+      );
+    }
+  }
+
   /* ------------------- Formulario de pacientes (alta/edición) ------------- */
   /* Un único formulario cumple las dos funciones: `state.pacienteEditId` guarda
      el id del paciente en edición (``null`` = alta). */
+  /* Si la cobertura del paciente fue dada de baja ya no está en el desplegable:
+     se agrega su opción para no borrarla sin querer al guardar otros cambios. */
+  function asegurarOpcionObraSocial(id) {
+    const sel = document.getElementById("pac-obra-social");
+    if (!sel || id === null || id === undefined || id === "") return;
+    const valor = String(id);
+    const existe = Array.prototype.some.call(sel.options, (o) => o.value === valor);
+    if (existe) return;
+    const obra = obraSocialPorId(valor);
+    const opt = document.createElement("option");
+    opt.value = valor;
+    opt.textContent = obra ? `${obra.nombre} (dada de baja)` : `Obra social #${valor}`;
+    sel.appendChild(opt);
+  }
+
   function modoEdicionPaciente(paciente) {
     const titulo = document.getElementById("pac-form-titulo");
     const sub = document.getElementById("pac-form-sub");
@@ -855,7 +1788,10 @@
       document.getElementById("pac-telefono").value = paciente.telefono || "";
       document.getElementById("pac-email").value = paciente.email || "";
       document.getElementById("pac-dni").value = paciente.dni || "";
-      document.getElementById("pac-obra-social").value = paciente.obra_social || "";
+      asegurarOpcionObraSocial(paciente.obra_social_id);
+      document.getElementById("pac-obra-social").value = paciente.obra_social_id
+        ? String(paciente.obra_social_id)
+        : "";
       document.getElementById("pac-numero-afiliado").value = paciente.numero_afiliado || "";
       state.pacienteEditId = paciente.id;
       if (titulo) titulo.textContent = "Editar paciente";
@@ -897,7 +1833,10 @@
       telefono: document.getElementById("pac-telefono").value.trim(),
       email: document.getElementById("pac-email").value.trim() || null,
       dni: document.getElementById("pac-dni").value.trim() || null,
-      obra_social: document.getElementById("pac-obra-social").value.trim() || null,
+      // La cobertura viaja como clave foránea del catálogo; vacío = sin obra social.
+      obra_social_id: document.getElementById("pac-obra-social").value
+        ? Number(document.getElementById("pac-obra-social").value)
+        : null,
       numero_afiliado: document.getElementById("pac-numero-afiliado").value.trim() || null,
     };
 
@@ -1138,7 +2077,8 @@
     const sub = document.getElementById("rec-subtitulo");
     if (sub) sub.textContent = texto;
     // Si la vista activa es la de recordatorios, el encabezado de la página
-    // también refleja la ventana de días elegida.
+    // también refleja la ventana de días elegida (el <h1> ya dice
+    // «Recordatorios pendientes»).
     if (state.vista === "recordatorios") {
       document.getElementById("page-subtitle").textContent = texto;
     }
@@ -1339,10 +2279,40 @@
       if (e.target.id === "modal-turno") cerrarModal();
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") cerrarModal();
+      if (e.key !== "Escape") return;
+      cerrarModal();
+      cerrarModalDoctor();
+      cerrarModalObraSocial();
     });
 
     document.getElementById("form-doctor").addEventListener("submit", crearDoctor);
+    // Gestión de doctores: edición en modal (PUT) y baja/reactivación lógica.
+    document.getElementById("form-doctor-edicion").addEventListener("submit", guardarEdicionDoctor);
+    document.getElementById("modal-doctor-close").addEventListener("click", cerrarModalDoctor);
+    document.getElementById("modal-doctor-cancel").addEventListener("click", cerrarModalDoctor);
+    document.getElementById("modal-doctor").addEventListener("click", function (e) {
+      if (e.target.id === "modal-doctor") cerrarModalDoctor();
+    });
+
+    // Catálogo de obras sociales: alta/edición en modal y filtro local.
+    document.getElementById("btn-nueva-obra-social").addEventListener("click", function () {
+      abrirModalObraSocial(null);
+    });
+    document.getElementById("form-obra-social").addEventListener("submit", guardarObraSocial);
+    document.getElementById("modal-os-close").addEventListener("click", cerrarModalObraSocial);
+    document.getElementById("modal-os-cancel").addEventListener("click", cerrarModalObraSocial);
+    document.getElementById("modal-obra-social").addEventListener("click", function (e) {
+      if (e.target.id === "modal-obra-social") cerrarModalObraSocial();
+    });
+    const chkInactivas = document.getElementById("os-inactivas");
+    if (chkInactivas) {
+      chkInactivas.checked = state.osMostrarInactivas;
+      chkInactivas.addEventListener("change", function (e) {
+        state.osMostrarInactivas = e.target.checked;
+        renderObrasSociales();
+      });
+    }
+
     document.getElementById("form-paciente").addEventListener("submit", crearPaciente);
     document.getElementById("pac-cancelar-edicion").addEventListener("click", cancelarEdicionPaciente);
     document.getElementById("form-turno").addEventListener("submit", crearTurno);
@@ -1371,6 +2341,8 @@
       selDisp.addEventListener("change", function (e) {
         state.dispDoctor = e.target.value;
         renderDisponibilidad();
+        // Los tramos personalizados son por odontólogo: se redibuja la tarjeta.
+        renderExcepciones();
       });
     }
     const semanaDisp = document.getElementById("disp-semana");
@@ -1428,6 +2400,39 @@
       fechaDisp.addEventListener("change", probarBloquesDisponibilidad);
     }
 
+    // Días personalizados (excepciones por fecha): fecha, alta y baja de tramos,
+    // copiar la agenda semanal, bloquear el día completo y volver a la semana.
+    const fechaExcep = document.getElementById("excep-fecha");
+    if (fechaExcep) {
+      if (!fechaExcep.value) fechaExcep.value = hoyISO();
+      fechaExcep.addEventListener("change", renderExcepciones);
+    }
+    const btnExcepVer = document.getElementById("excep-ver");
+    if (btnExcepVer) btnExcepVer.addEventListener("click", verDiaPersonalizado);
+    const formExcep = document.getElementById("excep-form");
+    if (formExcep) formExcep.addEventListener("submit", agregarExcepcion);
+    const listaExcep = document.getElementById("excep-lista");
+    if (listaExcep) {
+      listaExcep.addEventListener("click", function (e) {
+        const btn = e.target.closest("[data-borrar-excepcion]");
+        if (!btn) return;
+        // El chip guarda el id REAL de la excepción (el que devolvió la API en el
+        // alta), junto con el odontólogo y la fecha a los que pertenece.
+        borrarExcepcion(
+          btn.dataset.excepcionDoctor,
+          btn.dataset.borrarExcepcion,
+          btn.dataset.excepcionFecha,
+          btn
+        );
+      });
+    }
+    const btnExcepCopiar = document.getElementById("excep-copiar");
+    if (btnExcepCopiar) btnExcepCopiar.addEventListener("click", copiarAgendaSemanal);
+    const btnExcepBloquear = document.getElementById("excep-bloquear");
+    if (btnExcepBloquear) btnExcepBloquear.addEventListener("click", bloquearDiaCompleto);
+    const btnExcepVolver = document.getElementById("excep-volver");
+    if (btnExcepVolver) btnExcepVolver.addEventListener("click", volverAAgendaSemanal);
+
     document.getElementById("agenda-prev").addEventListener("click", function () {
       state.agendaFecha = sumarDiasISO(state.agendaFecha, -1);
       renderAgenda();
@@ -1453,6 +2458,39 @@
     document.addEventListener("click", function (e) {
       const btn = e.target.closest("[data-editar-paciente]");
       if (btn) editarPaciente(btn.dataset.editarPaciente);
+    });
+
+    // Delegación: acciones de la tabla de doctores (las filas se redibujan en
+    // cada carga, así que se escucha en el documento y no por botón).
+    document.addEventListener("click", function (e) {
+      const editar = e.target.closest("[data-editar-doctor]");
+      if (editar) {
+        abrirModalDoctor(editar.dataset.editarDoctor);
+        return;
+      }
+      const baja = e.target.closest("[data-baja-doctor]");
+      if (baja) {
+        cambiarEstadoDoctor(baja.dataset.bajaDoctor, false);
+        return;
+      }
+      const reactivar = e.target.closest("[data-reactivar-doctor]");
+      if (reactivar) cambiarEstadoDoctor(reactivar.dataset.reactivarDoctor, true);
+    });
+
+    // Delegación: acciones del catálogo de obras sociales.
+    document.addEventListener("click", function (e) {
+      const editar = e.target.closest("[data-editar-os]");
+      if (editar) {
+        abrirModalObraSocial(editar.dataset.editarOs);
+        return;
+      }
+      const baja = e.target.closest("[data-baja-os]");
+      if (baja) {
+        cambiarEstadoObraSocial(baja.dataset.bajaOs, false);
+        return;
+      }
+      const reactivar = e.target.closest("[data-reactivar-os]");
+      if (reactivar) cambiarEstadoObraSocial(reactivar.dataset.reactivarOs, true);
     });
 
     // Delegación: botones "Responder: Confirma/Cancela" de las tarjetas de turno.
@@ -1519,6 +2557,13 @@
     renderAgenda,
     renderRecordatorios,
     cargarRecordatorios,
+    // Doctores y obras sociales (catálogo de coberturas)
+    doctoresActivos,
+    obrasSocialesActivas,
+    obraSocialPorId,
+    nombreObraSocial,
+    renderObrasSociales,
+    cargarObrasSocialesSelect,
     // Disponibilidad (agenda semanal por odontólogo)
     cargarDisponibilidad,
     renderDisponibilidad,
@@ -1526,6 +2571,13 @@
     probarBloquesDisponibilidad,
     DIAS_SEMANA,
     PLANTILLA_SEMANAL,
+    // Días personalizados (excepciones por fecha) que usan app.js y calendar.js
+    renderExcepciones,
+    excepcionesDeFecha,
+    cargarExcepcionesDeFecha,
+    cargarExcepcionesDeRango,
+    rangosVigentesDeFecha,
+    diaSemanaDe,
   };
 })();
 

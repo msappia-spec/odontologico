@@ -1,5 +1,6 @@
 """Endpoints de ``Turno``."""
 
+from datetime import date as Date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
@@ -29,17 +30,40 @@ def crear_turno(payload: TurnoCreate, db: Session = Depends(get_db)) -> Turno:
     return turno_service.crear_turno(db, payload)
 
 
-@router.get("", response_model=List[TurnoRead], summary="Listar turnos")
+@router.get(
+    "",
+    response_model=List[TurnoRead],
+    summary="Listar turnos",
+    description=(
+        "Lista los turnos ordenados por fecha/hora de inicio. Los filtros son "
+        "acumulativos y opcionales: profesional (``doctor_id``), paciente "
+        "(``paciente_id``) y **rango de fechas** (``fecha_desde``/``fecha_hasta``, "
+        "formato ``AAAA-MM-DD``), que incluye los turnos solapados con esos días. "
+        "Un rango invertido responde **422**."
+    ),
+)
 def listar_turnos(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     doctor_id: Optional[int] = Query(None, gt=0),
     paciente_id: Optional[int] = Query(None, gt=0),
+    fecha_desde: Optional[Date] = Query(
+        None, description="Primer día del rango a consultar (AAAA-MM-DD)."
+    ),
+    fecha_hasta: Optional[Date] = Query(
+        None, description="Último día del rango a consultar (AAAA-MM-DD)."
+    ),
     db: Session = Depends(get_db),
 ) -> List[Turno]:
     return list(
         turno_service.listar_turnos(
-            db, skip=skip, limit=limit, doctor_id=doctor_id, paciente_id=paciente_id
+            db,
+            skip=skip,
+            limit=limit,
+            doctor_id=doctor_id,
+            paciente_id=paciente_id,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
         )
     )
 

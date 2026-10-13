@@ -119,6 +119,57 @@
     if (!A || typeof A.rangosDe !== "function") return [];
     return A.rangosDe(doctorId) || [];
   }
+
+  /* -------------------- Excepciones por fecha (un día) ------------------- */
+  /* Un día concreto puede tener sus propios tramos (tabla
+     `disponibilidad_especifica`, GET /doctores/{id}/disponibilidad-especifica):
+     si existen, mandan sobre la agenda semanal. app.js los cachea y desde acá
+     sólo se leen. */
+  function excepcionesDe(doctorId, iso) {
+    const A = app();
+    if (!A || typeof A.excepcionesDeFecha !== "function") return [];
+    return A.excepcionesDeFecha(doctorId, iso) || [];
+  }
+
+  /* Rangos que rigen una fecha concreta: los propios del día si los tiene y, si
+     no, la agenda semanal del día de la semana. app.js aplica la misma regla que
+     el backend (HABILITADO menos BLOQUEADO), así la grilla nunca ofrece un bloque
+     que el servidor vaya a rechazar. */
+  function rangosDeFecha(doctorId, iso) {
+    const A = app();
+    if (A && typeof A.rangosVigentesDeFecha === "function") {
+      return A.rangosVigentesDeFecha(doctorId, iso) || [];
+    }
+    const dia = fechaDe(iso).getDay();
+    return rangosDe(doctorId).filter((r) => Number(r.dia_semana) === dia);
+  }
+
+  /* ¿Ese odontólogo tiene tramos cargados a mano para esa fecha? */
+  function esDiaPersonalizado(doctorId, iso) {
+    return excepcionesDe(doctorId, iso).length > 0;
+  }
+
+  /* ¿Alguno de los odontólogos que se están mostrando personalizó esa fecha? Se
+     usa para marcar la celda del mes y avisar en el panel del día. */
+  function diaPersonalizado(fecha) {
+    if (!dispCargada()) return false;
+    const iso = isoDe(fecha);
+    return candidatosDelDia().some((d) => esDiaPersonalizado(d.id, iso));
+  }
+
+  /* El mes visible puede caer fuera de la ventana de excepciones que app.js trae
+     al arrancar: se piden las del rango completo (una sola vez por rango; app.js
+     recuerda qué ya pidió) y, cuando llegan, el evento `odonto:disponibilidad`
+     vuelve a dibujar grilla, panel del día y tarjeta de disponibilidad. */
+  function pedirExcepcionesDelRango(desde, hasta) {
+    const A = app();
+    if (!dispCargada() || !A || typeof A.cargarExcepcionesDeRango !== "function") return;
+    A.cargarExcepcionesDeRango(desde, hasta)
+      .then(function (nuevos) {
+        if (nuevos) document.dispatchEvent(new CustomEvent("odonto:disponibilidad"));
+      })
+      .catch(function () { /* silencioso: la grilla ya se dibujó */ });
+  }
   /* Doctores que el calendario puede ofrecer: los activos y, si la leyenda tiene
      un filtro activo, únicamente ese profesional. */
   function candidatosDelDia() {
@@ -272,12 +323,19 @@
     if (esOtroMes) clases.push("otro-mes");
     if (iso === isoDe(new Date())) clases.push("hoy");
     if (iso === fechaSeleccionada()) clases.push("seleccionado");
+    const personalizado = diaPersonalizado(fecha);
+    if (personalizado) clases.push("personalizado");
     if (!hayAgenda(fecha)) clases.push("sin-agenda");
 
     let html =
       `<div class="${clases.join(" ")}" data-dia="${iso}" role="button" tabindex="0" ` +
-      `aria-label="${A.esc(A.fechaLarga(iso))}: ${activos} turno${activos === 1 ? "" : "s"}">` +
+      `aria-label="${A.esc(A.fechaLarga(iso))}: ${activos} turno${activos === 1 ? "" : "s"}` +
+      `${personalizado ? " (horario personalizado)" : ""}">` +
       `<div class="cal-dia-top"><span class="cal-dia-num">${fecha.getDate()}</span>` +
+      (personalizado
+        ? `<span class="cal-dia-custom" title="Este día tiene tramos propios: se usa ese horario ` +
+          `en lugar de la agenda semanal">Personalizado</span>`
+        : "") +
       (activos ? `<span class="cal-dia-conteo">${activos}</span>` : "") +
       `</div>`;
 
@@ -358,6 +416,11 @@
     const inicio = moverDias(primero, -offset);
     const mapa = mapaDelMes(isoDe(inicio), isoDe(moverDias(inicio, celdas - 1)));
 
+    /* Las excepciones por fecha pueden caer fuera de la ventana que app.js trae al
+       arrancar (el mes visible se mueve): se piden para las 5 o 6 semanas que
+       muestra la grilla y, cuando llegan, todo se redibuja con `render`. */
+    pedirExcepcionesDelRango(isoDe(inicio), isoDe(moverDias(inicio, celdas - 1)));
+
     let html = "";
     for (let i = 0; i < celdas; i += 1) {
       const fecha = moverDias(inicio, i);
@@ -395,13 +458,14 @@
   /* Mapa minuto a minuto (1440) con la cobertura de los rangos configurados de
      cada odontólogo para ese día. Permite unir las agendas de varios
      profesionales y saber exactamente quién cubre cada bloque. */
-  function coberturaDelDia(dia) {
+  function coberturaDelDia(iso) {
     const cobertura = new Array(1440).fill(false);
     const porDoctor = {};
     candidatosDelDia().forEach(function (d) {
       const minutos = new Set();
-      rangosDe(d.id).forEach(function (rango) {
-        if (Number(rango.dia_semana) !== dia) return;
+      // Los tramos del día ya vienen resueltos: excepciones propias de la fecha
+      // o, si no hay ninguna, la agenda semanal del día de la semana.
+      rangosDeFecha(d.id, iso).forEach(function (rango) {
         const desde = Math.max(0, aMinutos(rango.hora_inicio));
         const hasta = Math.min(1440, aMinutos(rango.hora_fin));
         for (let m = desde; m < hasta; m += 1) {
@@ -418,7 +482,7 @@
      tramos contiguos y se corta cada SLOT_MIN minutos. Un bloque sólo se ofrece
      si cae entero dentro de la agenda de al menos un odontólogo. */
   function slotsDelDia(iso) {
-    const calculo = coberturaDelDia(fechaDe(iso).getDay());
+    const calculo = coberturaDelDia(iso);
     const cobertura = calculo.cobertura;
     const slots = [];
     let m = 0;
@@ -444,15 +508,14 @@
   }
 
   /* ¿Algún odontólogo del filtro atiende ese día? Se usa para marcar las celdas
-     "sin agenda" del mes. Mientras la disponibilidad no llegó del backend no se
-     marca nada, para no parpadear en el primer render. */
+     "sin agenda" del mes: un día con excepciones cuenta sólo si le quedan tramos
+     (bloquear el día completo deja la celda sin agenda). Mientras la
+     disponibilidad no llegó del backend no se marca nada, para no parpadear en el
+     primer render. */
   function hayAgenda(fecha) {
     if (!dispCargada()) return true;
-    return candidatosDelDia().some(function (d) {
-      return rangosDe(d.id).some(function (r) {
-        return Number(r.dia_semana) === fecha.getDay();
-      });
-    });
+    const iso = isoDe(fecha);
+    return candidatosDelDia().some((d) => rangosDeFecha(d.id, iso).length > 0);
   }
 
   /* Devuelve los minutos del día del turno, o null si no cae en ese día. */
@@ -482,6 +545,19 @@
     // Mismo filtro que la grilla: lo fijan los chips de la leyenda.
     const candidatos = candidatosDelDia();
 
+    /* El día puede tener tramos propios (excepciones por fecha): ahí la agenda
+       semanal no se usa y conviene decirlo, porque el panel puede mostrar más o
+       menos bloques que un día equivalente de la semana. */
+    const personalizados = candidatos.filter((d) => esDiaPersonalizado(d.id, iso));
+    const origen = $id("agenda-origen");
+    if (origen) {
+      origen.textContent = personalizados.length
+        ? `Día con horario personalizado para ${personalizados
+            .map((d) => d.nombre)
+            .join(", ")}: ese día se usa el horario cargado a mano, no la agenda semanal.`
+        : "";
+    }
+
     /* La disponibilidad se pide a la API cuando arranca el panel; hasta que llega
        no se puede afirmar que no haya horarios. */
     if (!dispCargada()) {
@@ -508,7 +584,10 @@
     if (!slots.length) {
       cont.innerHTML = A.vacio(
         "Ningún odontólogo atiende este día",
-        "Los rangos horarios se configuran en la pestaña «Disponibilidad»."
+        personalizados.length
+          ? "Ese día quedó bloqueado por sus tramos personalizados: revisá la tarjeta " +
+            "«Gestionar un día específico», en la pestaña «Disponibilidad»."
+          : "Los rangos horarios se configuran en la pestaña «Disponibilidad»."
       );
       if (resumen) resumen.textContent = "0";
       return;
@@ -874,6 +953,12 @@
     // Disponibilidad configurada (la agenda semanal vive en el backend; app.js
     // la cachea y este módulo sólo la lee para armar los bloques del día).
     rangosDe: rangosDe,
+    // Excepciones por fecha: los tramos propios de un día reemplazan a la agenda
+    // semanal mientras existan (app.js resuelve la precedencia).
+    rangosDeFecha: rangosDeFecha,
+    excepcionesDe: excepcionesDe,
+    esDiaPersonalizado: esDiaPersonalizado,
+    diaPersonalizado: diaPersonalizado,
     dispCargada: dispCargada,
     hayAgenda: hayAgenda,
     slotsDelDia: slotsDelDia,

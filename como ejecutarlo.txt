@@ -1,0 +1,50 @@
+Ya está andando. Esto es lo que tenés que poner:
+
+## 🔗 La URL para entrar
+
+**Desde el celular** (conectado a la misma Wi‑Fi que la PC) — probado ahora mismo, responde **200**:
+
+```
+http://192.168.1.123:8000/medico
+```
+
+> La IP de la PC cambia si te conectás a otra red. Para averiguarla, en PowerShell:
+> `(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' }).IPAddress`
+> (usá la de la interfaz **Wi‑Fi**; las de Ethernet/VPN no sirven desde el teléfono).
+
+**Desde la PC** (para ver cómo queda el diseño móvil): `http://127.0.0.1:8000/medico`
+→ o simplemente tocá el botón **“Vista móvil (odontólogos)”** en el menú lateral del panel de la secretaría.
+
+Un detalle: dejé el servidor **ya levantado y abierto a la red** (`--host 0.0.0.0`, puerto 8000) y **reiniciado con el backend nuevo** (filtro de fechas), así que podés probarlo ahora directo desde el teléfono.
+
+## ⚠️ Si el celular no carga la página
+
+La red Wi‑Fi está marcada como **Pública** en Windows y las reglas de firewall que existen son del otro Python (no del `.venv`), así que puede bloquear la conexión entrante. Para destrabarlo, abrí **PowerShell como Administrador** y ejecutá una sola vez:
+
+```powershell
+netsh advfirewall firewall add rule name="Odontologico vista movil 8000" dir=in action=allow protocol=TCP localport=8000
+```
+
+(Yo lo intenté pero no tengo permisos de elevación: el sistema respondió *“La operación solicitada requiere elevación”*.)
+
+## 🔄 Cuando reinicies la PC / el servidor
+
+El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistema\Odontologico`):
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+> Tip: en el celular, una vez abierta la página usá *“Agregar a pantalla de inicio”* (Safari: Compartir → Agregar a inicio / Chrome: menú ⋮ → Agregar a pantalla de inicio). Como la vista ya tiene `theme-color`, `viewport-fit=cover` y objetivos táctiles de 44 px, se abre a pantalla completa y se ve como una app.
+
+## 📝 Qué vas a ver al entrar
+
+1. **Pantalla de selección** con los 3 odontólogos reales de tu base: **Cecilia Fransioci, Fabiana Fransioci y Florencia Uboldi** (cada tarjeta muestra especialidad y cuántos turnos tiene hoy).
+2. Al tocar uno, entra a **su agenda** y esa elección **queda recordada**: la próxima vez va directo a la agenda.
+3. **Navegador de fechas** (arriba de la lista): flechas ◀ ▶ para el día anterior/siguiente, botones para moverse de semana, la **tira de los 7 días** (con un punto en los días que tienen turnos), el botón **Hoy** y un **selector de fecha**. Se puede consultar *cualquier* día del calendario, no sólo hoy; el filtrado lo hace el backend (`GET /turnos?fecha_desde=&fecha_hasta=`).
+4. Tocás un **horario libre** → se abre la hoja con el **buscador de fichas** (por nombre, DNI o teléfono): elegís un paciente **ya registrado** o cargás uno **nuevo** (Nombre, Teléfono, DNI) → *Agendar turno*. Ahí mismo podés ajustar **fecha, hora y duración**, y tocar los chips de *Horarios libres de ese día*.
+5. Tocás el **lápiz** ✏️ de un turno → *Editar turno*: cambiás **paciente, día, hora, duración y estado** (Pendiente / Confirmado / Cancelado), o lo **reprogramás** para otro día → *Guardar cambios* (usa `PATCH /turnos/{id}`; el backend revalida solapamientos y horarios).
+6. Tocás el **cesto** 🗑️ de un turno → confirmar → pasa a **CANCELADO** (gris, tachado) y el horario vuelve a ofrecerse como disponible.
+7. Todo lo que agendás, reprogramás o cancelás acá aparece al instante en el **Panel Principal** de la secretaría (y a la inversa).
+
+> ⚙️ Si tocás el código **del backend** (archivos `.py`), hay que **reiniciar** uvicorn para que tome los cambios. El **HTML/CSS/JS** de la vista móvil se recarga solo con F5 (los sirve desde disco).
