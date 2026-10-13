@@ -1,0 +1,749 @@
+/* ==========================================================================
+   Sistema Odontológico - Dashboard de la Secretaría
+   Estilos complementarios a Tailwind CSS (CDN).
+   ========================================================================== */
+
+:root {
+  --brand-50:  #eefbf8;
+  --brand-100: #d3f4ee;
+  --brand-200: #a9e9df;
+  --brand-300: #74d7c9;
+  --brand-400: #3fbfae;
+  --brand-500: #17a394;
+  --brand-600: #0d8578;
+  --brand-700: #106a61;
+  --brand-800: #12554f;
+  --brand-900: #134742;
+  --ink-900:   #0f1c24;
+  --ink-700:   #33454f;
+}
+
+* { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+body {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(1200px 600px at 100% -10%, #e6f7f4 0%, transparent 55%),
+    radial-gradient(900px 500px at -10% 110%, #eef2ff 0%, transparent 50%),
+    #f6f8fb;
+  color: var(--ink-900);
+}
+
+/* ------------------------------ Scrollbars ------------------------------ */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; background-clip: content-box; }
+
+/* ------------------------------ Componentes ----------------------------- */
+.card {
+  background: #ffffff;
+  border: 1px solid #e8edf3;
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 8px 24px -12px rgba(16, 24, 40, .12);
+}
+
+.card-hover { transition: box-shadow .25s ease, transform .25s ease; }
+.card-hover:hover {
+  box-shadow: 0 4px 6px rgba(16, 24, 40, .04), 0 20px 40px -20px rgba(13, 133, 120, .35);
+  transform: translateY(-2px);
+}
+
+/* Inputs estéticos (no "cajas negras") */
+.field-label {
+  display: block;
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: .35rem;
+}
+
+.field {
+  width: 100%;
+  border-radius: .7rem;
+  border: 1.5px solid #e2e8f0;
+  background: #f8fafc;
+  padding: .62rem .85rem;
+  font-size: .925rem;
+  color: var(--ink-900);
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+  outline: none;
+}
+.field::placeholder { color: #9aa8b8; }
+.field:hover { border-color: #cbd5e1; }
+.field:focus {
+  background: #fff;
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 4px rgba(23, 163, 148, .14);
+}
+.field:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+
+select.field {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right .7rem center;
+  padding-right: 2.2rem;
+}
+
+/* Botones */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  border-radius: .7rem;
+  font-weight: 600;
+  font-size: .9rem;
+  padding: .62rem 1.05rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .2s ease, background .2s ease, color .2s ease;
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+
+.btn-primary {
+  background: linear-gradient(180deg, var(--brand-500) 0%, var(--brand-600) 100%);
+  color: #fff;
+  box-shadow: 0 6px 16px -6px rgba(13, 133, 120, .65);
+}
+.btn-primary:hover:not(:disabled) { box-shadow: 0 10px 22px -8px rgba(13, 133, 120, .75); }
+
+.btn-ghost {
+  background: #fff;
+  border-color: #e2e8f0;
+  color: var(--ink-700);
+}
+.btn-ghost:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; }
+
+.btn-soft {
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border-color: var(--brand-100);
+}
+.btn-soft:hover:not(:disabled) { background: var(--brand-100); }
+
+.btn-danger-soft {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fee2e2;
+}
+.btn-danger-soft:hover:not(:disabled) { background: #fee2e2; }
+
+.btn-sm { padding: .4rem .7rem; font-size: .8rem; border-radius: .6rem; }
+
+/* Navegación lateral */
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .68rem .85rem;
+  border-radius: .75rem;
+  font-weight: 500;
+  font-size: .925rem;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+  user-select: none;
+}
+.nav-link:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+.nav-link.active {
+  background: linear-gradient(90deg, rgba(23, 163, 148, .28), rgba(23, 163, 148, .06));
+  color: #fff;
+  box-shadow: inset 3px 0 0 0 var(--brand-400);
+}
+.nav-link.active svg { color: var(--brand-300); }
+
+/* Badges de estado */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .38rem;
+  padding: .22rem .6rem;
+  border-radius: 999px;
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .01em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.badge-amber  { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.badge-green  { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.badge-red    { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.badge-slate  { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+.badge-brand  { background: var(--brand-50); color: var(--brand-700); border-color: var(--brand-100); }
+
+/* Tarjeta de turno (timeline) */
+.turno-row {
+  display: flex;
+  gap: 1rem;
+  padding: .95rem 1.1rem;
+  border-radius: .9rem;
+  border: 1px solid #e8edf3;
+  background: #fff;
+  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+.turno-row:hover {
+  border-color: var(--brand-200);
+  box-shadow: 0 12px 28px -20px rgba(13, 133, 120, .55);
+  transform: translateX(2px);
+}
+.turno-hora {
+  min-width: 62px;
+  text-align: center;
+  border-right: 1px dashed #e2e8f0;
+  padding-right: .9rem;
+}
+.turno-hora .h { font-size: 1.05rem; font-weight: 700; color: var(--ink-900); }
+.turno-hora .d { font-size: .7rem; color: #94a3b8; }
+
+/* Estado del turno en la tarjeta: el CONFIRMADO se pinta de verde con prioridad
+   sobre el color del odontólogo, el CANCELADO queda en gris sutil y el
+   PENDIENTE conserva el color del profesional (app.js lo inyecta en línea).
+   Las clases de Tailwind (bg-green-500 / text-white / bg-slate-200) viajan en
+   el marcado y estas reglas fijan el resultado exacto del bloque. */
+.turno-row.turno-confirmado { border-color: #a7f3d0; }
+.turno-row.turno-confirmado:hover {
+  border-color: #6ee7b7;
+  box-shadow: 0 12px 28px -20px rgba(16, 185, 129, .6);
+}
+.turno-hora.hora-confirmada .h { color: #fff; }
+.turno-hora.hora-confirmada .d { color: rgba(255, 255, 255, .85); }
+.turno-row.turno-cancelado { background: #fbfcfd; opacity: .75; }
+.turno-row.turno-cancelado:hover { opacity: 1; }
+.turno-hora.hora-cancelada .h { color: #64748b; }
+.turno-hora.hora-cancelada .d { color: #94a3b8; }
+
+/* Recordatorios por WhatsApp (enlaces Click-to-Chat) */
+.rec-row { align-items: center; flex-wrap: wrap; }
+.rec-row.enviando { opacity: .55; pointer-events: none; }
+.rec-acciones {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .35rem;
+  flex: none;
+}
+.btn-wa {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .55rem 1rem;
+  border-radius: .7rem;
+  font-weight: 700;
+  font-size: .84rem;
+  color: #fff;
+  white-space: nowrap;
+  background: linear-gradient(180deg, #25d366 0%, #12a75a 100%);
+  box-shadow: 0 8px 18px -8px rgba(18, 140, 126, .8);
+  transition: transform .12s ease, box-shadow .2s ease, filter .18s ease;
+}
+.btn-wa:hover { filter: brightness(1.06); box-shadow: 0 12px 24px -10px rgba(18, 140, 126, .9); }
+.btn-wa:active { transform: translateY(1px); }
+.btn-wa-off {
+  background: #e2e8f0;
+  color: #64748b;
+  font-weight: 600;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.rec-mensaje {
+  margin-top: .45rem;
+  padding-left: .55rem;
+  border-left: 2px solid #e2e8f0;
+  font-size: .74rem;
+  font-style: italic;
+  color: #7c8b9b;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Contador de recordatorios pendientes (navegación y encabezado) */
+.nav-badge {
+  min-width: 1.35rem;
+  padding: .1rem .42rem;
+  border-radius: 999px;
+  background: var(--brand-500);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+}
+.nav-link:not(.active) .nav-badge { background: rgba(255, 255, 255, .22); color: #e2e8f0; }
+
+/* Animaciones */
+@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+@keyframes popIn {
+  0%   { opacity: 0; transform: scale(.94) translateY(8px) }
+  100% { opacity: 1; transform: scale(1) translateY(0) }
+}
+@keyframes shimmer { 100% { transform: translateX(100%) } }
+
+.anim-fade  { animation: fadeIn .3s ease both; }
+.anim-up    { animation: slideUp .35s cubic-bezier(.22,1,.36,1) both; }
+.anim-pop   { animation: popIn .28s cubic-bezier(.22,1,.36,1) both; }
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #eef2f6;
+  border-radius: .6rem;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.7), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 28, 36, .55);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* Toast */
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  min-width: 280px;
+  max-width: 380px;
+  padding: .85rem 1rem;
+  border-radius: .85rem;
+  background: #fff;
+  border: 1px solid #e8edf3;
+  box-shadow: 0 18px 40px -18px rgba(16, 24, 40, .35);
+  animation: slideUp .3s cubic-bezier(.22,1,.36,1) both;
+}
+.toast.leaving { opacity: 0; transform: translateY(-6px); transition: all .25s ease; }
+
+/* Tablas */
+.data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.data-table th {
+  text-align: left;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #7c8b9b;
+  font-weight: 700;
+  padding: .6rem .9rem;
+  border-bottom: 1px solid #eef2f6;
+}
+.data-table td {
+  padding: .78rem .9rem;
+  border-bottom: 1px solid #f4f7fa;
+  font-size: .9rem;
+  color: var(--ink-700);
+}
+.data-table tbody tr { transition: background .15s ease; }
+.data-table tbody tr:hover { background: #fafcfe; }
+.data-table tbody tr:last-child td { border-bottom: none; }
+
+/* Avatar con iniciales */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: .85rem;
+  color: #fff;
+  flex: none;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .6rem;
+  padding: 2.6rem 1rem;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.hide { display: none !important; }
+
+@media (max-width: 1023px) {
+  #sidebar {
+    position: fixed;
+    z-index: 40;
+    height: 100%;
+    transform: translateX(-100%);
+    transition: transform .28s ease;
+  }
+  #sidebar.open { transform: translateX(0); }
+}
+
+/* ==========================================================================
+   Calendario mensual (vista Calendario) y panel de disponibilidad del día
+   ========================================================================== */
+
+/* ------------------------------- Grilla -------------------------------- */
+.cal-cabecera {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #8494a5;
+  text-align: center;
+  padding: .35rem 0;
+}
+
+.cal-dia {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: .28rem;
+  min-height: 76px;
+  padding: .35rem .4rem .5rem;
+  border: 1px solid #eef2f6;
+  border-radius: .85rem;
+  background: #fff;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, box-shadow .18s ease;
+}
+.cal-dia:hover { background: #fafcfe; border-color: #dbe6f0; }
+.cal-dia.otro-mes { background: #f9fbfd; }
+.cal-dia.otro-mes .cal-dia-num { color: #b8c4d1; }
+.cal-dia.hoy { border-color: var(--brand-300); }
+.cal-dia.seleccionado {
+  background: #f1faf8;
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 2px rgba(23, 163, 148, .16);
+}
+.cal-dia.sin-agenda { background: #fbfcfe; }
+
+.cal-dia-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .25rem;
+}
+.cal-dia-num {
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--ink-900);
+  line-height: 1;
+}
+.cal-dia.hoy .cal-dia-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: var(--brand-500);
+  color: #fff;
+}
+.cal-dia-conteo {
+  font-size: .6rem;
+  font-weight: 700;
+  color: #94a3b8;
+  background: #f1f5f9;
+  border-radius: 999px;
+  padding: .1rem .35rem;
+}
+
+/* Bloques de turno dentro del día */
+.cal-evento {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  width: 100%;
+  padding: .2rem .35rem;
+  border: 0;
+  border-left: 3px solid #94a3b8;
+  border-radius: .4rem;
+  background: #f1f5f9;
+  color: var(--ink-900);
+  font-family: inherit;
+  font-size: .68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  transition: filter .14s ease, transform .12s ease;
+}
+.cal-evento:hover { filter: brightness(.95); transform: translateX(1px); }
+.cal-evento:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
+.cal-evento .cal-evento-hora { font-weight: 700; opacity: .85; flex: none; }
+.cal-evento .cal-evento-nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* CONFIRMADO: verde prioritario, por encima del color del odontólogo. Las
+   clases bg-green-500 / text-white viajan en el marcado (calendar.js) y estas
+   reglas garantizan el contraste del bloque en la grilla. */
+.cal-evento.confirmado {
+  background: #22c55e;
+  color: #fff;
+  border-left-color: #15803d;
+  font-weight: 700;
+}
+.cal-evento.confirmado .cal-evento-hora { opacity: .95; }
+/* CANCELADO: gris sutil (sigue visible, atenuado y tachado). */
+.cal-evento.cancelado {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-left-color: #cbd5e1;
+  opacity: .72;
+}
+.cal-evento.cancelado .cal-evento-nombre { text-decoration: line-through; }
+.cal-evento-mas {
+  font-size: .62rem;
+  font-weight: 700;
+  color: #64748b;
+  background: transparent;
+  border: 0;
+  padding: 0 .2rem;
+  text-align: left;
+  cursor: pointer;
+}
+.cal-evento-mas:hover { color: var(--brand-600); text-decoration: underline; }
+
+@media (min-width: 640px) { .cal-dia { min-height: 94px; } }
+@media (min-width: 1280px) { .cal-dia { min-height: 112px; } }
+
+/* ------------------------------ Tooltip -------------------------------- */
+.cal-tooltip {
+  position: fixed;
+  z-index: 70;
+  width: 292px;
+  max-width: calc(100vw - 1.5rem);
+  padding: .85rem .95rem;
+  border: 1px solid #e2e8f0;
+  border-radius: .9rem;
+  background: #fff;
+  box-shadow: 0 26px 50px -22px rgba(15, 28, 36, .5);
+  pointer-events: none;
+  animation: popIn .16s cubic-bezier(.22, 1, .36, 1) both;
+}
+.cal-tooltip-cab {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding-bottom: .55rem;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: .55rem;
+}
+.cal-tooltip-fila {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  font-size: .76rem;
+  padding: .16rem 0;
+}
+.cal-tooltip-fila dt { color: #8494a5; font-weight: 600; flex: none; }
+.cal-tooltip-fila dd { color: var(--ink-900); font-weight: 600; text-align: right; }
+
+/* ------------------------- Horarios disponibles ------------------------- */
+.cal-slot {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .5rem .65rem;
+  border: 1px solid #e8edf3;
+  border-radius: .7rem;
+  background: #fff;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, transform .12s ease;
+}
+.cal-slot:hover { border-color: var(--brand-400); background: #f4fbf9; transform: translateX(2px); }
+.cal-slot:disabled { opacity: .55; cursor: not-allowed; transform: none; background: #f8fafc; }
+.cal-slot-hora {
+  display: flex;
+  flex-direction: column;
+  min-width: 76px;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--ink-900);
+  line-height: 1.15;
+}
+.cal-slot-hora small { font-size: .62rem; font-weight: 600; color: #94a3b8; }
+.cal-slot-docs { display: flex; flex-wrap: wrap; gap: .25rem; margin-left: auto; justify-content: flex-end; }
+.cal-dot {
+  display: inline-block;
+  width: .6rem;
+  height: .6rem;
+  border-radius: 999px;
+  flex: none;
+}
+
+/* ---------------------- Leyenda / filtro de odontólogos ----------------- */
+.cal-filtro-label {
+  font-size: .64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: #94a3b8;
+  margin-right: .1rem;
+}
+
+.cal-leyenda-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .32rem .6rem;
+  border: 1px solid #e8edf3;
+  border-radius: 999px;
+  background: #fff;
+  font-size: .74rem;
+  font-weight: 600;
+  color: var(--ink-700);
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, box-shadow .16s ease, transform .12s ease;
+}
+.cal-leyenda-chip:hover { border-color: #cbd5e1; background: #fafcfe; transform: translateY(-1px); }
+.cal-leyenda-chip:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
+.cal-leyenda-chip .cal-leyenda-esp { color: #94a3b8; font-weight: 500; }
+
+/* Chip del odontólogo seleccionado: se resalta con su propio color, que
+   calendar.js inyecta en línea mediante --chip-color / --chip-ring. */
+.cal-leyenda-chip.activo {
+  border-color: var(--chip-color, var(--brand-600));
+  background: var(--chip-ring, var(--brand-50));
+  color: var(--ink-900);
+  font-weight: 700;
+  box-shadow: 0 0 0 3px var(--chip-ring, var(--brand-100));
+}
+.cal-leyenda-chip.activo .cal-leyenda-esp { color: #64748b; }
+
+/* "Todos los odontólogos": cuando está activo se pinta con la marca. */
+.cal-leyenda-chip.todos.activo {
+  border-color: var(--brand-600);
+  background: var(--brand-600);
+  color: #fff;
+  box-shadow: 0 0 0 3px var(--brand-100);
+}
+
+/* ==========================================================================
+   Vista "Disponibilidad": editor semanal de la agenda de cada odontólogo
+   (la grilla que renderiza app.js en #disp-semana)
+   ========================================================================== */
+
+.disp-semana {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .6rem;
+}
+@media (min-width: 768px) {
+  .disp-semana { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.disp-dia {
+  border: 1px solid #e8edf3;
+  border-radius: .9rem;
+  background: #fff;
+  padding: .7rem .8rem;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+.disp-dia:hover { border-color: #dbe6f0; box-shadow: 0 10px 24px -22px rgba(13, 133, 120, .55); }
+.disp-dia.cerrado { background: #fafcfe; border-style: dashed; }
+
+.disp-dia-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-bottom: .5rem;
+}
+.disp-dia-nombre { font-weight: 700; font-size: .86rem; color: var(--ink-900); }
+
+.disp-rangos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+  min-height: 1.7rem;
+}
+.disp-sin-rangos { font-size: .74rem; color: #b0bcc9; font-style: italic; }
+
+.disp-rango {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .2rem .28rem .2rem .58rem;
+  border: 1px solid var(--brand-200);
+  border-radius: 999px;
+  background: var(--brand-50);
+  color: var(--brand-800);
+  font-size: .74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.disp-rango-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .9);
+  color: #b91c1c;
+  cursor: pointer;
+  transition: background .15s ease, transform .12s ease;
+}
+.disp-rango-x:hover { background: #fee2e2; transform: scale(1.08); }
+.disp-rango-x:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
+
+.disp-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem;
+  margin-top: .6rem;
+  padding-top: .6rem;
+  border-top: 1px dashed #eef2f6;
+}
+.disp-form .disp-field {
+  width: auto;
+  min-width: 6.6rem;
+  padding: .35rem .55rem;
+  font-size: .78rem;
+}
+.disp-form-sep { font-size: .72rem; color: #94a3b8; }
+
+.disp-bloques-grid { display: flex; flex-wrap: wrap; gap: .35rem; }
+.disp-bloque-chip {
+  padding: .25rem .6rem;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: .74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+

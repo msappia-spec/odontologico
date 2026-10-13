@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OdontoCare · Panel de Secretaría</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A6%B7%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eefbf8', 100: '#d3f4ee', 200: '#a9e9df', 300: '#74d7c9',
+              400: '#3fbfae', 500: '#17a394', 600: '#0d8578', 700: '#106a61',
+              800: '#12554f', 900: '#134742'
+            }
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="min-h-screen">
+  <!-- Glifo oficial de WhatsApp, definido una sola vez y reutilizado con
+       <use href="#ico-whatsapp"> por los botones estáticos y por las filas que
+       renderiza app.js (botones verdes de recordatorios). -->
+  <svg width="0" height="0" class="absolute" aria-hidden="true" focusable="false">
+    <symbol id="ico-whatsapp" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.347-.347.52-.52.174-.174.232-.298.347-.497.116-.198.058-.372-.014-.52-.072-.149-.66-1.59-.904-2.169-.24-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/>
+    </symbol>
+  </svg>
+
+  <div class="flex min-h-screen">
+
+    <!-- ===================== SIDEBAR ===================== -->
+    <aside id="sidebar" class="w-64 flex-none bg-[#0f1c24] text-slate-100 flex flex-col">
+      <div class="px-5 py-5 flex items-center gap-3 border-b border-white/10">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-lg">
+          <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5.5C10.5 3.8 8.6 3 6.9 3 4.7 3 3 4.8 3 7.2c0 3 1.6 5.6 2.4 8.6.5 1.9.7 5.2 2.4 5.2 1.6 0 1.2-4.1 2.2-5.6.5-.8 1.5-.8 2 0 1 1.5.6 5.6 2.2 5.6 1.7 0 1.9-3.3 2.4-5.2.8-3 2.4-5.6 2.4-8.6C21 4.8 19.3 3 17.1 3c-1.7 0-3.6.8-5.1 2.5z"/>
+          </svg>
+        </div>
+        <div class="leading-tight">
+          <p class="font-extrabold tracking-tight text-white">OdontoCare</p>
+          <p class="text-[11px] text-slate-400">Panel de secretaría</p>
+        </div>
+      </div>
+
+      <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        <p class="px-3 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Operación</p>
+        <a class="nav-link active" data-view="calendario">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          Calendario
+        </a>
+        <a class="nav-link" data-view="disponibilidad">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+          Disponibilidad
+        </a>
+        <a class="nav-link" data-view="dashboard">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+          Dashboard
+        </a>
+        <a class="nav-link" data-view="recordatorios">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
+          <span class="flex-1">Recordatorios</span>
+          <span id="nav-rec-pendientes" class="nav-badge hide">0</span>
+        </a>
+        <p class="px-3 pt-4 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Registros</p>
+        <a class="nav-link" data-view="doctores">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3v0"/><path d="M10 10.6V16a2 2 0 0 0 2 2"/><circle cx="12" cy="7" r="4"/><path d="M9 21v-2a4 4 0 0 1 4-4"/></svg>
+          Doctores
+        </a>
+        <a class="nav-link" data-view="pacientes">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Pacientes
+        </a>
+      </nav>
+
+      <div class="px-3 py-4 border-t border-white/10 space-y-2">
+        <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5">
+          <span id="api-status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+          <span id="api-status-text" class="text-xs text-slate-300">Conectando…</span>
+        </div>
+        <a href="/docs" target="_blank" rel="noopener" class="nav-link text-slate-300">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          Documentación API
+        </a>
+      </div>
+    </aside>
+
+    <!-- ===================== MAIN ===================== -->
+    <div class="flex-1 min-w-0 flex flex-col">
+      <header class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200">
+        <div class="px-4 sm:px-6 lg:px-8 py-3.5 flex items-center gap-3">
+          <button id="btn-menu" class="lg:hidden btn btn-ghost btn-sm" aria-label="Menú">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+          <div class="flex-1 min-w-0">
+            <h1 id="page-title" class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 truncate">Calendario</h1>
+            <p id="page-subtitle" class="text-xs sm:text-[13px] text-slate-500 truncate">Calendario mensual de turnos y disponibilidad por día</p>
+          </div>
+          <button id="btn-recordatorios" class="btn btn-ghost btn-sm hidden sm:inline-flex" title="Ver los recordatorios pendientes de envío">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
+            Recordatorios
+            <span id="header-rec-pendientes" class="nav-badge hide">0</span>
+          </button>
+          <button id="btn-nuevo-turno" class="btn btn-primary btn-sm">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span class="hidden sm:inline">Nuevo turno</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="p-4 sm:p-6 lg:p-8 flex-1">
+
+        <!-- ===================== VISTA: DASHBOARD ===================== -->
+        <section id="view-dashboard" class="anim-fade space-y-6">
+          <div class="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="card card-hover p-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Turnos hoy</p>
+                  <p id="kpi-hoy" class="mt-1.5 text-3xl font-extrabold text-slate-900">&mdash;</p>
+                </div>
+                <span class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                </span>
+              </div>
+            </div>
+            <div class="card card-hover p-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Confirmados</p>
+                  <p id="kpi-confirmados" class="mt-1.5 text-3xl font-extrabold text-emerald-600">&mdash;</p>
+                </div>
+                <span class="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </span>
+              </div>
+            </div>
+            <div class="card card-hover p-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Pendientes</p>
+                  <p id="kpi-pendientes" class="mt-1.5 text-3xl font-extrabold text-amber-600">&mdash;</p>
+                </div>
+                <span class="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                </span>
+              </div>
+            </div>
+            <div class="card card-hover p-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Cancelados</p>
+                  <p id="kpi-cancelados" class="mt-1.5 text-3xl font-extrabold text-rose-600">&mdash;</p>
+                </div>
+                <span class="w-11 h-11 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div class="card p-5 xl:col-span-2">
+              <div class="flex items-center justify-between mb-4 gap-3">
+                <div>
+                  <h2 class="font-bold text-slate-900">Agenda de hoy</h2>
+                  <p id="dash-hoy-fecha" class="text-xs text-slate-500"></p>
+                </div>
+                <button class="btn btn-soft btn-sm" data-goto="calendario">Ver calendario completo</button>
+              </div>
+              <div id="dash-agenda-hoy" class="space-y-3"></div>
+            </div>
+
+            <div class="space-y-6">
+              <div class="card p-5">
+                <h2 class="font-bold text-slate-900 mb-3">Próximos turnos</h2>
+                <div id="dash-proximos" class="space-y-3"></div>
+              </div>
+              <div class="card p-5 bg-gradient-to-br from-brand-600 to-brand-800 text-white border-0">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <h2 class="font-bold">Recordatorios de WhatsApp</h2>
+                    <p class="text-sm text-brand-50/90 mt-1">
+                      Avisos con el enlace oficial de WhatsApp: abr&iacute; el mensaje ya escrito y confirm&aacute;
+                      el env&iacute;o con un clic.
+                    </p>
+                  </div>
+                  <span class="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center flex-none">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
+                  </span>
+                </div>
+                <p id="dash-rec-resumen" class="text-sm mt-3 text-brand-50/90"></p>
+                <button id="btn-recordatorios-2" class="btn mt-4 bg-white text-brand-700 hover:bg-brand-50 w-full" data-goto="recordatorios">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                  Ver recordatorios pendientes
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== VISTA: CALENDARIO ===================== -->
+        <section id="view-calendario" class="anim-fade space-y-5 hide">
+
+          <!-- Barra del mes: navegación, totales y leyenda por odontólogo -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex items-center gap-2">
+                <button id="cal-prev" class="btn btn-ghost btn-sm" title="Mes anterior" aria-label="Mes anterior">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <button id="cal-hoy" class="btn btn-soft btn-sm">Mes actual</button>
+                <button id="cal-next" class="btn btn-ghost btn-sm" title="Mes siguiente" aria-label="Mes siguiente">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+              </div>
+              <div class="min-w-0">
+                <h2 id="cal-mes-titulo" class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 capitalize">&mdash;</h2>
+                <p id="cal-mes-sub" class="text-xs text-slate-500">Turnos del mes por odontólogo</p>
+              </div>
+              <div class="ml-auto flex items-center gap-3">
+                <span id="cal-resumen" class="badge badge-slate">&mdash;</span>
+                <button id="agenda-nuevo" class="btn btn-primary btn-sm">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  Nuevo turno
+                </button>
+              </div>
+            </div>
+            <div id="cal-leyenda" class="mt-4 flex flex-wrap items-center gap-2"></div>
+          </div>
+
+          <!-- Calendario mensual (grilla de 7 columnas, lunes a domingo) -->
+          <div class="card p-3 sm:p-4">
+            <div class="grid grid-cols-7 gap-1.5">
+              <div class="cal-cabecera">Lun</div>
+              <div class="cal-cabecera">Mar</div>
+              <div class="cal-cabecera">Mi&eacute;</div>
+              <div class="cal-cabecera">Jue</div>
+              <div class="cal-cabecera">Vie</div>
+              <div class="cal-cabecera">S&aacute;b</div>
+              <div class="cal-cabecera">Dom</div>
+            </div>
+            <div id="cal-grid" class="grid grid-cols-7 gap-1.5 mt-1.5"></div>
+            <p class="text-[11px] text-slate-400 mt-3">
+              Pas&aacute; el mouse sobre un turno para ver el detalle completo (paciente, tel&eacute;fono, horario,
+              odont&oacute;logo y estado de WhatsApp). Hac&eacute; clic en un d&iacute;a para consultar su
+              disponibilidad, editar o cancelar los turnos ya agendados.
+            </p>
+          </div>
+
+          <!-- Panel del día seleccionado: ocupados + horarios libres -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-end gap-3">
+              <div class="min-w-[200px] flex-1">
+                <p class="field-label">Día seleccionado</p>
+                <h3 id="agenda-titulo" class="text-base sm:text-lg font-bold text-slate-900 capitalize truncate"></h3>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="agenda-prev" class="btn btn-ghost btn-sm" title="Día anterior" aria-label="Día anterior">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <button id="agenda-hoy" class="btn btn-soft btn-sm">Hoy</button>
+                <button id="agenda-next" class="btn btn-ghost btn-sm" title="Día siguiente" aria-label="Día siguiente">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+              </div>
+              <div class="min-w-[150px]">
+                <label class="field-label" for="agenda-fecha">Fecha</label>
+                <input type="date" id="agenda-fecha" class="field" />
+              </div>
+              <div class="min-w-[180px]">
+                <label class="field-label" for="agenda-doctor">Odontólogo</label>
+                <select id="agenda-doctor" class="field">
+                  <option value="">Todos los doctores</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 mt-5">
+              <!-- Turnos ocupados: editar, cancelar o reactivar -->
+              <div class="rounded-2xl border border-slate-100 bg-slate-50/50 p-3 sm:p-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                  <h3 class="font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-brand-500"></span>
+                    Turnos ocupados
+                  </h3>
+                  <span id="agenda-resumen" class="badge badge-brand">0</span>
+                </div>
+                <div id="agenda-lista" class="space-y-3 max-h-[540px] overflow-y-auto pr-1"></div>
+              </div>
+
+              <!-- Horarios disponibles: bloques de 30 minutos -->
+              <div class="rounded-2xl border border-slate-100 bg-slate-50/50 p-3 sm:p-4">
+                <div class="flex items-center justify-between gap-3 mb-2">
+                  <h3 class="font-bold text-slate-900 flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    Horarios disponibles
+                  </h3>
+                  <span id="cal-disponibles-resumen" class="badge badge-green">0</span>
+                </div>
+                <p class="text-[11px] text-slate-400 mb-3">
+                  Bloques de 30 minutos seg&uacute;n la agenda de cada odont&oacute;logo. Hac&eacute; clic en uno libre
+                  para agendar el turno con la fecha y hora ya cargadas.
+                </p>
+                <div id="cal-disponibles" class="space-y-2 max-h-[540px] overflow-y-auto pr-1"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================ VISTA: DISPONIBILIDAD MÉDICA ================= -->
+        <section id="view-disponibilidad" class="anim-fade space-y-5 hide">
+
+          <!-- Editor de la agenda semanal por odontólogo -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-end gap-3">
+              <div class="min-w-[220px] flex-1">
+                <label class="field-label" for="disp-doctor">Odontólogo</label>
+                <select id="disp-doctor" class="field"></select>
+              </div>
+              <div class="min-w-[150px]">
+                <label class="field-label" for="disp-fecha">Probar un día</label>
+                <input type="date" id="disp-fecha" class="field" />
+              </div>
+              <div class="min-w-[150px]">
+                <label class="field-label" for="disp-duracion">Duración del bloque</label>
+                <select id="disp-duracion" class="field">
+                  <option value="15">15 minutos</option>
+                  <option value="20">20 minutos</option>
+                  <option value="30" selected>30 minutos</option>
+                  <option value="45">45 minutos</option>
+                  <option value="60">1 hora</option>
+                </select>
+              </div>
+              <button type="button" id="disp-probar" class="btn btn-soft btn-sm">Ver bloques libres</button>
+              <span id="disp-resumen" class="badge badge-brand ml-auto">0</span>
+            </div>
+
+            <p class="text-xs text-slate-500 mt-3">
+              Cada odontólogo define sus rangos de atención y puede tener varios tramos el mismo día
+              (por ejemplo, lunes de 09:00 a 13:00 y de 15:00 a 19:00). El calendario sólo ofrece
+              bloques que caigan dentro de esos rangos y descuenta los turnos ya agendados.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-2 mt-4">
+              <button type="button" id="disp-plantilla" class="btn btn-ghost btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Restaurar plantilla sugerida
+              </button>
+              <button type="button" id="disp-vaciar" class="btn btn-danger-soft btn-sm">Vaciar la semana</button>
+            </div>
+
+            <!-- Grilla semanal: un panel por día con sus rangos y su formulario -->
+            <div id="disp-semana" class="disp-semana mt-4"></div>
+          </div>
+
+          <!-- Bloques que la API ofrece para la fecha elegida -->
+          <div class="card p-4 sm:p-5">
+            <h3 class="font-bold text-slate-900 flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              Bloques ofrecidos ese día
+            </h3>
+            <p class="text-[11px] text-slate-400 mt-1 mb-3">
+              Los calcula la API
+              (<code class="font-mono">GET /api/v1/doctores/&lt;id&gt;/horarios-disponibles</code>)
+              con la duración elegida: sólo aparecen los tramos habilitados que todavía están libres.
+            </p>
+            <div id="disp-bloques"></div>
+          </div>
+        </section>
+
+        <!-- ===================== VISTA: DOCTORES ===================== -->
+        <section id="view-doctores" class="anim-fade hide">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="card p-5 h-fit">
+              <h2 class="font-bold text-slate-900">Registrar doctor</h2>
+              <p class="text-xs text-slate-500 mt-1">Completá los datos del profesional.</p>
+              <form id="form-doctor" class="space-y-4 mt-5" autocomplete="off">
+                <div>
+                  <label class="field-label" for="doc-nombre">Nombre completo</label>
+                  <input id="doc-nombre" name="nombre" class="field" placeholder="Ej.: Dra. Ana Pérez" required maxlength="120" />
+                </div>
+                <div>
+                  <label class="field-label" for="doc-especialidad">Especialidad</label>
+                  <input id="doc-especialidad" name="especialidad" class="field" placeholder="Ej.: Ortodoncia" required maxlength="120" />
+                </div>
+                <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                  <input id="doc-activo" name="activo" type="checkbox" checked
+                         class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+                  <span class="text-sm text-slate-600">Profesional activo</span>
+                </label>
+                <button type="submit" class="btn btn-primary w-full">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                  Guardar doctor
+                </button>
+              </form>
+            </div>
+
+            <div class="card lg:col-span-2 overflow-hidden h-fit">
+              <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h2 class="font-bold text-slate-900">Doctores registrados</h2>
+                <span id="count-doctores" class="badge badge-brand">0</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Profesional</th><th>Especialidad</th><th>Estado</th><th>Turnos</th></tr>
+                  </thead>
+                  <tbody id="lista-doctores"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===================== VISTA: PACIENTES ===================== -->
+        <section id="view-pacientes" class="anim-fade hide">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="card p-5 h-fit">
+              <h2 id="pac-form-titulo" class="font-bold text-slate-900">Registrar paciente</h2>
+              <p id="pac-form-sub" class="text-xs text-slate-500 mt-1">El teléfono se usa para los avisos de WhatsApp.</p>
+              <form id="form-paciente" class="space-y-4 mt-5" autocomplete="off">
+                <div>
+                  <label class="field-label" for="pac-nombre">Nombre completo</label>
+                  <input id="pac-nombre" name="nombre" class="field" placeholder="Ej.: Juan Gómez" required maxlength="120" />
+                </div>
+                <div>
+                  <label class="field-label" for="pac-telefono">Teléfono (WhatsApp)</label>
+                  <input id="pac-telefono" name="telefono" class="field" placeholder="+5491122334455" required minlength="6" maxlength="30" />
+                  <p class="text-[11px] text-slate-400 mt-1">Formato internacional con prefijo +.</p>
+                </div>
+                <div>
+                  <label class="field-label" for="pac-email">Email <span class="text-slate-400 normal-case">(opcional)</span></label>
+                  <input id="pac-email" name="email" type="email" class="field" placeholder="paciente@correo.com" maxlength="120" />
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="field-label" for="pac-dni">DNI <span class="text-slate-400 normal-case">(único, opcional)</span></label>
+                    <input id="pac-dni" name="dni" class="field" placeholder="Ej.: 30123456" maxlength="20" inputmode="numeric" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="pac-obra-social">Obra social <span class="text-slate-400 normal-case">(opcional)</span></label>
+                    <input id="pac-obra-social" name="obra_social" class="field" placeholder="Ej.: OSDE" maxlength="120" list="obras-sociales" />
+                  </div>
+                </div>
+                <div>
+                  <label class="field-label" for="pac-numero-afiliado">Nº de afiliado <span class="text-slate-400 normal-case">(opcional)</span></label>
+                  <input id="pac-numero-afiliado" name="numero_afiliado" class="field" placeholder="Ej.: 610012345678" maxlength="60" />
+                  <p class="text-[11px] text-slate-400 mt-1">Número que figura en la credencial de la obra social.</p>
+                </div>
+                <datalist id="obras-sociales">
+                  <option value="Particular"></option>
+                  <option value="OSDE"></option>
+                  <option value="Swiss Medical"></option>
+                  <option value="Galeno"></option>
+                  <option value="Medifé"></option>
+                  <option value="OMINT"></option>
+                  <option value="IOMA"></option>
+                  <option value="PAMI"></option>
+                  <option value="OSPE"></option>
+                  <option value="OSECAC"></option>
+                  <option value="Sancor Salud"></option>
+                  <option value="Federada Salud"></option>
+                </datalist>
+                <div class="flex gap-3">
+                  <button type="button" id="pac-cancelar-edicion" class="btn btn-ghost flex-1 hide">Cancelar</button>
+                  <button type="submit" id="pac-guardar" class="btn btn-primary flex-1">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+                    <span id="pac-guardar-texto">Guardar paciente</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="card lg:col-span-2 overflow-hidden h-fit">
+              <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h2 class="font-bold text-slate-900">Pacientes registrados</h2>
+                <span id="count-pacientes" class="badge badge-brand">0</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr><th>Paciente</th><th>DNI</th><th>Teléfono</th><th>Cobertura</th><th>Email</th><th>Turnos</th><th></th></tr>
+                  </thead>
+                  <tbody id="lista-pacientes"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============== VISTA: RECORDATORIOS PENDIENTES ============== -->
+        <section id="view-recordatorios" class="anim-fade space-y-5 hide">
+
+          <!-- Encabezado: ventana de días, contador y refresco manual -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="w-11 h-11 rounded-xl bg-[#25d366]/15 text-[#128c7e] flex items-center justify-center flex-none">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-extrabold tracking-tight text-slate-900">Recordatorios Pendientes</h2>
+                <p id="rec-subtitulo" class="text-xs text-slate-500">
+                  Turnos de los próximos días que todavía no recibieron el aviso de WhatsApp.
+                </p>
+              </div>
+              <span id="rec-contador" class="badge badge-brand">0</span>
+              <div class="min-w-[140px]">
+                <label class="field-label" for="rec-dias">Días a futuro</label>
+                <select id="rec-dias" class="field">
+                  <option value="1">1 día</option>
+                  <option value="2">2 días</option>
+                  <option value="3" selected>3 días</option>
+                  <option value="5">5 días</option>
+                  <option value="7">7 días</option>
+                  <option value="14">14 días</option>
+                </select>
+              </div>
+              <button id="rec-actualizar" class="btn btn-soft btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Actualizar
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-3">
+              Cada fila tiene el bot&oacute;n verde de WhatsApp con el mensaje ya redactado (se abre en una
+              pesta&ntilde;a nueva, desde el WhatsApp del consultorio). Al abrirlo, el turno se marca
+              autom&aacute;ticamente como <span class="font-semibold text-slate-500">enviado</span> y desaparece
+              de esta lista.
+            </p>
+          </div>
+
+          <!-- Lista cronológica de turnos sin recordatorio enviado -->
+          <div id="rec-lista" class="space-y-3"></div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: NUEVO TURNO ===================== -->
+  <div id="modal-turno" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-lg p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 id="modal-turno-titulo" class="text-lg font-extrabold text-slate-900">Nuevo turno</h3>
+          <p class="text-xs text-slate-500">Agendá una cita para un paciente.</p>
+        </div>
+        <button id="modal-turno-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-turno" class="space-y-4">
+        <div>
+          <label class="field-label" for="turno-paciente">Paciente</label>
+          <select id="turno-paciente" class="field" required></select>
+        </div>
+        <div>
+          <label class="field-label" for="turno-doctor">Doctor</label>
+          <select id="turno-doctor" class="field" required></select>
+          <p id="turno-doctor-hint" class="hide mt-1.5 text-[11px] leading-snug text-brand-800 bg-brand-50 border border-brand-100 rounded-lg px-2.5 py-1.5">
+            <span class="font-semibold">Odontólogo fijado por el filtro del calendario:</span>
+            <span id="turno-doctor-hint-nombre">—</span>.
+            Quitá el filtro en el calendario para poder elegir otro profesional.
+          </p>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="field-label" for="turno-fecha">Fecha</label>
+            <input type="date" id="turno-fecha" class="field" required />
+          </div>
+          <div>
+            <label class="field-label" for="turno-hora">Hora de inicio</label>
+            <input type="time" id="turno-hora" class="field" required value="09:00" step="300" />
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="turno-duracion">Duración</label>
+          <select id="turno-duracion" class="field">
+            <option value="15">15 minutos</option>
+            <option value="20">20 minutos</option>
+            <option value="30" selected>30 minutos</option>
+            <option value="45">45 minutos</option>
+            <option value="60">1 hora</option>
+            <option value="90">1 hora 30 minutos</option>
+          </select>
+        </div>
+        <div id="turno-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-turno-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-turno-save" class="btn btn-primary flex-1">Guardar turno</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== TOASTS ===================== -->
+  <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col gap-3"></div>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/calendar.js"></script>
+</body>
+</html>

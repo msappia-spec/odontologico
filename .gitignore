@@ -1,0 +1,30 @@
+# --- Entorno / entorno virtual ---
+.venv/
+venv/
+env/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# --- Variables de entorno y base de datos locales ---
+.env
+*.db
+*.sqlite3
+# Copias de seguridad generadas por scripts/migrar_turnos_unique_parcial.py
+*.db.bak-*
+
+# --- Testing / cachés ---
+.pytest_cache/
+.cache/
+.coverage
+htmlcov/
+
+# --- IDEs ---
+.idea/
+.vscode/
+*.swp
