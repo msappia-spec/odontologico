@@ -124,3 +124,58 @@ def test_documentacion_del_despliegue() -> None:
     readme = (RAIZ / "README.md").read_text(encoding="utf-8")
     assert "Vercel" in readme
     assert "DATABASE_URL" in readme
+
+
+@pytest.mark.parametrize(
+    ("url_proveedor", "url_esperada"),
+    [
+        (
+            "postgresql://usuario:clave@ep-xxx.sa-east-1.aws.neon.tech/neondb"
+            "?sslmode=require",
+            "postgresql+psycopg://usuario:clave@ep-xxx.sa-east-1.aws.neon.tech"
+            "/neondb?sslmode=require",
+        ),
+        (
+            "postgres://usuario:clave@host:5432/odontologico",
+            "postgresql+psycopg://usuario:clave@host:5432/odontologico",
+        ),
+    ],
+)
+def test_url_postgres_sin_driver_usa_psycopg(
+    monkeypatch: pytest.MonkeyPatch, url_proveedor: str, url_esperada: str
+) -> None:
+    """La cadena que entrega el proveedor (Neon) se acepta tal cual.
+
+    SQLAlchemy interpretaría ``postgresql://`` como ``psycopg2`` (no instalado),
+    así que la app la reescribe al driver ``psycopg`` (v3) automáticamente.
+    """
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.setenv("DATABASE_URL", url_proveedor)
+    assert Settings(_env_file=None).database_url == url_esperada
+
+
+@pytest.mark.parametrize(
+    "url_con_driver",
+    [
+        "postgresql+psycopg://usuario:clave@host:5432/odontologico",
+        "postgresql+psycopg://usuario:clave@host/neondb?sslmode=require",
+    ],
+)
+def test_url_con_driver_explicito_no_se_toca(
+    monkeypatch: pytest.MonkeyPatch, url_con_driver: str
+) -> None:
+    """Si el driver ya está declarado, la URL queda idéntica (idempotente)."""
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.setenv("DATABASE_URL", url_con_driver)
+    assert Settings(_env_file=None).database_url == url_con_driver
+
+
+def test_postgres_normalizado_tambien_en_vercel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """En Vercel se normaliza igual (PostgreSQL nunca se redirige a /tmp)."""
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@host/neondb")
+    assert Settings(_env_file=None).database_url == (
+        "postgresql+psycopg://u:p@host/neondb"
+    )

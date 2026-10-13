@@ -80,6 +80,29 @@ class Settings(BaseSettings):
         self.database_url = SQLITE_SERVERLESS_URL
         return self
 
+    @model_validator(mode="after")
+    def _normalizar_driver_postgres(self) -> "Settings":
+        """Fuerza el driver ``psycopg`` (v3) en las URLs de PostgreSQL.
+
+        Los proveedores administrados (Neon, Supabase, Render, Railway) entregan
+        la cadena como ``postgresql://usuario:clave@host/db`` (o ``postgres://``,
+        el formato viejo de Heroku). SQLAlchemy interpreta ese prefijo como el
+        driver ``psycopg2``, **que no está instalado** (se usa psycopg 3), y el
+        arranque fallaría con ``ModuleNotFoundError: No module named 'psycopg2'``
+        justo dentro de la Function de Vercel. Acá se reescribe al driver real
+        para poder pegar la cadena del proveedor tal cual.
+        """
+        for prefijo in ("postgres://", "postgresql://"):
+            if self.database_url.startswith(prefijo):
+                logger.info(
+                    "DATABASE_URL sin driver explícito: se usa 'psycopg' (v3)."
+                )
+                self.database_url = (
+                    "postgresql+psycopg://" + self.database_url[len(prefijo):]
+                )
+                break
+        return self
+
     # --- WhatsApp Cloud API (opcional) ---
     whatsapp_api_url: Optional[str] = None
     whatsapp_phone_number_id: Optional[str] = None
