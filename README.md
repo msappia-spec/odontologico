@@ -152,6 +152,65 @@ uvicorn app.main:app --reload
 
 ---
 
+## ☁️ Despliegue en Vercel (opcional)
+
+El repositorio está preparado para desplegarse en Vercel **sin `vercel.json`**:
+Vercel detecta FastAPI por `requirements.txt` y busca la instancia `app` en los
+*entrypoints* soportados (`app.py`, `index.py`, `server.py`, `main.py`,
+`wsgi.py`, `asgi.py` — y los mismos nombres dentro de `app/` o `src/`). Como el
+proyecto ya define `app = FastAPI(...)` en `app/main.py`, el despliegue es
+*zero-config*.
+
+> ⚠️ **No usar `vercel.json` con `builds`/`routes`**: ese formato (API v2) está
+> obsoleto y hace fallar el *build*. El contrato se verifica en
+> `tests/test_deploy_vercel.py`.
+
+### 1) Importar el proyecto
+
+1. Entrar a <https://vercel.com/new> → **Import Git Repository** →
+   `msappia-spec/odontologico` (rama `main`).
+2. No hace falta tocar *Build Command*, *Output Directory* ni *Install Command*.
+3. Definir las **Environment Variables** (Production y Preview):
+
+   | Variable | Valor | ¿Obligatoria? |
+   |---|---|---|
+   | `DATABASE_URL` | `postgresql+psycopg://usuario:clave@host:5432/db` | Sí, para persistir datos |
+   | `DEBUG` | `false` | No |
+   | `CORS_ORIGINS` | `["https://TU-PROYECTO.vercel.app"]` | No (por defecto `["*"]`) |
+   | `RECORDATORIO_DIAS` | `3` | No |
+   | `WHATSAPP_CODIGO_PAIS` | `549` | No |
+   | `WHATSAPP_API_URL` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | credenciales de Meta | Sólo para envíos reales |
+
+4. **Deploy**.
+
+### 2) URLs publicadas
+
+- Panel Principal: `https://TU-PROYECTO.vercel.app/`
+- Agenda móvil del odontólogo: `https://TU-PROYECTO.vercel.app/medico`
+- Swagger: `/docs` · Health-check: `/health`
+
+### 3) Particularidades del entorno *serverless*
+
+- **Base de datos.** Vercel monta el código en un sistema de archivos de **sólo
+  lectura**: el único directorio escribible es `/tmp`. Si no se define
+  `DATABASE_URL` con PostgreSQL, la aplicación redirige el SQLite a
+  `sqlite:////tmp/odontologico.db` (ver `app/core/config.py`): el panel y la
+  vista móvil funcionan, pero **los datos se pierden** cuando Vercel recicla la
+  instancia. El esquema lo crea el `lifespan` (`init_db()`); los datos de ejemplo
+  se cargan una vez contra esa base con `python -m scripts.seed`.
+- **Recordatorios.** La tarea programada no corre en segundo plano: se dispara
+  con `POST /api/v1/tareas/enviar-recordatorios`. Para automatizarla, apuntar un
+  *Cron Job* externo (cron-job.org, GitHub Actions) a la URL de producción.
+- **Webhook de WhatsApp.** Configurar
+  `https://TU-PROYECTO.vercel.app/api/v1/whatsapp/webhook` como *Callback URL*
+  en la app de Meta.
+- **Versión de Python.** Se fija con `.python-version` (3.14).
+- **Frontend.** El panel y la vista móvil se sirven por el mismo dominio
+  (`app.mount("/static", ...)` + rutas del `web_router`), por lo que no hay que
+  cambiar nada respecto del uso local.
+
+---
+
 ## 🖥️ Interfaz web (Panel Principal de la secretaría)
 
 Servida por la propia aplicación FastAPI, **sin pasos de build** ni dependencias

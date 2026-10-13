@@ -48,3 +48,19 @@ El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistem
 7. Todo lo que agendás, reprogramás o cancelás acá aparece al instante en el **Panel Principal** de la secretaría (y a la inversa).
 
 > ⚙️ Si tocás el código **del backend** (archivos `.py`), hay que **reiniciar** uvicorn para que tome los cambios. El **HTML/CSS/JS** de la vista móvil se recarga solo con F5 (los sirve desde disco).
+
+## ☁️ Subirlo a internet (Vercel)
+
+El código ya está en GitHub (`github.com/msappia-spec/odontologico`, rama `main`),
+así que falta sólo importarlo en Vercel (no hay que instalar nada en la PC):
+
+1. Entrá a <https://vercel.com/new> e iniciá sesión con la cuenta de GitHub.
+2. Elegí **Import Git Repository** → **msappia-spec/odontologico**.
+3. En **Environment Variables** cargá `DATABASE_URL` con la cadena de una base
+   PostgreSQL gratuita (por ejemplo <https://neon.tech>). Sin eso la app igual
+   arranca, pero guarda los datos en un SQLite temporal (`/tmp`) y **se borran**
+   cuando Vercel reinicia la instancia.
+4. Tocá **Deploy**. En un minuto tenés una URL tipo
+   `https://odontologico-xxxx.vercel.app`, y la agenda del celular te queda en
+   `https://odontologico-xxxx.vercel.app/medico` (esa sí funciona desde
+   cualquier red, sin depender del Wi‑Fi de la PC ni del firewall).

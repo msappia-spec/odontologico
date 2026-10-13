@@ -3,9 +3,19 @@
 Las variables se leen del archivo ``.env`` (si existe) y del entorno del sistema.
 """
 
+import logging
+import os
 from typing import List, Optional
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("app.core.config")
+
+# Vercel (serverless) monta el código en un sistema de archivos de sólo lectura:
+# el único directorio escribible es ``/tmp``, por eso el SQLite por defecto se
+# redirige ahí cuando no hay una base PostgreSQL configurada.
+SQLITE_SERVERLESS_URL = "sqlite:////tmp/odontologico.db"
 
 
 class Settings(BaseSettings):
@@ -43,6 +53,32 @@ class Settings(BaseSettings):
     # rechaza cuando el origen es comodín, así que requiere ``cors_origins``
     # explícitos.
     cors_allow_credentials: bool = False
+
+    @model_validator(mode="after")
+    def _adaptar_base_al_entorno(self) -> "Settings":
+        """Ajusta la base de datos cuando la app corre en Vercel.
+
+        Vercel define la variable de entorno ``VERCEL`` y monta el proyecto en
+        un sistema de archivos de **sólo lectura**. Un SQLite relativo
+        (``sqlite:///./odontologico.db``) no se puede abrir, así que el
+        ``lifespan`` fallaría al crear el esquema y la Function devolvería 500.
+        Para que el despliegue arranque igual (útil para demos) se redirige a
+        ``/tmp``; los datos son **efímeros**: para persistir hay que definir
+        ``DATABASE_URL`` con una base PostgreSQL (por ejemplo Neon).
+        """
+        if not os.getenv("VERCEL"):
+            return self
+        if not self.database_url.startswith("sqlite"):
+            return self
+        if self.database_url.startswith("sqlite:////tmp"):
+            return self
+        logger.warning(
+            "Vercel detectado: se usa SQLite efímero en %s. Definí DATABASE_URL "
+            "con PostgreSQL para conservar los datos entre despliegues.",
+            SQLITE_SERVERLESS_URL,
+        )
+        self.database_url = SQLITE_SERVERLESS_URL
+        return self
 
     # --- WhatsApp Cloud API (opcional) ---
     whatsapp_api_url: Optional[str] = None
