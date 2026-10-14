@@ -213,7 +213,9 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
   `sqlite:////tmp/odontologico.db` (ver `app/core/config.py`): el panel y la
   vista móvil funcionan, pero **los datos se pierden** cuando Vercel recicla la
   instancia. El esquema lo crea el `lifespan` (`init_db()`); los datos de ejemplo
-  se cargan una vez contra esa base con `python -m scripts.seed`.
+  se cargan una vez contra esa base con `python -m scripts.seed` y la base local
+  se puede copiar entera con `python -m scripts.migrar_sqlite_a_postgres`
+  (ver *Migrar los datos locales a la nube*).
 - **Recordatorios.** La tarea programada no corre en segundo plano: se dispara
   con `POST /api/v1/tareas/enviar-recordatorios`. Para automatizarla, apuntar un
   *Cron Job* externo (cron-job.org, GitHub Actions) a la URL de producción.
@@ -224,6 +226,27 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
 - **Frontend.** El panel y la vista móvil se sirven por el mismo dominio
   (`app.mount("/static", ...)` + rutas del `web_router`), por lo que no hay que
   cambiar nada respecto del uso local.
+
+### 4) Migrar los datos locales a la nube
+
+La base de desarrollo es `odontologico.db` (SQLite). Con `DATABASE_URL` ya
+definida en Vercel, lo que tenés cargado localmente se copia con
+`scripts/migrar_sqlite_a_postgres.py`:
+
+```powershell
+# Simulacro: informa qué copiaría y no escribe nada
+python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://usuario:clave@ep-xxx.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+# Copia real
+python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://..." --ejecutar
+```
+
+El script crea el esquema en el destino, copia las tablas en **orden de
+dependencias** (obras sociales y doctores antes que pacientes y turnos) y conserva
+los `id`, así que las claves foráneas siguen siendo válidas. Al terminar reajusta
+las secuencias de PostgreSQL (`setval`) y compara los conteos: si algo no cuadra,
+termina con error. `--modo agregar` inserta sólo las filas que falten, sin borrar
+lo cargado desde la web. Controles en
+`tests/test_migracion_sqlite_a_postgres.py`.
 
 ---
 
