@@ -246,15 +246,22 @@
     );
   }
 
-  /* Acciones rápidas de una tarjeta de turno (editar / cancelar / reactivar).
-     Los clics se resuelven por delegación en calendar.js. */
+  /* Acciones rápidas de una tarjeta de turno (confirmar asistencia / editar /
+     cancelar / reactivar). Los clics se resuelven por delegación en calendar.js.
+     *Confirmar asistencia* aparece mientras el turno está PENDIENTE: es la forma
+     de dejarlo en verde cuando el paciente avisa por teléfono o llega al
+     consultorio, sin depender de que responda el WhatsApp. */
   function panelAccionesTurno(t) {
     const editar = `<button class="btn btn-ghost btn-sm" data-editar-turno="${t.id}">Editar</button>`;
+    const confirmar =
+      t.estado_turno === "PENDIENTE"
+        ? `<button class="btn btn-soft btn-sm" data-confirmar-turno="${t.id}">Confirmar asistencia</button>`
+        : "";
     const alterno =
       t.estado_turno === "CANCELADO"
         ? `<button class="btn btn-soft btn-sm" data-reactivar-turno="${t.id}">Reactivar</button>`
         : `<button class="btn btn-danger-soft btn-sm" data-cancelar-turno="${t.id}">Cancelar</button>`;
-    return `<div class="flex flex-wrap items-center gap-2 mt-2">${editar}${alterno}</div>`;
+    return `<div class="flex flex-wrap items-center gap-2 mt-2">${editar}${confirmar}${alterno}</div>`;
   }
 
   /* Color del bloque horario de la tarjeta según el estado del turno:

@@ -184,8 +184,17 @@ button, a, input, select, textarea { touch-action: manipulation; }
 .m-cesto svg { width: 20px; height: 20px; }
 .m-cesto:disabled { opacity: .5; }
 
-/* Botones de cada turno: editar (lápiz, también en cancelados) y cancelar. */
+/* Botones de cada turno: confirmar asistencia (tilde verde), editar (lápiz,
+   también en cancelados) y cancelar (cesto). */
 .m-acciones-turno { display: flex; flex-direction: column; gap: .3rem; flex: none; }
+.m-check {
+  display: flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 999px; cursor: pointer;
+  background: #ecfdf5; border: 1px solid #a7f3d0; color: var(--m-verde);
+  transition: transform .12s ease, background .18s ease;
+}
+.m-check:active { transform: scale(.92); background: #d1fae5; }
+.m-check svg { width: 20px; height: 20px; }
 .m-editar {
   display: flex; align-items: center; justify-content: center;
   width: 44px; height: 44px; border-radius: 999px; cursor: pointer;

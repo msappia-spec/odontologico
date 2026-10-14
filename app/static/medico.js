@@ -324,6 +324,14 @@
       ? ""
       : `<button type="button" class="m-cesto" data-cancelar="${t.id}" ` +
         `aria-label="Cancelar el turno de ${esc(nombre)}">${ICON.cesto}</button>`;
+    /* Confirmar la asistencia en un toque: sólo mientras el turno está PENDIENTE
+       (el confirmado ya está en verde y el cancelado no se atiende). */
+    const confirmar =
+      t.estado_turno === "PENDIENTE"
+        ? `<button type="button" class="m-check" data-confirmar="${t.id}" ` +
+          `aria-label="Confirmar la asistencia de ${esc(nombre)}" ` +
+          `title="Confirmar asistencia">${ICON.check}</button>`
+        : "";
     return (
       `<article class="${clase}" style="--m-color:${colorDe(t.doctor_id)}">` +
       `<span class="m-hora">${esc(parteHora(t.fecha_hora_inicio))}</span>` +
@@ -333,6 +341,7 @@
       `<div class="m-item-badges">${badgeTurno(t.estado_turno)}${badgeWhatsApp(t)}</div>` +
       `</div>` +
       `<div class="m-acciones-turno">` +
+      confirmar +
       `<button type="button" class="m-editar" data-editar="${t.id}" ` +
       `aria-label="Editar el turno de ${esc(nombre)}" title="Editar turno">${ICON.lapiz}</button>` +
       cancelar +
@@ -686,6 +695,27 @@
       bloquear(btn, false);
     }
   }
+  /* ------------------- Confirmar la asistencia (un toque) ------------------ */
+  /* Mismo ``PATCH`` que el botón *Confirmar asistencia* del panel principal:
+     deja el turno en verde para el paciente que avisó por teléfono o ya llegó,
+     sin esperar la respuesta del recordatorio de WhatsApp. */
+  async function confirmarAsistencia(id) {
+    const turno = turnoEnAgenda(id);
+    const detalle = turno
+      ? `${nombrePaciente(turno.paciente_id)} · ${parteHora(turno.fecha_hora_inicio)} hs`
+      : `Turno #${id}`;
+    try {
+      await api(`/turnos/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ estado_turno: "CONFIRMADO" }),
+      });
+      toast("exito", "Asistencia confirmada", detalle);
+      await cargarAgenda(true);
+    } catch (err) {
+      toast("error", "No se pudo confirmar la asistencia", err.message);
+    }
+  }
+
   /* -------------------- Buscador de pacientes (fichas) -------------------- */
   /* ``GET /pacientes`` trae la lista completa: acá se filtra por nombre, DNI o
      teléfono mientras se escribe, sin una request por tecla. Con el campo vacío
@@ -1088,6 +1118,9 @@
 
       const editar = objetivo.closest("[data-editar]");
       if (editar) { abrirHojaEditar(editar.dataset.editar); return; }
+
+      const confirmar = objetivo.closest("[data-confirmar]");
+      if (confirmar) { confirmarAsistencia(confirmar.dataset.confirmar); return; }
 
       const cesto = objetivo.closest("[data-cancelar]");
       if (cesto) abrirHojaCancelar(cesto.dataset.cancelar);

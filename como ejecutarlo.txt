@@ -44,8 +44,9 @@ El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistem
 3. **Navegador de fechas** (arriba de la lista): flechas ◀ ▶ para el día anterior/siguiente, botones para moverse de semana, la **tira de los 7 días** (con un punto en los días que tienen turnos), el botón **Hoy** y un **selector de fecha**. Se puede consultar *cualquier* día del calendario, no sólo hoy; el filtrado lo hace el backend (`GET /turnos?fecha_desde=&fecha_hasta=`).
 4. Tocás un **horario libre** → se abre la hoja con el **buscador de fichas** (por nombre, DNI o teléfono): elegís un paciente **ya registrado** o cargás uno **nuevo** (Nombre, Teléfono, DNI) → *Agendar turno*. Ahí mismo podés ajustar **fecha, hora y duración**, y tocar los chips de *Horarios libres de ese día*.
 5. Tocás el **lápiz** ✏️ de un turno → *Editar turno*: cambiás **paciente, día, hora, duración y estado** (Pendiente / Confirmado / Cancelado), o lo **reprogramás** para otro día → *Guardar cambios* (usa `PATCH /turnos/{id}`; el backend revalida solapamientos y horarios).
-6. Tocás el **cesto** 🗑️ de un turno → confirmar → pasa a **CANCELADO** (gris, tachado) y el horario vuelve a ofrecerse como disponible.
-7. Todo lo que agendás, reprogramás o cancelás acá aparece al instante en el **Panel Principal** de la secretaría (y a la inversa).
+6. Tocás el **tilde verde** ✔️ de un turno **pendiente** → *Confirmar la asistencia*: el turno queda **CONFIRMADO** (verde) de un solo toque, para el paciente que avisó por teléfono o ya llegó al consultorio. No hace falta que responda el WhatsApp.
+7. Tocás el **cesto** 🗑️ de un turno → confirmar → pasa a **CANCELADO** (gris, tachado) y el horario vuelve a ofrecerse como disponible.
+8. Todo lo que agendás, reprogramás, confirmás o cancelás acá aparece al instante en el **Panel Principal** de la secretaría (y a la inversa). En el panel la misma acción es el botón **Confirmar asistencia** de la tarjeta del turno.
 
 > ⚙️ Si tocás el código **del backend** (archivos `.py`), hay que **reiniciar** uvicorn para que tome los cambios. El **HTML/CSS/JS** de la vista móvil se recarga solo con F5 (los sirve desde disco).
 
@@ -160,4 +161,12 @@ sociales, 4 pacientes, 13 rangos de agenda y 7 turnos).
   (`app/db/types.py`), que normaliza al leer y al escribir **sin cambiar el
   esquema**. Controles: `tests/test_fechas_utc_naive.py`. Para ver los errores de
   una Function: `vercel logs --deployment odontologico-omega.vercel.app`.
+- **No aparece el botón “Responder: Confirma / Cancela”** en la tarjeta del turno
+  del panel: esos botones **sólo** se muestran si el turno tiene
+  `whatsapp_mensaje_id`, o sea un mensaje **realmente enviado** por la API de Meta
+  (el `wamid`). Ese identificador es efímero y **no** se copia al migrar la base,
+  así que en los turnos migrados no está. Para dejar la asistencia confirmada sin
+  WhatsApp usá **Confirmar asistencia** (panel) o el **tilde verde** de la agenda
+  móvil: los dos hacen `PATCH /turnos/{id}` con `{"estado_turno": "CONFIRMADO"}` y
+  no dependen del `wamid`. Control: `tests/test_web.py::test_se_puede_confirmar_la_asistencia_del_turno_desde_la_ui`.
 

@@ -282,7 +282,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 
 | Sección | Función |
 |---------|---------|
-| **Panel Principal** | KPIs (turnos de hoy, confirmados, pendientes, cancelados), **agenda del día en una columna por odontólogo** (cada columna trae el avatar, la especialidad y el cupo de turnos del profesional, con las tarjetas compactas del día y sus acciones *Editar* / *Cancelar* / *Reactivar*), próximos turnos, envío de recordatorios y tarjeta *Recordatorios por WhatsApp* con el contador de pendientes (lleva a esa pestaña). |
+| **Panel Principal** | KPIs (turnos de hoy, confirmados, pendientes, cancelados), **agenda del día en una columna por odontólogo** (cada columna trae el avatar, la especialidad y el cupo de turnos del profesional, con las tarjetas compactas del día y sus acciones *Confirmar asistencia* / *Editar* / *Cancelar* / *Reactivar*), próximos turnos, envío de recordatorios y tarjeta *Recordatorios por WhatsApp* con el contador de pendientes (lleva a esa pestaña). |
 | **Calendario** | Grilla mensual de turnos con **color por estado** (`CONFIRMADO` en verde, `PENDIENTE` con el color del odontólogo y `CANCELADO` en gris atenuado), *tooltip* con el detalle del turno, **filtro por odontólogo** (*Todos los odontólogos* + un botón por profesional) y panel del día con turnos ocupados y horarios disponibles. Los horarios disponibles salen de la **agenda semanal configurada por profesional**, no de una lista fija. Al hacer clic en un **horario disponible con un odontólogo filtrado**, el modal se abre con ese profesional ya seleccionado y **bloqueado** (con un aviso en pantalla), para que el turno no se agende por error en otra agenda. |
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
 | **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos —se pueden cargar **varios por día**, p. ej. lunes 08:00-13:00 y 15:00-19:00—, botón para eliminar cada rango, formulario *desde / hasta* para agregar otro y contador de rangos. Incluye **Restaurar plantilla sugerida** (lun-vie doble turno y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
@@ -377,6 +377,12 @@ El panel principal consume los mismos endpoints del backend:
   que aparecen en el turno una vez enviado el recordatorio. Reproducen el webhook
   de Meta usando el `whatsapp_mensaje_id` como `context.id`, lo que permite ver el
   ciclo completo (enviado → respuesta → confirmado/cancelado) sin un teléfono real.
+  Como dependen de ese identificador (dato efímero de Meta que **no** se copia al
+  migrar la base), la asistencia también se puede confirmar sin WhatsApp con el
+  botón **Confirmar asistencia** de la tarjeta del turno
+  (`PATCH` con `{"estado_turno":"CONFIRMADO"}`) y con el tilde verde de la agenda
+  móvil: son acciones de un toque pensadas para el paciente que avisa por teléfono
+  o llega al consultorio.
 
 > **Método HTTP de la actualización de turnos.** *Editar* y *Cancelar* comparten
 > el mismo endpoint: **`PATCH /api/v1/turnos/{id}`** (el `fetch` del panel
@@ -428,6 +434,10 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 - **Turnos ocupados:** nombre del paciente, teléfono, DNI, horario y estado. El
   `CONFIRMADO` se pinta con **fondo verde**, el `PENDIENTE` toma el color del
   odontólogo y los cancelados del día se listan aparte, en gris y tachados.
+- **Confirmar la asistencia en un toque:** el botón de *tilde* de cada turno
+  pendiente ejecuta `PATCH /api/v1/turnos/{id}` con `{"estado_turno": "CONFIRMADO"}`
+  (el mismo que el botón *Confirmar asistencia* del panel) y el bloque pasa al
+  verde sin esperar la respuesta del recordatorio de WhatsApp.
 - **Cancelar en un toque:** el botón de *cesto* abre una hoja de confirmación que
   ejecuta `PATCH /api/v1/turnos/{id}` con `{"estado_turno": "CANCELADO"}` (el
   mismo endpoint que el botón *Cancelar* del panel); el horario vuelve a quedar

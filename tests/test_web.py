@@ -261,6 +261,38 @@ def test_la_agenda_movil_marca_los_estados_y_los_horarios_libres(client):
     assert "items.sort" in js
 
 
+def test_se_puede_confirmar_la_asistencia_del_turno_desde_la_ui(client):
+    """Confirmar la asistencia es una acción de un toque, en el panel y en el celular.
+
+    El panel la ofrece como botón de la tarjeta del turno (*Confirmar asistencia*)
+    y la agenda móvil como botón de tilde; los dos ejecutan
+    ``PATCH /turnos/{id}`` con ``estado_turno = CONFIRMADO``. No dependen de que
+    el paciente responda el WhatsApp —los botones *Responder: Confirma/Cancela*
+    necesitan el ``whatsapp_mensaje_id`` de un mensaje realmente enviado—, así que
+    la opción sigue disponible aunque el turno nunca haya recibido el recordatorio.
+    """
+    app_js = client.get("/static/app.js").text
+    assert 'data-confirmar-turno="${t.id}"' in app_js
+    assert "Confirmar asistencia" in app_js
+    # Sólo se ofrece mientras el turno está pendiente: el confirmado ya está en
+    # verde y el cancelado se reactiva desde *Editar* / *Reactivar*.
+    assert 't.estado_turno === "PENDIENTE"' in app_js
+
+    calendario = client.get("/static/calendar.js").text
+    assert '"[data-confirmar-turno]"' in calendario
+    assert "confirmarAsistencia" in calendario
+    assert 'AVISO_ESTADO' in calendario and "Asistencia confirmada" in calendario
+
+    movil = client.get("/static/medico.js").text
+    assert 'class="m-check" data-confirmar="${t.id}"' in movil
+    assert 'estado_turno: "CONFIRMADO"' in movil
+    assert 'objetivo.closest("[data-confirmar]")' in movil
+
+    css = client.get("/static/medico.css").text
+    assert ".m-check" in css
+    assert ".m-check:active" in css
+
+
 def test_el_panel_enlaza_la_vista_movil(client):
     """El menú del panel ofrece el acceso a la agenda móvil del odontólogo."""
     html = client.get("/").text

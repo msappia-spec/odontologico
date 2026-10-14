@@ -697,30 +697,41 @@
   }
 
   /* ------------------ Acciones sobre turnos (PATCH /turnos) -------------- */
-  function cambiarEstado(id, estado, etiqueta) {
+
+  /* Título del aviso de éxito según el estado al que se movió el turno. */
+  const AVISO_ESTADO = {
+    CANCELADO: "Turno cancelado",
+    PENDIENTE: "Turno reactivado",
+    CONFIRMADO: "Asistencia confirmada",
+  };
+
+  function cambiarEstado(id, estado, etiqueta, pedirConfirmacion = true) {
     const A = app();
     const t = turnoPorId(id);
     if (!A || !t) return;
     const detalle =
       `${A.nombrePaciente(t.paciente_id)} · ${A.fechaCorta(t.fecha_hora_inicio)} ` +
       `${A.parteHora(t.fecha_hora_inicio)} · ${A.nombreDoctor(t.doctor_id)}`;
-    if (!window.confirm(`¿${etiqueta} el turno de ${detalle}?`)) return;
+    if (pedirConfirmacion && !window.confirm(`¿${etiqueta} el turno de ${detalle}?`)) return;
     ocultarTooltip();
     A.api(`/turnos/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ estado_turno: estado }),
     })
       .then(function () {
-        A.toast(
-          "exito",
-          estado === "CANCELADO" ? "Turno cancelado" : "Turno reactivado",
-          detalle
-        );
+        A.toast("exito", AVISO_ESTADO[estado] || "Turno actualizado", detalle);
         return A.cargarTodo();
       })
       .catch(function (err) {
         A.toast("error", "No se pudo actualizar el turno", err.message);
       });
+  }
+
+  /* Confirmar la asistencia del paciente: acción de un toque —sin diálogo, a
+     diferencia de cancelar o reactivar— que deja el turno en verde cuando el
+     paciente avisa por teléfono o llega al consultorio. */
+  function confirmarAsistencia(id) {
+    cambiarEstado(id, "CONFIRMADO", "Confirmar", false);
   }
 
   /* ------------------------ Formulario del turno ------------------------- */
@@ -876,7 +887,9 @@
       const cancelar = e.target.closest("[data-cancelar-turno]");
       if (cancelar) { cambiarEstado(cancelar.dataset.cancelarTurno, "CANCELADO", "Cancelar"); return; }
       const reactivar = e.target.closest("[data-reactivar-turno]");
-      if (reactivar) cambiarEstado(reactivar.dataset.reactivarTurno, "PENDIENTE", "Reactivar");
+      if (reactivar) { cambiarEstado(reactivar.dataset.reactivarTurno, "PENDIENTE", "Reactivar"); return; }
+      const confirmar = e.target.closest("[data-confirmar-turno]");
+      if (confirmar) confirmarAsistencia(confirmar.dataset.confirmarTurno);
     });
   }
 
