@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # Por defecto SQLite; para PostgreSQL usar
     # "postgresql+psycopg://usuario:password@host:5432/db".
     database_url: str = "sqlite:///./odontologico.db"
+    # Destino opcional de ``scripts/migrar_sqlite_a_postgres`` (la base de la
+    # nube, p. ej. la de Neon). Vive acá para poder dejarla en el ``.env`` local
+    # en lugar de pegar la cadena en la línea de comandos; el despliegue no la
+    # usa, porque la app sólo lee ``database_url``.
+    database_url_destino: Optional[str] = None
 
     # --- CORS (interfaz web y clientes externos) ---
     # Orígenes autorizados a consumir la API desde otro dominio. Con ``["*"]``

@@ -43,6 +43,11 @@ Uso (desde la raíz del proyecto, con el venv activo)::
     python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://..." --ejecutar
     python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://..." --modo agregar --ejecutar
 
+La cadena también se puede dejar en el ``.env`` local como ``DATABASE_URL_DESTINO``
+(ignorado por git) para no pegar el secreto en la línea de comandos::
+
+    python -m scripts.migrar_sqlite_a_postgres --modo agregar --ejecutar
+
 La cadena puede pegarse **tal cual** la entrega el proveedor (``postgresql://``):
 el script la reescribe al driver psycopg 3 con el mismo criterio que
 ``app/core/config.py``, que es el driver que instala ``requirements.txt``.
@@ -55,7 +60,6 @@ que en Neon es UTC, de modo que el instante se conserva.
 from __future__ import annotations
 
 import argparse
-import os
 from dataclasses import dataclass, field
 
 from sqlalchemy import Engine, create_engine, delete, func, select
@@ -338,10 +342,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--destino",
-        default=os.getenv("DATABASE_URL_DESTINO"),
+        default=None,
         help=(
             "Cadena del destino, tal como la entrega el proveedor "
-            "(postgresql://...). También se lee de DATABASE_URL_DESTINO."
+            "(postgresql://...). Por defecto, la variable de entorno "
+            "DATABASE_URL_DESTINO (o la misma clave en el .env local)."
         ),
     )
     parser.add_argument(
@@ -365,11 +370,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.destino:
-        parser.error("Falta --destino (o la variable DATABASE_URL_DESTINO).")
+    # La cadena puede venir por --destino, del entorno o del .env local.
+    destino = args.destino or settings.database_url_destino
+    if not destino:
+        parser.error("Falta --destino (o DATABASE_URL_DESTINO en el entorno/.env).")
 
     resultado = migrar(
-        args.destino,
+        destino,
         args.origen,
         ejecutar=args.ejecutar,
         modo=args.modo,

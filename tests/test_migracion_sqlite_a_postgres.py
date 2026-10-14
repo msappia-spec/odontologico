@@ -27,6 +27,7 @@ from app.models.enums import (
 from app.models.obra_social import ObraSocial
 from app.models.paciente import Paciente
 from app.models.turno import Turno
+from scripts import migrar_sqlite_a_postgres as migrador
 from scripts.migrar_sqlite_a_postgres import (
     MODOS,
     _normalizar_url,
@@ -304,9 +305,30 @@ def test_cli_sin_ejecutar_no_escribe(origen_url, destino_url, capsys):
 def test_cli_exige_destino(monkeypatch):
     """Sin ``--destino`` ni ``DATABASE_URL_DESTINO`` el CLI corta con error."""
     monkeypatch.delenv("DATABASE_URL_DESTINO", raising=False)
+    monkeypatch.setattr(migrador.settings, "database_url_destino", None)
 
     with pytest.raises(SystemExit):
         main(["--origen", "sqlite:///no-existe.db"])
+
+
+def test_settings_lee_database_url_destino_del_entorno(monkeypatch):
+    """La cadena del destino se puede dejar en el entorno (o en el ``.env``)."""
+    monkeypatch.setenv("DATABASE_URL_DESTINO", "postgresql://u:p@host:5432/db")
+
+    assert (
+        Settings(_env_file=None).database_url_destino
+        == "postgresql://u:p@host:5432/db"
+    )
+
+
+def test_cli_toma_el_destino_de_la_configuracion(origen_url, destino_url, monkeypatch, capsys):
+    """Sin ``--destino`` se usa ``settings.database_url_destino``."""
+    monkeypatch.setattr(migrador.settings, "database_url_destino", destino_url)
+
+    assert main(["--origen", origen_url, "--ejecutar"]) == 0
+
+    assert "Total de filas copiadas: 8" in capsys.readouterr().out
+    assert set(_conteos(destino_url).values()) != {0}
 
 
 def test_modos_disponibles():
