@@ -139,7 +139,7 @@ python -m scripts.replicar_datos_api --ejecutar  # crea lo que falte
 ✅ **Hecho el 13/10/2026**: 32 registros copiados a Neon (3 odontólogos, 5 obras
 sociales, 4 pacientes, 13 rangos de agenda y 7 turnos).
 
-### 🔧 Dos problemas que ya quedaron resueltos (por si reaparecen)
+### 🔧 Problemas que ya quedaron resueltos (por si reaparecen)
 
 - **`requirements.txt` con BOM** (`EF BB BF`): Vercel aborta con
   *"could not parse requirements.txt: Unexpected '\ufeff'"*. El archivo debe estar
@@ -151,4 +151,13 @@ sociales, 4 pacientes, 13 rangos de agenda y 7 turnos).
   when resolving dependencies"*. `requirements.txt` ahora lista sólo las
   dependencias **directas**; las de desarrollo (pytest, esprima) están en
   `requirements-dev.txt`.
+- **`500` en `/api/v1/doctores/{id}/horarios-disponibles` con PostgreSQL**: los
+  logs de la Function mostraban
+  `TypeError: can't compare offset-naive and offset-aware datetimes` en
+  `turno_service.py`. En PostgreSQL una columna `TIMESTAMP WITH TIME ZONE` vuelve
+  *aware*, y el proyecto trabaja con **UTC naive** (con SQLite no pasa, por eso el
+  error sólo aparecía en la nube). Se resolvió con el tipo `UTCDateTime`
+  (`app/db/types.py`), que normaliza al leer y al escribir **sin cambiar el
+  esquema**. Controles: `tests/test_fechas_utc_naive.py`. Para ver los errores de
+  una Function: `vercel logs --deployment odontologico-omega.vercel.app`.
 

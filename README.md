@@ -44,6 +44,7 @@ Odontologico/
 │   │   ├── base_class.py           # DeclarativeBase (SQLAlchemy 2.0)
 │   │   ├── base.py                 # Agregador de metadatos (importa modelos)
 │   │   ├── session.py              # Engine, SessionLocal, dependencia get_db
+│   │   ├── types.py                # UTCDateTime (UTC naive en PostgreSQL)
 │   │   └── init_db.py              # create_all / drop_all
 │   ├── models/
 │   │   ├── enums.py                # EstadoTurno, EstadoWhatsApp
