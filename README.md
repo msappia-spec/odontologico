@@ -84,6 +84,7 @@ Odontologico/
 │       └── medico.js               # Selección del profesional + agenda + acciones
 ├── scripts/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
+│   ├── publicar.py                      # Publicar en un paso: pruebas + commit + push + deploy
 │   ├── migrar_turnos_unique_parcial.py  # Migración al índice único parcial de turnos
 │   ├── migrar_pacientes_datos.py        # Migración: DNI y cobertura del paciente
 │   └── migrar_obra_social.py            # Migración: obra_social (texto) → catálogo
@@ -102,6 +103,7 @@ Odontologico/
 │   └── test_whatsapp_flow.py
 ├── requirements.txt
 ├── pytest.ini
+├── publicar.bat                    # Doble clic: publica usando el intérprete del .venv
 ├── .env.example
 └── README.md
 ```
@@ -168,6 +170,45 @@ es uno de los *entrypoints* que Vercel reconoce (`app.py`, `index.py`,
 > ⚠️ **No usar `vercel.json` con `builds`/`routes`**: ese formato (API v2) está
 > obsoleto y hace fallar el *build*. El contrato se verifica en
 > `tests/test_deploy_vercel.py`.
+
+### Publicar los cambios en un paso (`scripts/publicar.py`)
+
+Subir una modificación son varios pasos que hay que repetir **en orden**:
+probar, *commitear*, empujar a GitHub y desplegar en Vercel. El script los
+encadena y corta al primer fallo (nunca se publica código sin probar ni quedan
+*commits* locales sin subir):
+
+```powershell
+cd c:\Sistema\Odontologico
+python -m scripts.publicar                        # pruebas + commit + push + deploy + verificación
+python -m scripts.publicar -m "Arregla el panel"  # con mensaje de commit propio
+python -m scripts.publicar --simulacro            # muestra qué haría, sin escribir nada
+```
+
+En Windows también está `publicar.bat` en la raíz (doble clic): usa el
+intérprete del `.venv` y deja la ventana abierta para leer el resultado.
+
+| Opción | Para qué sirve |
+|---|---|
+| `-m, --mensaje "..."` | Mensaje del commit (si no se pasa, se arma uno con fecha y hora) |
+| `--sin-tests` | No corre `pytest` antes de subir (no recomendado) |
+| `--sin-deploy` | Sólo GitHub: *commitea* y empuja, sin desplegar |
+| `--solo-deploy` | Sólo Vercel: despliega sin tocar git |
+| `--forzar` | Despliega aunque no haya cambios nuevos |
+| `--simulacro` | Informa qué haría y con qué archivos, sin ejecutar nada que escriba |
+| `--sin-verificar` | No consulta la URL publicada al terminar |
+| `--rama <nombre>` | Rama a empujar (por defecto, la que está activa) |
+| `--url <base>` | Base de la app publicada que se verifica |
+
+- Las pruebas corren con **el mismo intérprete** que ejecuta el script
+  (`python -m pytest`); si alguna falla, no se sube nada.
+- Si no hay cambios ni *commits* pendientes, no *commitea* ni despliega: lo
+  informa y termina (es el caso de un doble clic de más).
+- Al final consulta `/health`, el panel y `/medico` de la URL publicada. Un
+  `401`/`403` se informa como **aviso**: es la *Deployment Protection* de Vercel,
+  no un error de la aplicación.
+- Controles: `tests/test_publicar.py` (con un ejecutor de comandos y un cliente
+  HTTP falsos: no corren git, ni la CLI de Vercel, ni tocan la red).
 
 ### 0) Deploy por CLI (lo que se usó acá)
 

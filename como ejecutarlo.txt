@@ -63,7 +63,37 @@ Documentación de la API: `https://odontologico-omega.vercel.app/docs`
 Salud del servicio: `https://odontologico-omega.vercel.app/health` → `{"status":"ok",...}`
 
 El proyecto en Vercel es **`marcozface-2235/odontologico`** (deploy hecho por CLI
-el 13/10/2026, *Ready in 35s*). Para volver a subir cambios alcanza con:
+el 13/10/2026, *Ready in 35s*).
+
+#### 🚀 Publicar cambios en un paso (`scripts/publicar.py`)
+
+El atajo para subir modificaciones: hace las **pruebas**, el **commit**, el
+**push a GitHub** y el **deploy en Vercel** —en ese orden— y corta al primer
+fallo, así no se publica código sin probar ni quedan commits sin subir.
+
+```powershell
+cd c:\Sistema\Odontologico
+python -m scripts.publicar                        # todo: pruebas + commit + push + deploy
+python -m scripts.publicar -m "Arregla el panel"  # con mensaje de commit propio
+python -m scripts.publicar --simulacro            # muestra qué haría, sin escribir nada
+```
+
+- También se puede **hacer doble clic en `publicar.bat`** (está en la raíz del
+  proyecto): usa el Python del `.venv` y deja la ventana abierta para leer el
+  resultado.
+- Si **alguna prueba falla**, no se sube nada.
+- Si **no hay cambios** ni commits pendientes, no commitea ni despliega: lo avisa
+  y termina (nada de "doble clic de más").
+- Opciones útiles: `--sin-tests`, `--sin-deploy` (sólo GitHub), `--solo-deploy`
+  (sólo Vercel, sin tocar git), `--forzar` (despliega aunque no haya cambios),
+  `--sin-verificar`, `--rama <nombre>`, `--url <base>`. Ayuda completa:
+  `python -m scripts.publicar --help`.
+- Al terminar consulta `/health`, el panel y `/medico` de la URL publicada: si
+  responde **401/403** es la *Deployment Protection* de Vercel (es un aviso, no
+  un error de la app).
+- Controles: `tests/test_publicar.py` (no ejecutan git, ni vercel, ni tocan la red).
+
+Deploy manual (por si hay que repetirlo a mano):
 
 ```powershell
 cd c:\Sistema\Odontologico

@@ -29,6 +29,9 @@ htmlcov/
 tests/
 scripts/
 
+# Atajos de publicación (se usan desde la máquina, no dentro del deploy)
+publicar.bat
+
 # Editores
 .vscode/
 .idea/
