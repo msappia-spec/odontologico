@@ -401,6 +401,14 @@ def test_correr_resuelve_los_cmd_que_instala_npm(tmp_path, monkeypatch):
     assert "hola desde el cmd" in completado.salida
 
 
+def test_correr_conserva_el_espacio_inicial_del_formato_porcelain():
+    """Regresión: sin ese espacio, `` M app/main.py`` daba «pp/main.py»."""
+    completado = _correr([sys.executable, "-c", "print(' M app/main.py')"])
+
+    assert completado.salida == " M app/main.py"
+    assert _nombres_del_status(completado.salida) == ["app/main.py"]
+
+
 def test_preparar_salida_ajusta_los_flujos_que_puede(monkeypatch):
     class FlujoFalso:
         """Doble de ``sys.stdout`` que registra los ajustes pedidos."""

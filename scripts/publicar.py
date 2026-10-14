@@ -197,7 +197,10 @@ def _correr(
         ) from error
     salida = ""
     if capturar:
-        salida = f"{proceso.stdout or ''}{proceso.stderr or ''}".strip()
+        # Ojo: ``rstrip`` y no ``strip``: en ``git status --porcelain`` el
+        # espacio inicial de « M ruta» es parte del formato (indica "sin
+        # cambios en el índice"), y recortarlo correría un carácter el nombre.
+        salida = f"{proceso.stdout or ''}{proceso.stderr or ''}".rstrip()
     return Completado(proceso.returncode, salida)
 
 
@@ -232,9 +235,13 @@ def _detalle(salida: str, maximo: int = 6) -> str:
 def _nombres_del_status(salida: str) -> list[str]:
     """Extrae los nombres de archivo de ``git status --porcelain``.
 
-    El formato es ``XY ruta`` (dos columnas de estado) y los renombres llegan
-    como ``R  viejo -> nuevo``; los nombres con caracteres especiales vienen
-    entre comillas dobles.
+    El formato es ``XY ruta`` (dos columnas de estado y **un espacio**) y los
+    renombres llegan como ``R  viejo -> nuevo``; los nombres con caracteres
+    especiales vienen entre comillas dobles.
+
+    Espera la salida **sin recortar**: el primer carácter de `` M ruta`` es un
+    espacio del propio formato, así que ``strip()`` sobre la salida correría un
+    carácter el nombre (para eso ``_correr`` usa ``rstrip``).
     """
 
     nombres: list[str] = []
