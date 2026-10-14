@@ -5,6 +5,8 @@ las órdenes en vez de correrlas) y un cliente HTTP falso. Así las pruebas no
 llaman a git, ni a la CLI de Vercel, ni tocan la red ni el repositorio real.
 """
 
+import os
+import sys
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -14,8 +16,10 @@ from scripts.publicar import (
     Completado,
     Consulta,
     ErrorPublicacion,
+    _correr,
     _nombres_del_status,
     _preparar_salida,
+    _resolver_ejecutable,
     archivos_modificados,
     asunto_automatico,
     commits_pendientes,
@@ -348,6 +352,53 @@ def test_commits_pendientes_ante_un_error_devuelve_cero():
 def test_archivos_modificados_propaga_el_fallo_de_git():
     with pytest.raises(ErrorPublicacion):
         archivos_modificados(EjecutorFalso(fallar=("status",)))
+
+
+def test_resolver_ejecutable_usa_la_ruta_que_encuentra_en_el_path():
+    encontrado = _resolver_ejecutable(
+        "vercel", buscar=lambda nombre: "C:/nodejs/vercel.CMD"
+    )
+
+    assert encontrado == "C:/nodejs/vercel.CMD"
+
+
+def test_resolver_ejecutable_deja_el_nombre_si_no_lo_encuentra():
+    assert _resolver_ejecutable("vercel", buscar=lambda nombre: None) == "vercel"
+
+
+@pytest.mark.parametrize(
+    "ruta",
+    ["C:/Program Files/Git/cmd/git.exe", r"C:\tools\git.exe", "bin/tool"],
+)
+def test_resolver_ejecutable_no_toca_los_nombres_que_ya_son_rutas(ruta):
+    assert _resolver_ejecutable(ruta, buscar=lambda nombre: None) == ruta
+
+
+def test_correr_ejecuta_de_verdad_y_captura_la_salida():
+    completado = _correr([sys.executable, "-c", "print('hola')"])
+
+    assert completado.ok
+    assert "hola" in completado.salida
+
+
+def test_correr_avisa_cuando_falta_el_programa():
+    with pytest.raises(ErrorPublicacion) as error:
+        _correr(["programa-que-no-existe-jamas"])
+
+    assert "No se encontró el programa" in str(error.value)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Los .cmd son de Windows")
+def test_correr_resuelve_los_cmd_que_instala_npm(tmp_path, monkeypatch):
+    """Regresión: ``CreateProcess`` no aplica ``PATHEXT`` y no veía ``vercel.cmd``."""
+    script = tmp_path / "saludo.cmd"
+    script.write_text("@echo hola desde el cmd\r\n", encoding="ascii")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+    completado = _correr(["saludo"], cwd=tmp_path)
+
+    assert completado.ok
+    assert "hola desde el cmd" in completado.salida
 
 
 def test_preparar_salida_ajusta_los_flujos_que_puede(monkeypatch):

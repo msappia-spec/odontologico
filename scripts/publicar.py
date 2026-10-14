@@ -45,6 +45,7 @@ falsos: las pruebas no corren git, ni vercel, ni tocan la red).
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -146,6 +147,23 @@ class Resultado:
     fallas: list[str] = field(default_factory=list)
 
 
+def _resolver_ejecutable(
+    nombre: str,
+    buscar: Callable[[str], Optional[str]] = shutil.which,
+) -> str:
+    """Devuelve la ruta real del ejecutable (``vercel`` → ``vercel.cmd``).
+
+    En Windows ``subprocess``/``CreateProcess`` **no** aplica ``PATHEXT``: al
+    recibir ``vercel`` a secas no ve el ``.cmd`` que instala npm y falla con
+    *"El sistema no puede encontrar el archivo especificado"*. Resolver la ruta
+    con ``shutil.which`` (que sí mira ``PATHEXT``) evita ese falso "no está
+    instalado". Los nombres que ya son rutas se dejan como están.
+    """
+    if os.sep in nombre or (os.altsep and os.altsep in nombre):
+        return nombre
+    return buscar(nombre) or nombre
+
+
 def _correr(
     comando: list[str],
     *,
@@ -154,9 +172,11 @@ def _correr(
     tiempo_espera: int = TIEMPO_ESPERA_GIT,
 ) -> Completado:
     """Ejecuta un comando externo (git, vercel, pytest) y devuelve su salida."""
+    partes = [str(parte) for parte in comando]
+    partes[0] = _resolver_ejecutable(partes[0])
     try:
         proceso = subprocess.run(
-            [str(parte) for parte in comando],
+            partes,
             cwd=str(cwd),
             capture_output=capturar,
             text=True,
