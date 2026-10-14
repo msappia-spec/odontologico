@@ -69,25 +69,26 @@ cd c:\Sistema\Odontologico
 vercel --prod --yes
 ```
 
-### ⚠️ Falta conectar una base PostgreSQL (importante)
+### ✅ Base PostgreSQL conectada (Neon) — 13/10/2026
 
-Tal como está ahora, en Vercel la app usa un **SQLite temporal en `/tmp`**: la
-página abre perfecto, pero **está vacía** (`/api/v1/doctores` devuelve `[]`) y todo
-lo que cargues **se borra** cuando Vercel reinicia la instancia (los archivos de
-un servidor serverless son de sólo lectura, salvo `/tmp`).
+La app ya **guarda en PostgreSQL (Neon, plan gratis)**: la cadena está en Vercel
+como `DATABASE_URL` (variable creada por la integración de Neon, entornos
+*Production* y *Preview*) y se hizo un **Redeploy** para que la Function la tome.
+Las variables nuevas no entran en un deploy viejo: hasta ese momento el SQLite de
+`/tmp` hacía que cada instancia viera datos distintos y que se perdieran al
+reciclarse.
 
-Para que guarde de verdad:
+Verificado en producción: `/health` → `{"status":"ok",...}`, `/api/v1/doctores`
+devuelve los 3 odontólogos y los datos sobreviven entre peticiones e instancias.
 
-1. Creá una base gratis en <https://neon.tech> y copiá la cadena de conexión
-   (`postgresql://usuario:clave@host/db?sslmode=require`).
-2. En Vercel: **Project → Settings → Environment Variables** → agregá
-   `DATABASE_URL` con esa cadena (entorno *Production*) y tocá **Redeploy**.
-   También podés hacerlo por CLI: `vercel env add DATABASE_URL production`.
-3. Pasá tus datos: en vez de cargarlos a mano, copiá la base local con
-   `python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://..." --ejecutar`
-   (sin `--ejecutar` sólo muestra qué haría, ver *Migrar los datos locales a la
-   nube*). Si preferís arrancar de cero, cargá los datos de ejemplo con
-   `python -m scripts.seed` o desde el panel.
+Si algún día hay que repetir la conexión desde cero:
+
+1. Creá la base en <https://neon.tech> (región `sa-east-1`, la más cercana a
+   `gru1`) y copiá la cadena (`postgresql://usuario:clave@host/db?sslmode=require`).
+2. En Vercel: **Project → Settings → Environment Variables** → `DATABASE_URL`
+   con esa cadena (entorno *Production*) y **Redeploy**
+   (`vercel --prod --yes`). El esquema de tablas lo crea la app al arrancar.
+3. Pasá tus datos con alguno de los dos scripts de la sección siguiente.
 
 ### 📦 Migrar los datos locales a la nube
 
@@ -111,6 +112,32 @@ python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://..." --ejecut
   `psycopg` igual que hace la app.
 - Controles: `tests/test_migracion_sqlite_a_postgres.py` (16 pruebas de la copia,
   los modos, el simulacro y la línea de comandos).
+
+#### Alternativa sin la cadena de PostgreSQL
+
+Las variables que crea la integración de Neon quedan marcadas como *sensitive*:
+`vercel env pull` baja `[SENSITIVE]` en lugar del valor, así que la cadena no se
+puede leer desde la máquina. Para esos casos está
+`scripts/replicar_datos_api.py`, que copia los datos con la **API HTTP** de la
+app desplegada:
+
+```powershell
+python -m scripts.replicar_datos_api             # simulacro (sólo GET)
+python -m scripts.replicar_datos_api --ejecutar  # crea lo que falte
+```
+
+- Empareja por clave **natural** (nombre de la obra social y del odontólogo,
+  documento/teléfono del paciente, odontólogo + fecha/hora del turno), porque los
+  `id` de la nube los asigna el servidor, y traduce las claves foráneas con los
+  `id` que devuelve la API.
+- Nunca actualiza ni borra lo existente: repetirlo no duplica nada.
+- Copia la agenda semanal con `PUT` (reemplazo total) y conserva los estados de
+  cada turno (incluidos los `CANCELADO`).
+- Controles: `tests/test_replicar_datos_api.py` (12 pruebas con un servidor HTTP
+  falso, sin tocar la red).
+
+✅ **Hecho el 13/10/2026**: 32 registros copiados a Neon (3 odontólogos, 5 obras
+sociales, 4 pacientes, 13 rangos de agenda y 7 turnos).
 
 ### 🔧 Dos problemas que ya quedaron resueltos (por si reaparecen)
 

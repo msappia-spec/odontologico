@@ -248,6 +248,13 @@ termina con error. `--modo agregar` inserta sólo las filas que falten, sin borr
 lo cargado desde la web. Controles en
 `tests/test_migracion_sqlite_a_postgres.py`.
 
+Existe además la vía **sin la cadena de PostgreSQL**: cuando la integración de Neon
+la guarda como *sensitive* (`vercel env pull` devuelve `[SENSITIVE]`),
+`python -m scripts.replicar_datos_api --ejecutar` copia los datos con la propia API
+HTTP de la app desplegada, emparejando por nombre, documento/teléfono y
+odontólogo + fecha del turno, sin tocar lo que ya existe. Controles en
+`tests/test_replicar_datos_api.py`.
+
 ---
 
 ## 🖥️ Interfaz web (Panel Principal de la secretaría)
