@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.datetime_utils import dia_semana_de, rango_del_dia
+from app.core.datetime_utils import dia_semana_de, rango_del_dia, to_naive_utc
 from app.core.exceptions import (
     PacienteConTurnoSolapadoError,
     RecursoNoEncontradoError,
@@ -339,12 +339,19 @@ def _bloques_de_rangos(
 
 def _turnos_vigentes_del_dia(
     db: Session, doctor_id: int, fecha: Date
-) -> List[Turno]:
-    """Turnos vigentes (distintos de ``CANCELADO``) del doctor en ``fecha``.
+) -> List[Tuple[datetime, datetime]]:
+    """Intervalos ``(inicio, fin)`` de los turnos vigentes del doctor en ``fecha``.
 
+    Se excluyen los ``CANCELADO`` (su horario vuelve a estar libre).
     ``fecha_hora_inicio``/``fecha_hora_fin`` se guardan como *naive* en UTC (ver
     ``app.core.datetime_utils``) y el panel web los interpreta como hora local
     del consultorio; por eso el día se delimita con :func:`rango_del_dia`.
+
+    Los valores se devuelven ya **normalizados a UTC naive**: en PostgreSQL la
+    columna es ``TIMESTAMP WITH TIME ZONE`` y el valor puede llegar con zona
+    horaria; comparar en Python un ``aware`` con un ``naive`` lanza
+    ``TypeError: can't compare offset-naive and offset-aware datetimes`` (el
+    error que rompía *horarios disponibles* en producción).
     """
     inicio, fin = rango_del_dia(fecha)
     stmt = select(Turno).where(
@@ -353,7 +360,10 @@ def _turnos_vigentes_del_dia(
         Turno.fecha_hora_inicio <= fin,
         Turno.fecha_hora_fin >= inicio,
     )
-    return list(db.execute(stmt).scalars().all())
+    return [
+        (to_naive_utc(turno.fecha_hora_inicio), to_naive_utc(turno.fecha_hora_fin))
+        for turno in db.execute(stmt).scalars().all()
+    ]
 
 
 def horarios_disponibles(
@@ -396,7 +406,12 @@ def horarios_disponibles(
     for hora_inicio, hora_fin in candidatos:
         inicio = datetime.combine(fecha, hora_inicio)
         fin = datetime.combine(fecha, hora_fin)
-        if any(t.fecha_hora_inicio < fin and t.fecha_hora_fin > inicio for t in ocupados):
+        # ``ocupados`` son intervalos UTC naive, igual que ``inicio``/``fin``:
+        # nunca se comparan valores con y sin zona horaria.
+        if any(
+            ocupa_inicio < fin and ocupa_fin > inicio
+            for ocupa_inicio, ocupa_fin in ocupados
+        ):
             continue
         libres.append((hora_inicio, hora_fin))
     return efectiva, libres

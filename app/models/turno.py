@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     CheckConstraint,
-    DateTime,
     Enum as SAEnum,
     ForeignKey,
     Index,
@@ -15,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base
+from app.db.types import UTCDateTime
 from app.models.enums import EstadoTurno, EstadoWhatsApp
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
@@ -70,11 +70,12 @@ class Turno(Base):
     )
 
     fecha_hora_inicio: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
+        # ``UTCDateTime``: en PostgreSQL la columna es ``TIMESTAMP WITH TIME
+        # ZONE``, pero el ORM entrega y recibe **UTC naive** (convención del
+        # proyecto), para que las comparaciones en Python no mezclen zonas.
+        UTCDateTime, nullable=False, index=True
     )
-    fecha_hora_fin: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    fecha_hora_fin: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
     estado_turno: Mapped[EstadoTurno] = mapped_column(
         SAEnum(
