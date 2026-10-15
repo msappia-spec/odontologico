@@ -68,6 +68,18 @@ class TurnoNoEncontradoError(RecursoNoEncontradoError):
     default_detail = "Turno no encontrado."
 
 
+class TurnoYaFacturadoError(ConflictoError):
+    """El turno ya tiene un cierre de caja (un movimiento de facturación).
+
+    Un turno se factura una sola vez: el movimiento de caja es el comprobante de
+    esa visita. Si hay que corregir algo, se registra un movimiento nuevo (otra
+    facturación con su propia observación) en lugar de pisar el anterior.
+    """
+
+    default_detail = "El turno ya fue facturado: no se puede cerrar dos veces."
+
+
+
 class RespuestaWebhookInvalidaError(AppError):
     """El payload recibido por el webhook no tiene el formato esperado."""
 

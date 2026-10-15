@@ -6,6 +6,10 @@ Incluye la gestión completa del profesional: alta (``POST``), listado y detalle
 turnos y su historia se conservan). Los profesionales dados de baja se pueden
 seguir consultando con ``GET /doctores?activos=false`` y reactivar con
 ``PATCH {"activo": true}``.
+
+Desde el Módulo 3, ``tipo_pago``/``valor_pago`` definen cómo se le liquida su
+producción (dueño, comisión o sueldo) y se validan en el alta y en la edición:
+una comisión sin porcentaje o un sueldo sin importe responden **422**.
 """
 
 from typing import List, Optional

@@ -8,32 +8,43 @@ y desplegar en Vercel). Este script los encadena y **corta al primer fallo**,
 de modo que nunca se publica código sin probar ni quedan *commits* locales sin
 subir por olvido.
 
-Qué hace
---------
-1. Comprueba que estamos en la raíz del repositorio y en una rama con nombre
-   (si el ``HEAD`` está *detached*, avisa y no hace nada).
-2. Corre las pruebas con el mismo intérprete que ejecuta el script
-   (``python -m pytest``). Si alguna falla, **no se sube nada**.
-3. Agrega y *commitea* los cambios (``git add -A`` + ``git commit``), listando
-   los archivos incluidos.
-4. Empuja la rama a GitHub (``git push origin <rama>``).
-5. Despliega en producción (``vercel --prod --yes``).
-6. Verifica la URL publicada (``/health``, el panel y ``/medico``) y avisa si
-   el deploy quedó con *Deployment Protection* (respuesta 401/403) en lugar de
-   fallar por algo que no es un problema de la app.
+Qué hace (siempre en este orden)
+--------------------------------
+1. **Control de calidad**: corre las pruebas con el mismo intérprete que ejecuta
+   el script (``python -m pytest``). Si **al menos un test falla** (código de
+   salida distinto de 0) se aborta **de inmediato**: no se toca git ni Vercel y
+   el motivo se imprime en **rojo** («no se publica código con errores»), junto
+   con las pruebas que fallaron.
+2. **Control de versiones**: comprueba que estamos en la raíz del repositorio,
+   que la rama tiene nombre (si el ``HEAD`` está *detached*, avisa y no hace
+   nada) y que existe el remoto ``origin``. Después agrega todo (``git add -A``,
+   equivalente a ``git add .`` desde la raíz e incluye borrados), *commitea*
+   (con el mensaje de ``-m`` o uno automático con la fecha) y empuja la rama
+   (``git push origin <rama>``) para respaldar el código en GitHub.
+3. **Despliegue**: corre la CLI de Vercel (``vercel --prod --yes``) **capturando
+   su salida**, la muestra al terminar, extrae el dominio de producción que
+   informa la propia CLI y lo usa para verificar la app publicada (``/health``,
+   el panel y ``/medico``). Un ``401``/``403`` se informa como *aviso* (es la
+   *Deployment Protection* de Vercel, no un error de la app).
 
 Si no hay cambios ni *commits* pendientes, no se *commitea* (git lo rechazaría)
 ni se despliega: en ese caso se informa y termina. ``--forzar`` sirve para
 desplegar igual (por ejemplo después de cambiar una variable de entorno).
 
+La consola de Windows se prepara sola (página de códigos UTF-8 y secuencias ANSI)
+para que los acentos, los ✓ y los mensajes en rojo se vean limpios; con
+``NO_COLOR`` o ``--sin-colores`` los mensajes van sin códigos de color (útil para
+redirigir la salida a un archivo o para terminales viejas).
+
 Uso (desde la raíz del proyecto, con el venv activo)::
 
-    python -m scripts.publicar                       # pruebas + commit + push + deploy
+    python -m scripts.publicar                       # pytest + commit + push + deploy
     python -m scripts.publicar -m "Arregla el panel" # mensaje de commit propio
     python -m scripts.publicar --sin-tests           # saltea las pruebas
     python -m scripts.publicar --sin-deploy          # sólo GitHub
     python -m scripts.publicar --solo-deploy         # sólo Vercel (sin git)
     python -m scripts.publicar --simulacro           # informa sin escribir nada
+    python -m scripts.publicar --sin-colores         # logs sin colores ANSI
 
 En Windows hay además ``publicar.bat`` (doble clic) que llama a este módulo con
 el intérprete del entorno virtual.
@@ -46,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -55,7 +67,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 # Raíz del proyecto (este archivo vive en scripts/).
 RAIZ = Path(__file__).resolve().parents[1]
@@ -69,8 +81,43 @@ RUTAS_VERIFICADAS = ("/health", "/", "/medico")
 # Ramas válidas para publicar (git devuelve "HEAD" cuando está detached).
 RAMAS_INVALIDAS = {"", "HEAD"}
 
+# Remoto al que se empuja (el que se usa en los ejemplos de la documentación).
+REMOTO = "origin"
+
+# Carpeta donde la CLI de Vercel guarda el enlace con el proyecto.
+CARPETA_VERCEL = ".vercel"
+
+# Nombres del archivo de enlace (`repo.json` lo crea `vercel link --repo`).
+ARCHIVOS_DE_ENLACE = ("project.json", "repo.json")
+
+# Variables que enlazan el proyecto sin depender de la carpeta .vercel (CI).
+VARIABLES_DE_ENLACE = ("VERCEL_PROJECT_ID", "VERCEL_ORG_ID")
+
 # Subcomandos que sólo leen: se ejecutan incluso en modo simulacro.
-SUBCOMANDOS_SOLO_LECTURA = {"rev-parse", "status", "rev-list", "log", "diff", "ls"}
+SUBCOMANDOS_SOLO_LECTURA = {
+    "rev-parse",
+    "status",
+    "rev-list",
+    "log",
+    "diff",
+    "ls",
+    "remote",
+}
+
+# Asunto del commit automático (cuando no se pasa ``-m``).
+MENSAJE_AUTOMATICO = "Actualización automática - Módulos Unificados"
+
+# Dominio de producción que imprime la CLI de Vercel al terminar el deploy.
+PATRON_URL_VERCEL = re.compile(r"https?://[\w.-]+\.vercel\.app[^\s\"'<>)\]]*")
+
+# Líneas del resumen de pytest que nombran las pruebas que fallaron.
+PATRON_FALLA_PYTEST = re.compile(r"^(FAILED|ERROR)\s+(?P<prueba>\S+)")
+
+# Códigos ANSI (se apagan solos cuando la consola no los soporta).
+ROJO = "\033[1;31m"
+VERDE = "\033[1;32m"
+AMARILLO = "\033[1;33m"
+RESET = "\033[0m"
 
 TIEMPO_ESPERA_GIT = 120
 TIEMPO_ESPERA_TESTS = 1800
@@ -84,6 +131,12 @@ PAUSA_PRODUCCION = 10.0
 # Máximo de archivos que se listan en el cuerpo del commit.
 ARCHIVOS_EN_EL_COMMIT = 20
 
+# Máximo de líneas de una salida ajena que se muestran cuando algo falla.
+LINEAS_DE_SALIDA_AL_FALLAR = 40
+
+# ¿Conviene escribir códigos ANSI? Lo decide `_preparar_salida`.
+_COLORES = False
+
 AYUDA_INSTALACION = {
     "git": "Instalá Git (https://git-scm.com/download/win) y volvé a intentar.",
     "vercel": (
@@ -94,7 +147,24 @@ AYUDA_INSTALACION = {
 
 
 class ErrorPublicacion(RuntimeError):
-    """Fallo que impide publicar (se informa y se corta el proceso)."""
+    """Fallo que impide publicar (se informa y se corta el proceso).
+
+    ``rojo`` marca los fallos que además son de *control de calidad* (pruebas en
+    rojo): ``main`` los imprime en rojo para que se lean de un vistazo.
+    ``pistas`` agrega líneas de ayuda debajo del mensaje (qué hacer para
+    destrabar la publicación).
+    """
+
+    def __init__(
+        self,
+        mensaje: str,
+        *,
+        rojo: bool = False,
+        pistas: Sequence[str] = (),
+    ) -> None:
+        super().__init__(mensaje)
+        self.rojo = rojo
+        self.pistas = tuple(pistas)
 
 
 @dataclass
@@ -138,6 +208,7 @@ class Resultado:
     rama: str = ""
     archivos: list[str] = field(default_factory=list)
     commit: str = ""
+    pruebas: str = ""
     empujado: bool = False
     desplegado: bool = False
     url: str = ""
@@ -145,6 +216,99 @@ class Resultado:
     verificaciones: list[str] = field(default_factory=list)
     avisos: list[str] = field(default_factory=list)
     fallas: list[str] = field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Consola: colores ANSI y UTF-8 (Windows incluido)
+# --------------------------------------------------------------------------- #
+
+
+def colores_activos() -> bool:
+    """``True`` si la salida admite códigos ANSI (lo decide ``_preparar_salida``)."""
+    return _COLORES
+
+
+def _pintar(texto: str, codigo: str) -> str:
+    """Envuelve ``texto`` con ``codigo``; si no hay colores, lo devuelve igual."""
+    if not _COLORES:
+        return texto
+    return f"{codigo}{texto}{RESET}"
+
+
+def rojo(texto: str) -> str:
+    """Pinta el texto en rojo (para los errores que frenan la publicación)."""
+    return _pintar(texto, ROJO)
+
+
+def verde(texto: str) -> str:
+    """Pinta el texto en verde (para los pasos que salieron bien)."""
+    return _pintar(texto, VERDE)
+
+
+def amarillo(texto: str) -> str:
+    """Pinta el texto en amarillo (para los avisos)."""
+    return _pintar(texto, AMARILLO)
+
+
+def apagar_colores() -> None:
+    """Desactiva los colores (opción ``--sin-colores``)."""
+    global _COLORES
+    _COLORES = False
+
+
+def _consola_interactiva(flujo=None) -> bool:
+    """``True`` si ``flujo`` (por defecto ``sys.stdout``) es una consola de verdad."""
+    flujo = sys.stdout if flujo is None else flujo
+    es_terminal = getattr(flujo, "isatty", None)
+    if es_terminal is None:
+        return False
+    try:
+        return bool(es_terminal())
+    except (ValueError, OSError):  # pragma: no cover - flujo ya cerrado
+        return False
+
+
+def _consola_utf8() -> bool:
+    """Pone la consola de Windows en UTF-8 (para los ✓, los ⚠ y los acentos)."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        return bool(kernel32.SetConsoleOutputCP(65001))
+    except (AttributeError, ImportError, OSError):  # pragma: no cover - sin consola
+        return False
+
+
+def _habilitar_color_en_windows() -> bool:
+    """Activa las secuencias ANSI (*Virtual Terminal*) en la consola de Windows.
+
+    La consola clásica necesita ``ENABLE_VIRTUAL_TERMINAL_PROCESSING``; Windows
+    Terminal, VS Code y los sistemas que no son Windows ya vienen listos. Si algo
+    falla se devuelve ``False`` y los mensajes salen sin códigos de color.
+    """
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+        STD_OUTPUT_HANDLE, STD_ERROR_HANDLE = -11, -12
+        habilitado = False
+        for identificador in (STD_OUTPUT_HANDLE, STD_ERROR_HANDLE):
+            manejador = kernel32.GetStdHandle(identificador)
+            modo = wintypes.DWORD()
+            if not kernel32.GetConsoleMode(manejador, ctypes.byref(modo)):
+                continue
+            nuevo = modo.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            if kernel32.SetConsoleMode(manejador, nuevo):
+                habilitado = True
+        return habilitado
+    except (AttributeError, ImportError, OSError):  # pragma: no cover - sin consola
+        return False
 
 
 def _resolver_ejecutable(
@@ -222,6 +386,21 @@ def _consultar(url: str, *, tiempo_espera: int = TIEMPO_ESPERA_HTTP) -> Consulta
 # --------------------------------------------------------------------------- #
 # Lectura del estado del repositorio
 # --------------------------------------------------------------------------- #
+
+
+def _comando_legible(comando: Sequence[str], ancho: int = 60) -> str:
+    """Formatea un comando para el log: una sola línea, con comillas si hace falta.
+
+    Los ``git commit`` llevan el asunto y el cuerpo completos: se colapsan los
+    espacios y se recorta cada argumento largo, así la consola queda prolija.
+    """
+    partes: list[str] = []
+    for argumento in map(str, comando):
+        texto = " ".join(argumento.split())
+        if len(texto) > ancho:
+            texto = texto[: ancho - 1] + "…"
+        partes.append(f'"{texto}"' if " " in texto else texto)
+    return " ".join(partes)
 
 
 def _detalle(salida: str, maximo: int = 6) -> str:
@@ -312,20 +491,209 @@ def _exigir_programa(
 # --------------------------------------------------------------------------- #
 
 
+def momento_legible(ahora: Optional[datetime] = None) -> str:
+    """Fecha y hora en formato corto (``13/10/2026 09:05``)."""
+    return (ahora or datetime.now()).strftime("%d/%m/%Y %H:%M")
+
+
 def asunto_automatico(ahora: Optional[datetime] = None) -> str:
-    """Asunto del commit cuando no se pasa ``-m``."""
-    momento = (ahora or datetime.now()).strftime("%d/%m/%Y %H:%M")
-    return f"Publica cambios del {momento}"
+    """Asunto del commit cuando no se pasa ``-m``.
+
+    Ejemplo: ``Actualización automática - Módulos Unificados [2026-10-15]``.
+    """
+    fecha = (ahora or datetime.now()).strftime("%Y-%m-%d")
+    return f"{MENSAJE_AUTOMATICO} [{fecha}]"
 
 
-def cuerpo_del_commit(archivos: list[str]) -> str:
-    """Cuerpo del commit: la lista de archivos que entran."""
+def cuerpo_del_commit(archivos: list[str], ahora: Optional[datetime] = None) -> str:
+    """Cuerpo del commit: el momento exacto y la lista de archivos que entran.
+
+    Va aparte del asunto para que ``git log --oneline`` quede corto pero el
+    *commit* completo conserve la fecha **y la hora** de la publicación.
+    """
     listados = archivos[:ARCHIVOS_EN_EL_COMMIT]
     lineas = [f"- {nombre}" for nombre in listados]
     restantes = len(archivos) - len(listados)
     if restantes > 0:
         lineas.append(f"- … y {restantes} archivo(s) más")
-    return f"Archivos incluidos ({len(archivos)}):\n" + "\n".join(lineas)
+    return (
+        f"Publicado automáticamente por scripts/publicar.py el "
+        f"{momento_legible(ahora)}.\n\n"
+        f"Archivos incluidos ({len(archivos)}):\n" + "\n".join(lineas)
+    )
+
+
+def url_de_produccion(salida: str, por_defecto: str = URL_POR_DEFECTO) -> str:
+    """Dominio de producción que informó la CLI de Vercel (o ``por_defecto``)."""
+    encontradas = PATRON_URL_VERCEL.findall(salida or "")
+    return encontradas[-1].rstrip(".,") if encontradas else por_defecto
+
+
+def fallas_de_pytest(salida: str) -> list[str]:
+    """Pruebas que fallaron, según el resumen de pytest."""
+    fallas: list[str] = []
+    for linea in (salida or "").splitlines():
+        coincidencia = PATRON_FALLA_PYTEST.match(linea.strip())
+        if not coincidencia:
+            continue
+        nombre = coincidencia.group("prueba")
+        if nombre not in fallas:
+            fallas.append(nombre)
+    return fallas
+
+
+def resumen_de_pytest(salida: str) -> str:
+    """Última línea de pytest (por ejemplo ``461 passed, 1 skipped in 34s``)."""
+    lineas = [linea.strip() for linea in (salida or "").splitlines() if linea.strip()]
+    return lineas[-1] if lineas else "sin salida"
+
+
+def mostrar_salida(
+    salida: Callable[[str], None],
+    texto: str,
+    *,
+    maximo: Optional[int] = LINEAS_DE_SALIDA_AL_FALLAR,
+) -> None:
+    """Muestra la salida de un comando ajeno (indentada y sin líneas vacías).
+
+    ``maximo=None`` muestra todas las líneas (el deploy de Vercel se ve entero).
+    """
+    lineas = [linea.rstrip() for linea in (texto or "").splitlines() if linea.strip()]
+    visibles = lineas if maximo is None else lineas[-maximo:]
+    for linea in visibles:
+        salida(f"  {linea}")
+
+
+def pistas_de_push(detalle: str) -> tuple[str, ...]:
+    """Explica los fallos típicos de ``git push`` (qué hacer para destrabarlo)."""
+    texto = (detalle or "").lower()
+    pistas: list[str] = []
+    if any(
+        marca in texto
+        for marca in ("non-fast-forward", "fetch first", "[rejected]", "behind")
+    ):
+        pistas.append(
+            "El remoto tiene commits que no están en tu copia: corré "
+            "«git pull --rebase origin main» y volvé a publicar."
+        )
+    if any(
+        marca in texto
+        for marca in (
+            "authentication failed",
+            "could not read username",
+            "permission denied",
+            "403",
+            "support for password authentication",
+        )
+    ):
+        pistas.append(
+            "GitHub rechazó las credenciales: iniciá sesión («gh auth login») o "
+            "revisá el token de acceso personal configurado en git."
+        )
+    if any(
+        marca in texto
+        for marca in ("repository not found", "does not appear to be a git repository")
+    ):
+        pistas.append(
+            "El remoto no es accesible: revisá la URL («git remote -v») y que tu "
+            "cuenta tenga permiso sobre el repositorio."
+        )
+    if any(marca in texto for marca in ("protected branch", "pre-receive hook")):
+        pistas.append(
+            "La rama está protegida en GitHub: revisá las reglas del repositorio "
+            "o publicá desde una rama permitida."
+        )
+    if not pistas:
+        pistas.append(
+            "Resolvé el error de arriba y volvé a correr el comando: el commit "
+            "local queda intacto, sólo falta empujarlo."
+        )
+    return tuple(pistas)
+
+
+def proyecto_enlazado(raiz: Path = RAIZ, entorno: Optional[dict] = None) -> bool:
+    """``True`` si la carpeta está enlazada a un proyecto de Vercel.
+
+    La CLI guarda el enlace en ``.vercel/project.json`` (o ``repo.json`` cuando
+    se usó ``vercel link --repo``); en integración continua alcanza con las
+    variables ``VERCEL_PROJECT_ID`` y ``VERCEL_ORG_ID``.
+    """
+    variables = os.environ if entorno is None else entorno
+    if all(variables.get(nombre) for nombre in VARIABLES_DE_ENLACE):
+        return True
+    carpeta = Path(raiz) / CARPETA_VERCEL
+    return any((carpeta / nombre).is_file() for nombre in ARCHIVOS_DE_ENLACE)
+
+
+def exigir_proyecto_enlazado(raiz: Path = RAIZ) -> None:
+    """Aborta si la carpeta no está enlazada (Vercel crearía otro proyecto)."""
+    if proyecto_enlazado(raiz):
+        return
+    raise ErrorPublicacion(
+        "Esta carpeta no está enlazada a un proyecto de Vercel "
+        f"(no hay {CARPETA_VERCEL}/).",
+        pistas=(
+            "Corré «vercel link» una sola vez (elegí tu equipo y el proyecto "
+            "odontologico), o definí VERCEL_PROJECT_ID y VERCEL_ORG_ID.",
+        ),
+    )
+
+
+def exigir_remoto(
+    rama: str,
+    correr: Callable[..., Completado] = _correr,
+) -> str:
+    """Comprueba que exista el remoto ``origin`` y devuelve su URL."""
+    resultado = correr(["git", "remote", "get-url", REMOTO])
+    url = resultado.salida.strip() if resultado.ok else ""
+    if not url:
+        raise ErrorPublicacion(
+            f"El repositorio no tiene el remoto «{REMOTO}» configurado: "
+            f"«git push {REMOTO} {rama}» fallaría.",
+            pistas=(
+                "Agregalo con «git remote add origin "
+                "https://github.com/msappia-spec/odontologico.git» y volvé a "
+                "publicar.",
+            ),
+        )
+    return url
+
+
+def control_de_calidad(
+    correr: Callable[..., Completado],
+    *,
+    salida: Callable[[str], None] = print,
+    tiempo_espera: int = TIEMPO_ESPERA_TESTS,
+) -> Completado:
+    """Corre ``pytest`` y **aborta la publicación** si algún test falla.
+
+    Es el primer paso del flujo y usa el mismo intérprete que ejecuta el script
+    (``python -m pytest``), así ve las mismas dependencias que la app. Con un
+    código de salida distinto de 0 no se agrega, no se *commitea*, no se empuja
+    ni se despliega nada.
+    """
+    completado = correr(
+        [sys.executable, "-m", "pytest"],
+        capturar=True,
+        tiempo_espera=tiempo_espera,
+    )
+    if completado.ok:
+        return completado
+
+    mostrar_salida(salida, completado.salida, maximo=LINEAS_DE_SALIDA_AL_FALLAR)
+    fallas = fallas_de_pytest(completado.salida)
+    pistas = [
+        "No se publica código con errores: no se tocó git ni Vercel.",
+        "Arreglá las pruebas que fallan y volvé a correr el comando.",
+    ]
+    if fallas:
+        pistas.insert(0, f"Fallaron {len(fallas)}: {', '.join(fallas[:5])}")
+    raise ErrorPublicacion(
+        "Hay pruebas en rojo (pytest salió con código "
+        f"{completado.codigo}): publicación abortada.",
+        rojo=True,
+        pistas=tuple(pistas),
+    )
 
 
 def verificar_produccion(
@@ -429,14 +797,15 @@ def publicar(
         tiempo_espera: int = TIEMPO_ESPERA_GIT,
     ) -> Completado:
         """Corre el comando (en simulacro, sólo lo muestra)."""
+        legible = _comando_legible(comando)
         prefijo = "  [simulacro] " if simulacro else "  ➜ "
-        anunciar(prefijo + " ".join(map(str, comando)))
+        anunciar(prefijo + legible)
         if simulacro and not es_solo_lectura(comando):
             return Completado(0)
         completado = correr(comando, capturar=capturar, tiempo_espera=tiempo_espera)
         if not completado.ok:
             raise ErrorPublicacion(
-                f"«{' '.join(map(str, comando))}» falló "
+                f"«{legible}» falló "
                 f"(código {completado.codigo}){_detalle(completado.salida)}"
             )
         return completado
@@ -444,6 +813,7 @@ def publicar(
     anunciar(f"▸ Publicación{' (simulacro)' if simulacro else ''}")
     resultado.rama = rama or ""
     pendientes = 0
+    momento = ahora or datetime.now()
 
     if hacer_git:
         resultado.rama = resultado.rama or rama_actual(correr)
@@ -456,28 +826,6 @@ def publicar(
             sobran = len(resultado.archivos) - ARCHIVOS_EN_EL_COMMIT
             if sobran > 0:
                 anunciar(f"  · … y {sobran} archivo(s) más")
-            if hacer_tests:
-                anunciar("▸ Pruebas (python -m pytest)")
-                ejecutar(
-                    [sys.executable, "-m", "pytest"],
-                    capturar=False,
-                    tiempo_espera=TIEMPO_ESPERA_TESTS,
-                )
-                if not simulacro:
-                    anunciar("  ✓ pruebas en verde")
-            asunto = mensaje or asunto_automatico(ahora)
-            ejecutar(["git", "add", "-A"])
-            ejecutar(
-                [
-                    "git",
-                    "commit",
-                    "-m",
-                    asunto,
-                    "-m",
-                    cuerpo_del_commit(resultado.archivos),
-                ]
-            )
-            resultado.commit = asunto
         elif pendientes:
             anunciar(
                 f"  Sin archivos nuevos por commitear; hay {pendientes} commit(s) "
@@ -486,27 +834,73 @@ def publicar(
         else:
             resultado.avisos.append("No hay cambios para commitear.")
 
+    # --- Paso 1: control de calidad (pytest) -------------------------------- #
+    # Se corre antes de tocar el repositorio: con pruebas en rojo se corta acá.
+    va_a_publicar = (
+        bool(resultado.archivos) or pendientes > 0 or forzar or not hacer_git
+    )
+    if hacer_tests and va_a_publicar:
+        anunciar("▸ Control de calidad (python -m pytest)")
+        if simulacro:
+            anunciar("  [simulacro] python -m pytest")
+        else:
+            completado = control_de_calidad(
+                correr, salida=salida, tiempo_espera=TIEMPO_ESPERA_TESTS
+            )
+            resultado.pruebas = resumen_de_pytest(completado.salida)
+            anunciar(f"  ✓ pruebas en verde ({resultado.pruebas})")
+
+    # --- Paso 2: control de versiones (git) --------------------------------- #
+    if hacer_git:
+        if resultado.archivos or pendientes:
+            exigir_remoto(resultado.rama, correr)
+        if resultado.archivos:
+            asunto = mensaje or asunto_automatico(momento)
+            # `git add -A` equivale a `git add .` desde la raíz e incluye borrados.
+            ejecutar(["git", "add", "-A"])
+            ejecutar(
+                [
+                    "git",
+                    "commit",
+                    "-m",
+                    asunto,
+                    "-m",
+                    cuerpo_del_commit(resultado.archivos, momento),
+                ]
+            )
+            resultado.commit = asunto
         if resultado.commit or pendientes:
-            ejecutar(["git", "push", "origin", resultado.rama])
+            try:
+                ejecutar(["git", "push", REMOTO, resultado.rama])
+            except ErrorPublicacion as error:
+                raise ErrorPublicacion(
+                    str(error), pistas=pistas_de_push(str(error))
+                ) from error
             resultado.empujado = not simulacro
             if not simulacro:
-                anunciar(f"  ✓ empujado a origin/{resultado.rama}")
+                anunciar(f"  ✓ empujado a {REMOTO}/{resultado.rama}")
 
     hay_novedad = bool(resultado.commit or pendientes)
 
+    # --- Paso 3: despliegue en la nube (Vercel) ----------------------------- #
     if hacer_deploy:
         if hay_novedad or forzar or not hacer_git or simulacro:
-            if not simulacro:
-                _exigir_programa("vercel", buscar_programa)
             anunciar("▸ Deploy en producción (vercel --prod --yes)")
-            ejecutar(
-                ["vercel", "--prod", "--yes"],
-                capturar=False,
-                tiempo_espera=TIEMPO_ESPERA_DEPLOY,
-            )
-            resultado.desplegado = not simulacro
-            if not simulacro:
-                anunciar("  ✓ deploy terminado")
+            if simulacro:
+                anunciar("  [simulacro] vercel --prod --yes")
+            else:
+                _exigir_programa("vercel", buscar_programa)
+                exigir_proyecto_enlazado()
+                anunciar("  (la salida de la CLI se muestra al terminar)")
+                completado = ejecutar(
+                    ["vercel", "--prod", "--yes"],
+                    capturar=True,
+                    tiempo_espera=TIEMPO_ESPERA_DEPLOY,
+                )
+                mostrar_salida(anunciar, completado.salida, maximo=None)
+                resultado.url = url_de_produccion(completado.salida, url)
+                resultado.desplegado = True
+                anunciar(f"  ✓ deploy terminado ({resultado.url})")
         else:
             resultado.avisos.append(
                 "No se desplegó: no había cambios nuevos "
@@ -515,7 +909,9 @@ def publicar(
 
     if verificar and resultado.desplegado and not simulacro:
         anunciar("▸ Verificación en producción")
-        informe = verificar_produccion(url, consultar=consultar, pausar=pausar)
+        informe = verificar_produccion(
+            resultado.url, consultar=consultar, pausar=pausar
+        )
         resultado.verificaciones = informe.mensajes
         resultado.fallas = informe.fallas
         for texto in informe.mensajes:
@@ -525,12 +921,21 @@ def publicar(
 
 
 def _preparar_salida() -> None:
-    """Evita ``UnicodeEncodeError`` cuando la consola no entiende UTF-8.
+    """Deja la consola lista: UTF-8, colores ANSI y sin ``UnicodeEncodeError``.
 
-    El mensaje de error de un ``print`` con símbolos como ``✓`` o ``⚠`` no debe
-    cortar la publicación; ``publicar.bat`` además fuerza UTF-8 (``chcp 65001``
-    y ``PYTHONUTF8=1``).
+    En Windows se pone la página de códigos en UTF-8 y se habilitan las
+    secuencias ANSI (*Virtual Terminal*), pero **sólo** cuando la salida es una
+    consola interactiva: si la salida está redirigida (o no hay consola) los
+    mensajes van sin códigos de color y un ``print`` con ``✓`` o ``⚠`` nunca
+    corta la publicación. ``publicar.bat`` además fuerza UTF-8 (``chcp 65001`` y
+    ``PYTHONUTF8=1``).
     """
+    global _COLORES
+    if not os.environ.get("NO_COLOR") and _consola_interactiva():
+        _consola_utf8()
+        _COLORES = _habilitar_color_en_windows()
+    else:
+        _COLORES = False
     for flujo in (sys.stdout, sys.stderr):
         ajustar = getattr(flujo, "reconfigure", None)
         if ajustar is None:
@@ -544,9 +949,9 @@ def _preparar_salida() -> None:
 def _imprimir(resultado: Resultado, salida: Callable[[str], None] = print) -> None:
     """Reporta el resumen de la publicación."""
     titulo = (
-        "Simulacro terminado (no se escribió nada)."
+        amarillo("Simulacro terminado (no se escribió nada).")
         if resultado.simulacro
-        else "Publicación terminada."
+        else verde("Publicación terminada.")
     )
     salida("")
     salida(titulo)
@@ -554,18 +959,20 @@ def _imprimir(resultado: Resultado, salida: Callable[[str], None] = print) -> No
         salida(f"  Rama   : {resultado.rama}")
     if resultado.archivos:
         salida(f"  Cambios: {len(resultado.archivos)} archivo(s)")
+    if resultado.pruebas:
+        salida(f"  Tests  : {resultado.pruebas}")
     if resultado.commit:
         salida(f"  Commit : {resultado.commit}")
     if resultado.empujado:
-        salida(f"  GitHub : empujado a origin/{resultado.rama}")
+        salida(f"  GitHub : empujado a {REMOTO}/{resultado.rama}")
     if resultado.desplegado:
         salida(f"  Vercel : producción actualizada ({resultado.url})")
     for texto in resultado.verificaciones:
         salida(f"  {texto}")
     for aviso in resultado.avisos:
-        salida(f"  ⚠ {aviso}")
+        salida(f"  {amarillo('⚠')} {aviso}")
     for falla in resultado.fallas:
-        salida(f"  ✗ {falla}")
+        salida(f"  {rojo('✗')} {falla}")
     if resultado.simulacro:
         salida("  Repetí el comando sin --simulacro para publicar de verdad.")
 
@@ -618,6 +1025,11 @@ def main(
         help="Muestra qué haría (y con qué archivos) sin ejecutar nada que escriba.",
     )
     parser.add_argument(
+        "--sin-colores",
+        action="store_true",
+        help="No escribe códigos de color ANSI (para terminales viejas o logs).",
+    )
+    parser.add_argument(
         "--sin-verificar",
         action="store_true",
         help="No consulta la URL publicada al terminar el deploy.",
@@ -629,9 +1041,14 @@ def main(
     parser.add_argument(
         "--url",
         default=URL_POR_DEFECTO,
-        help="Base de la app publicada que se verifica al final.",
+        help=(
+            "Base de la app publicada que se verifica al final (si la CLI de "
+            "Vercel informa otro dominio, se usa ese)."
+        ),
     )
     args = parser.parse_args(argv)
+    if args.sin_colores:
+        apagar_colores()
 
     try:
         resultado = publicar(
@@ -651,7 +1068,17 @@ def main(
             salida=salida,
         )
     except ErrorPublicacion as error:
-        salida(f"✗ {error}")
+        # Con colores apagados (log redirigido o consola vieja) el mensaje de
+        # control de calidad se enmarca, así se ve de un vistazo igual.
+        enmarcar = error.rojo and not colores_activos()
+        separador = "=" * 68
+        if enmarcar:
+            salida(separador)
+        salida(rojo(f"✗ {error}"))
+        for pista in error.pistas:
+            salida(f"  {pista}")
+        if enmarcar:
+            salida(separador)
         return 1
 
     _imprimir(resultado, salida)

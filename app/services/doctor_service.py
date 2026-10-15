@@ -6,6 +6,10 @@ Reglas de negocio del recurso ``Doctor``:
   los campos enviados. ``activo`` forma parte del payload, así que el mismo
   ``PATCH`` sirve para dar de baja (``{"activo": false}``) y para reactivar
   (``{"activo": true}``).
+* **Modalidad de pago (Módulo 3)**: ``tipo_pago`` y ``valor_pago`` se validan
+  **contra el estado vigente** del profesional (ver
+  :func:`app.core.pagos.validar_modalidad_pago`): un ``PATCH`` que cambie el tipo
+  sin informar el valor no puede dejar al odontólogo sin forma de pago.
 * **Baja lógica (``DELETE``)**: ``dar_de_baja`` marca ``activo = False`` en lugar
   de borrar la fila. Los turnos del profesional se conservan (la secretaría los
   reprograma o cancela desde el calendario) y el odontólogo deja de ofrecerse en
@@ -19,13 +23,22 @@ from typing import Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import RecursoNoEncontradoError
+from app.core.exceptions import RecursoNoEncontradoError, ValidacionError
+from app.core.pagos import validar_modalidad_pago
 from app.models.doctor import Doctor
-from app.models.enums import EstadoTurno
+from app.models.enums import EstadoTurno, TipoPagoDoctor
 from app.models.turno import Turno
 from app.schemas.doctor import DoctorCreate, DoctorReplace, DoctorUpdate
 
 logger = logging.getLogger("app.services.doctores")
+
+
+def _validar_pago(tipo_pago: TipoPagoDoctor, valor_pago: Optional[float]) -> None:
+    """Traduce la regla de la modalidad de pago a ``ValidacionError`` (HTTP 422)."""
+    try:
+        validar_modalidad_pago(tipo_pago, valor_pago)
+    except ValueError as exc:
+        raise ValidacionError(str(exc)) from exc
 
 
 def obtener_doctor(
@@ -63,6 +76,7 @@ def listar_doctores(db: Session, activos: Optional[bool] = None) -> Sequence[Doc
 
 def crear_doctor(db: Session, data: DoctorCreate) -> Doctor:
     """Crea un doctor con los datos completos del payload."""
+    _validar_pago(data.tipo_pago, data.valor_pago)
     doctor = Doctor(**data.model_dump())
     db.add(doctor)
     db.commit()
@@ -74,6 +88,7 @@ def crear_doctor(db: Session, data: DoctorCreate) -> Doctor:
 def reemplazar_doctor(db: Session, doctor_id: int, data: DoctorReplace) -> Doctor:
     """Reemplaza los datos del doctor (``PUT``) con el payload completo."""
     doctor = obtener_doctor(db, doctor_id)
+    _validar_pago(data.tipo_pago, data.valor_pago)
     for campo, valor in data.model_dump().items():
         setattr(doctor, campo, valor)
     db.commit()
@@ -83,9 +98,19 @@ def reemplazar_doctor(db: Session, doctor_id: int, data: DoctorReplace) -> Docto
 
 
 def actualizar_doctor(db: Session, doctor_id: int, data: DoctorUpdate) -> Doctor:
-    """Actualiza parcialmente un doctor (``PATCH``): sólo los campos enviados."""
+    """Actualiza parcialmente un doctor (``PATCH``): sólo los campos enviados.
+
+    La modalidad de pago se valida con los valores **resultantes** (los enviados
+    o los que ya tenía el profesional): ``PATCH {"tipo_pago": "SUELDO"}`` sobre un
+    odontólogo sin ``valor_pago`` responde **422** en lugar de dejar su
+    liquidación en cero.
+    """
     doctor = obtener_doctor(db, doctor_id)
     cambios = data.model_dump(exclude_unset=True)
+    _validar_pago(
+        cambios.get("tipo_pago", doctor.tipo_pago),
+        cambios.get("valor_pago", doctor.valor_pago),
+    )
     for campo, valor in cambios.items():
         setattr(doctor, campo, valor)
     db.commit()

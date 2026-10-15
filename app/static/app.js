@@ -53,6 +53,44 @@
     // Es la copia en memoria de lo que el backend aplica como precedencia, para
     // que el calendario no ofrezca bloques de un día bloqueado.
     excepcionesPorDoctor: {},
+    /* --- Módulo 3: facturación, caja y liquidaciones --- */
+    // Pestaña activa de la vista "Facturación y Caja" y día/caja consultados.
+    factTab: "caja",
+    factFecha: hoyISO(),
+    factCaja: [],
+    factResumen: null,
+    // Catálogo de prestaciones (activas y dadas de baja) y aranceles de la
+    // cobertura elegida en la pantalla de precios.
+    factPrestaciones: [],
+    factMostrarInactivas: false,
+    factPrestacionEditId: null,
+    factAranceles: [],
+    factArancelEditId: null,
+    factArrObraSocial: "",
+    // Convenios: la grilla de precios de la cobertura (pantalla "Convenios"), las
+    // ediciones todavía sin guardar (``prestacion_id -> monto que cubre la OS``) y
+    // el archivo subido al importador masivo con su último reporte.
+    factConvenio: null,
+    convEdiciones: {},
+    convBusqueda: "",
+    convArchivo: null,
+    convReporte: null,
+    // Presentación del período de una obra social y las órdenes tildadas para
+    // cerrarlas de a una (cobradas / debitadas).
+    factPresentacion: null,
+    factTildadas: [],
+    // Reporte de producción del mes.
+    factMedicos: null,
+    factMedMes: mesISO(),
+    factMedDoctor: "",
+    // Turno que se está cobrando (respuesta de /turnos/{id}/prestaciones-disponibles)
+    // y las prácticas tildadas con su cantidad (prestacion_id -> cantidad).
+    cobro: null,
+    cobroSeleccion: {},
+    // Filtro del buscador rápido del modal de cobro (código o nombre de práctica).
+    cobroBusqueda: "",
+    // Movimiento que se está debitando desde el modal de débito.
+    debitoMovimientoId: null,
   };
 
   /* --------------------------- Utilidades fecha -------------------------- */
@@ -95,6 +133,26 @@
     const h = Math.floor(min / 60);
     const r = min % 60;
     return r ? `${h} h ${r} min` : `${h} h`;
+  }
+  /* Mes actual en formato del input ``month`` (AAAA-MM). La liquidación de obras
+     sociales y el reporte de profesionales trabajan por mes calendario. */
+  function mesISO(fecha) {
+    const d = fecha ? new Date(fecha) : new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+  /* Importes en pesos argentinos: "$ 15.000,00" (formato del mostrador). */
+  const MONEDA = new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    minimumFractionDigits: 2,
+  });
+  function fmtMoneda(valor) {
+    return MONEDA.format(Number(valor) || 0);
+  }
+  /* Fecha y hora legibles de un instante de la API (UTC naive). */
+  function fechaHora(iso) {
+    if (!iso) return "—";
+    return `${fechaLarga(parteFecha(iso))} · ${parteHora(iso)} h`;
   }
 
   /* ------------------------------- Helpers ------------------------------- */
@@ -256,6 +314,11 @@
      consultorio, sin depender de que responda el WhatsApp. */
   function panelAccionesTurno(t) {
     const editar = `<button class="btn btn-ghost btn-sm" data-editar-turno="${t.id}">Editar</button>`;
+    /* "Cobrar" cierra la visita: elige las prestaciones realizadas, muestra el
+       coseguro del mostrador y registra el ingreso en la caja del día. */
+    const cobrar =
+      `<button class="btn btn-soft btn-sm" data-cobrar-turno="${t.id}" ` +
+      `title="Cerrar la visita y cobrar el coseguro">Cobrar</button>`;
     const confirmar =
       t.estado_turno === "PENDIENTE"
         ? `<button class="btn btn-soft btn-sm" data-confirmar-turno="${t.id}">Confirmar asistencia</button>`
@@ -264,7 +327,7 @@
       t.estado_turno === "CANCELADO"
         ? `<button class="btn btn-soft btn-sm" data-reactivar-turno="${t.id}">Reactivar</button>`
         : `<button class="btn btn-danger-soft btn-sm" data-cancelar-turno="${t.id}">Cancelar</button>`;
-    return `<div class="flex flex-wrap items-center gap-2 mt-2">${editar}${confirmar}${alterno}</div>`;
+    return `<div class="flex flex-wrap items-center gap-2 mt-2">${editar}${confirmar}${cobrar}${alterno}</div>`;
   }
 
   /* Color del bloque horario de la tarjeta según el estado del turno:
@@ -492,7 +555,7 @@
     document.getElementById("count-doctores").textContent = state.doctores.length;
     const tbody = document.getElementById("lista-doctores");
     if (!state.doctores.length) {
-      tbody.innerHTML = `<tr><td colspan="5">${vacio("Aún no hay doctores registrados")}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6">${vacio("Aún no hay doctores registrados")}</td></tr>`;
       return;
     }
     tbody.innerHTML = state.doctores
@@ -512,7 +575,9 @@
           `<tr${d.activo ? "" : ' class="opacity-70"'}>` +
           `<td><div class="flex items-center gap-3">${avatar(d.nombre, d.id)}` +
           `<span class="font-semibold text-slate-800">${esc(d.nombre)}</span></div></td>` +
-          `<td>${esc(d.especialidad)}</td><td>${estado}</td>` +
+          `<td>${esc(d.especialidad)}</td>` +
+          `<td><span class="fact-med-tipo">${esc(textoPagoDoctor(d))}</span></td>` +
+          `<td>${estado}</td>` +
           `<td><span class="badge badge-brand">${n}</span></td>` +
           `<td><div class="flex items-center justify-end gap-2">` +
           `<button type="button" class="btn btn-ghost btn-sm" data-editar-doctor="${d.id}" ` +
@@ -1654,6 +1719,1828 @@
     }
   }
 
+  /* ========================================================================= */
+  /* Módulo 3 · Facturación y Caja (coseguros, obras sociales y liquidaciones)  */
+  /* ========================================================================= */
+  /* Flujo del mostrador: al cerrar una visita (desde la tarjeta del turno en la
+     agenda o desde la pestaña "Caja del día") se eligen las prestaciones
+     realizadas, el sistema muestra el cartel del coseguro y guarda el
+     movimiento de caja. Lo que queda a cargo de la obra social se presenta por
+     período y se cierra cuando entra el depósito. La producción del mes se
+     liquida por profesional según su tipo de pago. */
+  const RUTA_CAJA = "/movimientos-caja";
+  const RUTA_PRESTACIONES = "/prestaciones";
+  const RUTA_ARANCELES = "/aranceles";
+  const RUTA_LIS_OS = "/liquidaciones/obras-sociales";
+  const RUTA_LIS_PROF = "/liquidaciones/profesionales";
+
+  function rutaPrestacion(id) {
+    return id ? `${RUTA_PRESTACIONES}/${id}` : RUTA_PRESTACIONES;
+  }
+  function rutaArancel(id) {
+    return id ? `${RUTA_ARANCELES}/${id}` : RUTA_ARANCELES;
+  }
+
+  /* Estados del cobro de una orden presentada a la obra social. */
+  const ESTADO_PAGO = {
+    PENDIENTE: { texto: "Sin presentar", clase: "badge-amber", icono: ICON.reloj },
+    EN_PROCESO_LIQUIDACION: { texto: "Presentada", clase: "badge-brand", icono: ICON.arena },
+    COBRADO: { texto: "Cobrada", clase: "badge-green", icono: ICON.check },
+    DEBITADO_OS: { texto: "Debitada", clase: "badge-red", icono: ICON.x },
+  };
+  function badgeEstadoPago(estado) {
+    return badge(ESTADO_PAGO[estado] || { texto: estado, clase: "badge-slate", icono: "" });
+  }
+
+  /* Cómo se liquida cada modalidad de pago (etiqueta del reporte mensual). */
+  const TIPO_PAGO_TEXTO = {
+    DUENO: "Dueño",
+    COMISION: "Comisión",
+    SUELDO: "Sueldo fijo",
+  };
+
+  /* --------------------------- Utilidades de la vista -------------------- */
+  function valorDe(id) {
+    const el = document.getElementById(id);
+    return el ? el.value : "";
+  }
+
+  /* Texto sin acentos y en minúsculas: comparaciones de búsqueda tolerantes. */
+  function normalizarTexto(valor) {
+    return String(valor == null ? "" : valor)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  }
+
+  /* Nombre de archivo seguro a partir de un texto (sin acentos ni espacios). */
+  function slug(texto) {
+    return (
+      normalizarTexto(texto)
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "profesional"
+    );
+  }
+
+  /* Lee un input ``month`` y devuelve ``[anio, mes]`` (por defecto, el actual). */
+  function mesDeInput(id) {
+    const valor = String(valorDe(id) || "") || mesISO();
+    const [anio, mes] = valor.split("-").map(Number);
+    return [anio || new Date().getFullYear(), mes || new Date().getMonth() + 1];
+  }
+
+  /* Descarga una tabla como CSV (separador ";", el que abre Excel es-AR). */
+  function descargarCSV(nombreArchivo, filas) {
+    const limpiar = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+    const csv = filas.map((f) => f.map(limpiar).join(";")).join("\r\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombreArchivo;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /* Descarga un archivo del servidor (los reportes en PDF). El backend ya manda
+     el nombre en ``Content-Disposition``: acá se repite para el navegador. */
+  async function descargarArchivo(path, nombreArchivo) {
+    const res = await fetch(API + path);
+    if (!res.ok) {
+      const texto = await res.text();
+      let data = null;
+      if (texto) { try { data = JSON.parse(texto); } catch (_) { data = texto; } }
+      throw new Error(mensajeError(data, res.status));
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombreArchivo;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return nombreArchivo;
+  }
+
+  /* Resumen de las prácticas de un movimiento: "1× 01.01 · 2× 02.02". */
+  function practicasTexto(movimiento) {
+    return (movimiento.prestaciones || [])
+      .map((p) => `${p.cantidad}× ${p.codigo_nomenclador}`)
+      .join(" · ");
+  }
+
+  /* -------------------------------- Pestañas ----------------------------- */
+  function cambiarTabFacturacion(tab) {
+    if (["caja", "obras", "medicos", "precios", "convenios"].indexOf(tab) === -1) {
+      return;
+    }
+    state.factTab = tab;
+    document.querySelectorAll("[data-fact-tab]").forEach((b) =>
+      b.classList.toggle("active", b.dataset.factTab === tab)
+    );
+    document.querySelectorAll("[data-fact-panel]").forEach((p) =>
+      p.classList.toggle("hide", p.dataset.factPanel !== tab)
+    );
+    // Carga perezosa: cada pestaña pide al servidor lo que muestra.
+    if (tab === "caja") cargarCajaDelDia();
+    if (tab === "obras") {
+      cargarSelectoresFacturacion();
+      cargarPresentacion();
+    }
+    if (tab === "medicos") {
+      cargarSelectoresFacturacion();
+      cargarLiquidacionMedicos();
+    }
+    if (tab === "precios") cargarPrestaciones();
+    if (tab === "convenios") {
+      cargarSelectoresFacturacion();
+      cargarConvenio();
+    }
+  }
+
+  /* Rellena los desplegables de la vista con el catálogo ya cargado. */
+  function cargarSelectoresFacturacion() {
+    const obras = obrasSocialesActivas();
+    const opciones =
+      `<option value="">Elegí una cobertura…</option>` +
+      obras.map((o) => `<option value="${o.id}">${esc(o.nombre)}</option>`).join("");
+    if (!state.factArrObraSocial && obras.length) {
+      state.factArrObraSocial = String(obras[0].id);
+    }
+    ["fact-lis-os", "fact-arr-os", "conv-os"].forEach((id) => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      sel.innerHTML = opciones;
+      sel.value = state.factArrObraSocial;
+    });
+
+    const selPrest = document.getElementById("fact-arr-prestacion");
+    if (selPrest) {
+      const previo = selPrest.value;
+      selPrest.innerHTML =
+        `<option value="">Elegí una práctica…</option>` +
+        state.factPrestaciones
+          .filter((p) => p.activa)
+          .map(
+            (p) =>
+              `<option value="${p.id}">${esc(p.codigo_nomenclador)} · ${esc(p.descripcion)}</option>`
+          )
+          .join("");
+      selPrest.value = previo;
+    }
+
+    const selDoc = document.getElementById("fact-med-doctor");
+    if (selDoc) {
+      const previo = selDoc.value || state.factMedDoctor;
+      selDoc.innerHTML =
+        `<option value="">Todos los odontólogos</option>` +
+        state.doctores
+          .map(
+            (d) =>
+              `<option value="${d.id}">${esc(d.nombre)}${d.activo ? "" : " (dado de baja)"}</option>`
+          )
+          .join("");
+      selDoc.value = previo;
+    }
+  }
+
+  /* -------------------------- Entrada a la vista ------------------------- */
+  /* Se llama al elegir "Facturación y Caja" en el menú: prepara los valores por
+     defecto (día y mes de hoy) y carga la pestaña activa. */
+  async function cargarFacturacion() {
+    const fecha = document.getElementById("fact-fecha");
+    if (fecha && !fecha.value) fecha.value = state.factFecha || hoyISO();
+    const mesLis = document.getElementById("fact-lis-mes");
+    if (mesLis && !mesLis.value) mesLis.value = mesISO();
+    const mesMed = document.getElementById("fact-med-mes");
+    if (mesMed && !mesMed.value) mesMed.value = state.factMedMes || mesISO();
+
+    cargarSelectoresFacturacion();
+    try {
+      await cargarCajaDelDia();
+    } catch (err) {
+      toast("error", "No se pudo cargar la caja", err.message);
+    }
+    cambiarTabFacturacion(state.factTab || "caja");
+  }
+
+  /* ------------------------------ Caja del día --------------------------- */
+  async function cargarCajaDelDia() {
+    const fecha = state.factFecha || hoyISO();
+    state.factFecha = fecha;
+    const [movimientos, resumen] = await Promise.all([
+      api(`${RUTA_CAJA}?desde=${fecha}&hasta=${fecha}&limit=200`),
+      api(`${RUTA_CAJA}/resumen?desde=${fecha}&hasta=${fecha}`),
+    ]);
+    state.factCaja = movimientos || [];
+    state.factResumen = resumen;
+    renderCaja();
+  }
+
+  function renderCaja() {
+    const resumen = state.factResumen;
+    const set = (id, texto) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    };
+    set("fact-kpi-efectivo", resumen ? fmtMoneda(resumen.monto_efectivo) : "—");
+    set("fact-kpi-pendiente", resumen ? fmtMoneda(resumen.monto_pendiente_os) : "—");
+    set("fact-kpi-cobrado", resumen ? fmtMoneda(resumen.monto_cobrado_os) : "—");
+    set("fact-kpi-cantidad", resumen ? String(resumen.cantidad_movimientos) : "—");
+    set("fact-caja-contador", String(state.factCaja.length));
+
+    // Insignia del menú: órdenes todavía sin acreditar (pendientes o presentadas).
+    const abiertos = state.factCaja.filter(
+      (m) =>
+        m.estado_pago === "PENDIENTE" || m.estado_pago === "EN_PROCESO_LIQUIDACION"
+    ).length;
+    const badgeNav = document.getElementById("nav-fact-pendientes");
+    if (badgeNav) {
+      badgeNav.textContent = String(abiertos);
+      badgeNav.classList.toggle("hide", abiertos === 0);
+    }
+
+    const tbody = document.getElementById("fact-lista-caja");
+    if (!tbody) return;
+    if (!state.factCaja.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="9">` +
+        vacio(
+          "Todavía no hay visitas cerradas ese día",
+          "Cerrá una visita con el botón «Cobrar» de su tarjeta en la agenda, o elegí otro día."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = state.factCaja
+      .map((m) => {
+        const abierto =
+          m.estado_pago === "PENDIENTE" || m.estado_pago === "EN_PROCESO_LIQUIDACION";
+        const acciones = abierto
+          ? `<button type="button" class="btn btn-soft btn-sm" data-fact-cobrar="${m.id}" ` +
+            `title="Marcar el depósito de la obra social">Cobrar</button>` +
+            `<button type="button" class="btn btn-danger-soft btn-sm" data-fact-debitar="${m.id}" ` +
+            `title="Registrar un débito de la obra social">Debitar</button>`
+          : `<span class="text-[11px] text-slate-400" title="${esc(m.observaciones || "")}">` +
+            `${m.estado_pago === "COBRADO" ? "Depositado" : "Sin cobrar"}</span>`;
+        return (
+          `<tr${m.estado_pago === "COBRADO" ? ' class="fact-tildada"' : ""}>` +
+          `<td class="font-semibold text-slate-600">${esc(parteHora(m.turno_fecha_hora_inicio || m.fecha))}</td>` +
+          `<td><div class="flex items-center gap-2">${avatar(m.paciente_nombre, m.paciente_id)}` +
+          `<div class="min-w-0"><p class="font-semibold text-slate-800 truncate">${esc(m.paciente_nombre || "—")}</p>` +
+          `<p class="text-[11px] text-slate-400 font-mono">${esc(m.paciente_dni || "sin DNI")}</p></div></div></td>` +
+          `<td>${m.obra_social_nombre ? esc(m.obra_social_nombre) : '<span class="badge badge-slate">Particular</span>'}</td>` +
+          `<td class="text-xs">${esc(m.doctor_nombre || "—")}</td>` +
+          `<td><ul class="fact-practicas"><li>${esc(practicasTexto(m)) || "—"}</li></ul></td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(m.monto_efectivo)}</td>` +
+          `<td class="text-right text-slate-500">${fmtMoneda(m.monto_pendiente_os)}</td>` +
+          `<td>${badgeEstadoPago(m.estado_pago)}</td>` +
+          `<td><div class="flex items-center justify-end gap-2">${acciones}</div></td></tr>`
+        );
+      })
+      .join("");
+  }
+
+  /* ---------------------------- Modal de cobro --------------------------- */
+  /* Se abre desde el botón "Cobrar" de una tarjeta de la agenda (llega el
+     ``turnoId``) o desde el botón general de la vista, que primero ofrece las
+     visitas del día que todavía no se cerraron. */
+  async function abrirModalCobro(turnoId) {
+    const elegir = document.getElementById("fact-cobro-elegir");
+    try {
+      if (turnoId) {
+        elegir.classList.add("hide");
+      } else {
+        const fecha = state.factFecha || hoyISO();
+        const [turnos, movimientos] = await Promise.all([
+          api(`/turnos?fecha_desde=${fecha}&fecha_hasta=${fecha}&limit=200`),
+          api(`${RUTA_CAJA}?desde=${fecha}&hasta=${fecha}&limit=200`),
+        ]);
+        const facturados = (movimientos || []).map((m) => String(m.turno_id));
+        const pendientes = (turnos || []).filter(
+          (t) =>
+            t.estado_turno !== "CANCELADO" && facturados.indexOf(String(t.id)) === -1
+        );
+        if (!pendientes.length) {
+          toast(
+            "info",
+            "No quedan visitas por cobrar",
+            `Las visitas del ${fechaCorta(fecha)} ya están cerradas.`
+          );
+          return;
+        }
+        const sel = document.getElementById("fact-cobro-turno");
+        sel.innerHTML = pendientes
+          .map(
+            (t) =>
+              `<option value="${t.id}">${esc(parteHora(t.fecha_hora_inicio))} · ` +
+              `${esc(nombrePaciente(t.paciente_id))} · ${esc(nombreDoctor(t.doctor_id))}</option>`
+          )
+          .join("");
+        elegir.classList.remove("hide");
+        turnoId = pendientes[0].id;
+      }
+      const listo = await cargarTurnoParaCobro(turnoId);
+      if (listo) mostrarModal("modal-cobro");
+    } catch (err) {
+      toast("error", "No se pudo abrir el cobro", err.message);
+    }
+  }
+
+  /* Trae las prácticas del turno con su arancel resuelto y arma el formulario. */
+  async function cargarTurnoParaCobro(turnoId) {
+    const datos = await api(`/turnos/${turnoId}/prestaciones-disponibles`);
+    if (datos.facturado) {
+      const estado = await api(`/turnos/${turnoId}/facturacion`);
+      const movimiento = estado.movimiento || {};
+      toast(
+        "info",
+        "Esa visita ya fue facturada",
+        `Movimiento #${movimiento.id} · efectivo ${fmtMoneda(movimiento.monto_efectivo)}`
+      );
+      return false;
+    }
+
+    state.cobro = datos;
+    state.cobroSeleccion = {};
+    state.cobroBusqueda = "";
+    const buscar = document.getElementById("fact-cobro-buscar");
+    if (buscar) buscar.value = "";
+    const set = (id, texto) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    };
+    set("fact-cobro-paciente", datos.paciente_nombre);
+    set("fact-cobro-cobertura", datos.obra_social_nombre || "Particular");
+    set("fact-cobro-afiliado", datos.numero_afiliado || "—");
+    set("fact-cobro-profesional", datos.doctor_nombre);
+    set("modal-cobro-titulo", `Cerrar la visita de ${datos.paciente_nombre}`);
+    set(
+      "modal-cobro-sub",
+      `${fechaHora(datos.turno_fecha_hora_inicio)} · turno #${datos.turno_id}`
+    );
+    const obs = document.getElementById("fact-cobro-obs");
+    if (obs) obs.value = "";
+    const particular = document.getElementById("fact-cobro-particular");
+    if (particular) particular.checked = false;
+    ocultarAviso("fact-cobro-error");
+    renderCobroPrestaciones();
+    return true;
+  }
+
+  function cerrarModalCobro() {
+    state.cobro = null;
+    state.cobroSeleccion = {};
+    state.cobroBusqueda = "";
+    ocultarModal("modal-cobro");
+  }
+
+  function seleccionDe(prestacionId) {
+    return state.cobroSeleccion[String(prestacionId)] || 0;
+  }
+
+  /* Tildar/destildar una práctica del formulario de cobro (arranca en 1). */
+  function alternarSeleccionCobro(prestacionId, tildada) {
+    const clave = String(prestacionId);
+    if (tildada) {
+      state.cobroSeleccion[clave] = state.cobroSeleccion[clave] || 1;
+    } else {
+      delete state.cobroSeleccion[clave];
+    }
+    renderCobroPrestaciones();
+  }
+
+  /* Cambiar la cantidad sin redibujar la tabla (no se pierde el foco). */
+  function fijarCantidadCobro(prestacionId, cantidad) {
+    const clave = String(prestacionId);
+    if (!Object.prototype.hasOwnProperty.call(state.cobroSeleccion, clave)) return;
+    state.cobroSeleccion[clave] = Math.max(1, Math.min(99, Number(cantidad) || 1));
+    recalcularCobro();
+  }
+
+  /* Prácticas del turno que coinciden con el buscador rápido (código o nombre).
+     El filtro es sólo visual: lo ya tildado sigue seleccionado aunque no se vea. */
+  function filtrarPrestacionesCobro(lista) {
+    const busqueda = normalizarTexto(state.cobroBusqueda).trim();
+    if (!busqueda) return lista;
+    return lista.filter(
+      (p) =>
+        normalizarTexto(`${p.codigo_nomenclador} ${p.descripcion}`).indexOf(busqueda) !== -1
+    );
+  }
+
+  /* Tabla de prácticas del turno: cada fila muestra el arancel de la cobertura,
+     se tilda y se le pone cantidad. */
+  function renderCobroPrestaciones() {
+    const cont = document.getElementById("fact-cobro-lista");
+    if (!cont) return;
+    const lista = filtrarPrestacionesCobro((state.cobro && state.cobro.prestaciones) || []);
+    if (!lista.length) {
+      cont.innerHTML =
+        `<tr><td colspan="6">` +
+        vacio(
+          state.cobroBusqueda
+            ? `Sin coincidencias para «${state.cobroBusqueda}»`
+            : "No hay prestaciones cargadas",
+          state.cobroBusqueda
+            ? "Probá con el código del nomenclador o con parte del nombre."
+            : "Cargá el catálogo en la pestaña «Prestaciones y aranceles»."
+        ) +
+        `</td></tr>`;
+      recalcularCobro();
+      return;
+    }
+
+    cont.innerHTML = lista
+      .map((p) => {
+        const cantidad = seleccionDe(p.prestacion_id);
+        /* Arancel de la práctica: lo que cubre la cobertura más el coseguro. */
+        const arancel =
+          Number(p.monto_cubre_os || 0) + Number(p.monto_coseguro_paciente || 0);
+        const aviso =
+          p.origen === "SIN_ARANCEL"
+            ? ` <span class="badge badge-amber">Sin arancel</span>`
+            : "";
+        return (
+          `<tr${cantidad ? ' class="fact-tildada"' : ""}>` +
+          `<td><input type="checkbox" class="fact-check" data-cobro-tilde="${p.prestacion_id}" ` +
+          `${cantidad ? "checked" : ""} /></td>` +
+          `<td><p class="font-semibold text-slate-800">${esc(p.descripcion)}</p>` +
+          `<p class="text-[11px] text-slate-400 font-mono">${esc(p.codigo_nomenclador)} · ` +
+          `base ${fmtMoneda(p.valor_base)}${aviso}</p></td>` +
+          `<td class="text-right">${fmtMoneda(arancel)}</td>` +
+          `<td class="text-right text-slate-500">${fmtMoneda(p.monto_cubre_os)}</td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(p.monto_coseguro_paciente)}</td>` +
+          `<td><input type="number" min="1" max="99" value="${cantidad || 1}" ` +
+          `class="field px-2 py-1 text-sm" data-cobro-cantidad="${p.prestacion_id}" ` +
+          `${cantidad ? "" : "disabled"} /></td></tr>`
+        );
+      })
+      .join("");
+    const contador = document.getElementById("fact-cobro-contador");
+    if (contador) contador.textContent = String(lista.length);
+    recalcularCobro();
+  }
+
+  /* Cartel del mostrador: suma los coseguros tildados y lo que va a la OS.
+     El importe definitivo lo confirma el backend al registrar el cobro. */
+  function recalcularCobro() {
+    const lista = (state.cobro && state.cobro.prestaciones) || [];
+    let efectivo = 0;
+    let os = 0;
+    let cantidad = 0;
+    const partes = [];
+    lista.forEach((p) => {
+      const n = seleccionDe(p.prestacion_id);
+      if (!n) return;
+      efectivo += Number(p.monto_coseguro_paciente || 0) * n;
+      os += Number(p.monto_cubre_os || 0) * n;
+      cantidad += n;
+      partes.push(`${n}× ${p.codigo_nomenclador}`);
+    });
+
+    const cartel = document.getElementById("fact-cobro-cartel");
+    if (cartel) cartel.classList.toggle("fact-cartel-vacio", cantidad === 0);
+    const set = (id, texto) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    };
+    set("fact-cobro-efectivo", fmtMoneda(efectivo));
+    set("fact-cobro-total", fmtMoneda(efectivo + os));
+    set("fact-cobro-os", fmtMoneda(os));
+    // El saldo de la cobertura queda PENDIENTE en caja hasta la liquidación del
+    // período: el cartel lo anticipa antes de cerrar la atención.
+    const pendiente = document.getElementById("fact-cobro-pendiente");
+    if (pendiente) {
+      const cobertura =
+        (state.cobro && state.cobro.obra_social_nombre) || "la obra social";
+      if (os > 0) {
+        pendiente.textContent =
+          `Queda PENDIENTE para la liquidación de ${cobertura}: ${fmtMoneda(os)}`;
+        pendiente.className = "badge badge-amber";
+      } else {
+        pendiente.textContent =
+          "Visita saldada en el mostrador: sin saldo para la obra social.";
+        pendiente.className = "badge badge-green";
+      }
+    }
+    set(
+      "fact-cobro-detalle",
+      cantidad
+        ? `${cantidad} práctica${cantidad === 1 ? "" : "s"}: ${partes.join(" · ")}`
+        : "Sin prestaciones seleccionadas."
+    );
+  }
+
+  /* POST /turnos/{id}/facturar: cierra la visita y registra el ingreso en caja. */
+  async function registrarCobro(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById("modal-cobro-save");
+    if (!state.cobro) return;
+    const prestaciones = Object.keys(state.cobroSeleccion)
+      .filter((id) => seleccionDe(id) > 0)
+      .map((id) => ({ prestacion_id: Number(id), cantidad: seleccionDe(id) }));
+    if (!prestaciones.length) {
+      mostrarAviso("fact-cobro-error", "Marcá al menos una prestación realizada.");
+      return;
+    }
+
+    const payload = {
+      prestaciones,
+      observaciones: valorDe("fact-cobro-obs").trim() || null,
+      permitir_particular: Boolean(
+        document.getElementById("fact-cobro-particular").checked
+      ),
+    };
+    try {
+      bloquear(btn, true);
+      const movimiento = await api(`/turnos/${state.cobro.turno_id}/facturar`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const cierre =
+        `Turno #${state.cobro.turno_id} finalizado · movimiento de caja #${movimiento.id}`;
+      cerrarModalCobro();
+      toast(
+        "exito",
+        `Cobrar Coseguro en mostrador: ${fmtMoneda(movimiento.monto_efectivo)}`,
+        movimiento.monto_pendiente_os > 0
+          ? `${cierre} · se presenta a ` +
+            `${movimiento.obra_social_nombre || "la obra social"}: ` +
+            `${fmtMoneda(movimiento.monto_pendiente_os)}`
+          : `${cierre} · visita saldada en el mostrador (sin saldo para la obra social).`
+      );
+      await cargarCajaDelDia();
+      await cargarTodo();
+    } catch (err) {
+      mostrarAviso("fact-cobro-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* ---------------------- Liquidación de obras sociales ------------------ */
+  /* GET /liquidaciones/obras-sociales: el período completo de la cobertura con
+     el estado de cada orden (sin presentar, presentada, cobrada o debitada). */
+  async function cargarPresentacion() {
+    const osId = state.factArrObraSocial;
+    if (!osId) {
+      state.factPresentacion = null;
+      renderPresentacion();
+      return;
+    }
+    const [anio, mes] = mesDeInput("fact-lis-mes");
+    try {
+      state.factPresentacion = await api(
+        `${RUTA_LIS_OS}?obra_social_id=${osId}&anio=${anio}&mes=${mes}`
+      );
+      state.factTildadas = [];
+      const todos = document.getElementById("fact-lis-todos");
+      if (todos) todos.checked = false;
+      renderPresentacion();
+    } catch (err) {
+      toast("error", "No se pudo cargar la presentación", err.message);
+    }
+  }
+
+  function renderPresentacion() {
+    const set = (id, texto) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    };
+    const p = state.factPresentacion;
+    const tbody = document.getElementById("fact-lista-presentacion");
+    if (!p) {
+      ["fact-lis-presentado", "fact-lis-cobrado", "fact-lis-debitado", "fact-lis-pendiente"].forEach((id) => set(id, "—"));
+      set("fact-lis-contador", "0");
+      set("fact-lis-numero", "Elegí la cobertura y el mes: la presentación agrupa las visitas pendientes de ese período.");
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9">${vacio("Sin cobertura seleccionada")}</td></tr>`;
+      return;
+    }
+
+    set("fact-lis-presentado", fmtMoneda(p.total_presentado));
+    set("fact-lis-cobrado", fmtMoneda(p.total_cobrado_os));
+    set("fact-lis-debitado", fmtMoneda(p.total_debitado_os));
+    set("fact-lis-pendiente", fmtMoneda(p.total_pendiente_os));
+    set("fact-lis-contador", String(p.cantidad_movimientos));
+    const sinPresentar = p.movimientos.filter((m) => m.estado_pago === "PENDIENTE").length;
+    set(
+      "fact-lis-numero",
+      `Presentación ${p.numero_presentacion} · ${p.obra_social_nombre} · ` +
+        `${String(p.mes).padStart(2, "0")}/${p.anio} · ` +
+        (p.generada ? "emitida" : "sin emitir") +
+        (sinPresentar ? ` · ${sinPresentar} orden(es) sin presentar` : "")
+    );
+
+    if (!tbody) return;
+    if (!p.movimientos.length) {
+      tbody.innerHTML = `<tr><td colspan="9">${vacio("No hay visitas de esa cobertura en el período")}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = p.movimientos
+      .map((m) => {
+        const abierto =
+          m.estado_pago === "PENDIENTE" || m.estado_pago === "EN_PROCESO_LIQUIDACION";
+        const tildada = state.factTildadas.indexOf(m.id) !== -1;
+        const acciones = abierto
+          ? `<button type="button" class="btn btn-soft btn-sm" data-fact-cobrar="${m.id}">Cobrar</button>` +
+            `<button type="button" class="btn btn-danger-soft btn-sm" data-fact-debitar="${m.id}">Debitar</button>`
+          : `<span class="text-[11px] text-slate-400">${esc(m.observaciones || "Cerrada")}</span>`;
+        return (
+          `<tr${tildada ? ' class="fact-tildada"' : ""}>` +
+          `<td><input type="checkbox" class="fact-check" data-fact-tilde="${m.id}" ${tildada ? "checked" : ""} ${abierto ? "" : "disabled"} /></td>` +
+          `<td class="text-xs">${esc(fechaHora(m.turno_fecha_hora_inicio || m.fecha))}</td>` +
+          `<td class="font-semibold text-slate-800">${esc(m.paciente_nombre || "—")}</td>` +
+          `<td class="text-xs font-mono text-slate-500">${esc(m.paciente_dni || "—")}</td>` +
+          `<td><ul class="fact-practicas"><li>${esc(practicasTexto(m)) || "—"}</li></ul></td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(m.monto_pendiente_os)}</td>` +
+          `<td class="text-right text-slate-500">${fmtMoneda(m.monto_efectivo)}</td>` +
+          `<td>${badgeEstadoPago(m.estado_pago)}</td>` +
+          `<td><div class="flex items-center justify-end gap-2">${acciones}</div></td></tr>`
+        );
+      })
+      .join("");
+  }
+
+  /* POST /liquidaciones/obras-sociales: emite la presentación del período. */
+  async function generarPresentacion() {
+    const osId = state.factArrObraSocial;
+    if (!osId) {
+      toast("info", "Elegí una obra social", "La presentación se arma por cobertura.");
+      return;
+    }
+    const [anio, mes] = mesDeInput("fact-lis-mes");
+    const p = state.factPresentacion;
+    const sinPresentar = p
+      ? p.movimientos.filter((m) => m.estado_pago === "PENDIENTE").length
+      : 0;
+    const ok = window.confirm(
+      `¿Generar la presentación de ${String(mes).padStart(2, "0")}/${anio} con ` +
+        `${sinPresentar} orden(es) sin presentar? Las órdenes pasan a "en liquidación".`
+    );
+    if (!ok) return;
+
+    const btn = document.getElementById("fact-lis-generar");
+    try {
+      bloquear(btn, true);
+      const presentacion = await api(RUTA_LIS_OS, {
+        method: "POST",
+        body: JSON.stringify({ obra_social_id: Number(osId), anio, mes }),
+      });
+      state.factPresentacion = presentacion;
+      state.factTildadas = [];
+      renderPresentacion();
+      toast(
+        "exito",
+        `Presentación ${presentacion.numero_presentacion} generada`,
+        `${presentacion.cantidad_movimientos} orden(es) · presentado ` +
+          `${fmtMoneda(presentacion.total_presentado)}`
+      );
+    } catch (err) {
+      toast("error", "No se pudo generar la presentación", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* Tilde de una orden para cerrarla en lote (cobrada o debitada). */
+  function alternarTilde(movimientoId) {
+    const id = Number(movimientoId);
+    const i = state.factTildadas.indexOf(id);
+    if (i === -1) state.factTildadas.push(id);
+    else state.factTildadas.splice(i, 1);
+    renderPresentacion();
+  }
+
+  /* Cierra en lote lo tildado. Cada orden se marca individualmente: los
+     endpoints de la API son de a uno (cobrar o debitar con su motivo). */
+  async function aplicarTildes(accion) {
+    const ids = state.factTildadas.slice();
+    if (!ids.length) {
+      toast("info", "No hay órdenes tildadas", "Tildá las que entraron en el depósito.");
+      return;
+    }
+    let motivo = "";
+    if (accion === "debitar") {
+      motivo = window.prompt(
+        `Motivo del débito para ${ids.length} orden(es):`,
+        "Práctica rechazada por la obra social"
+      );
+      if (!motivo || motivo.trim().length < 3) return;
+    }
+
+    const btn = document.getElementById(
+      accion === "cobrar" ? "fact-lis-cobrar-tildadas" : "fact-lis-debitar-tildadas"
+    );
+    let hechas = 0;
+    const errores = [];
+    try {
+      bloquear(btn, true);
+      for (const id of ids) {
+        try {
+          await api(`${RUTA_CAJA}/${id}/${accion}`, {
+            method: "POST",
+            body: JSON.stringify(
+              accion === "cobrar" ? {} : { observaciones: motivo.trim() }
+            ),
+          });
+          hechas += 1;
+        } catch (err) {
+          errores.push(`#${id}: ${err.message}`);
+        }
+      }
+      state.factTildadas = [];
+      const todos = document.getElementById("fact-lis-todos");
+      if (todos) todos.checked = false;
+      await cargarPresentacion();
+      await cargarCajaDelDia();
+      toast(
+        errores.length ? "info" : "exito",
+        `${hechas} orden(es) marcadas como ${accion === "cobrar" ? "cobradas" : "debitadas"}`,
+        errores.length ? errores.slice(0, 3).join(" · ") : "Presentación actualizada."
+      );
+    } catch (err) {
+      toast("error", "No se pudieron cerrar las órdenes", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* Cierre individual: POST /movimientos-caja/{id}/cobrar. */
+  async function cobrarMovimiento(movimientoId) {
+    try {
+      const movimiento = await api(`${RUTA_CAJA}/${movimientoId}/cobrar`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast(
+        "exito",
+        `Orden #${movimiento.id} cobrada`,
+        `Depositado ${fmtMoneda(movimiento.monto_cobrado_os || 0)} de ` +
+          `${fmtMoneda(movimiento.monto_pendiente_os)} presentados.`
+      );
+      await Promise.all([cargarCajaDelDia(), cargarPresentacion()]);
+    } catch (err) {
+      toast("error", "No se pudo marcar el cobro", err.message);
+    }
+  }
+
+  /* Débito individual: pide el motivo en un modal (queda registrado). */
+  function abrirDebito(movimientoId) {
+    const id = Number(movimientoId);
+    const candidatos = state.factCaja.concat(
+      state.factPresentacion ? state.factPresentacion.movimientos : []
+    );
+    const movimiento = candidatos.find((m) => m.id === id);
+    state.debitoMovimientoId = id;
+    const detalle = document.getElementById("fact-deb-detalle");
+    if (detalle) {
+      detalle.textContent = movimiento
+        ? `Orden #${movimiento.id} · ${movimiento.paciente_nombre || "—"} · ` +
+          `presentado ${fmtMoneda(movimiento.monto_pendiente_os)} (${movimiento.estado_pago})`
+        : `Orden #${id}`;
+    }
+    const motivo = document.getElementById("fact-deb-motivo");
+    if (motivo) motivo.value = "";
+    const monto = document.getElementById("fact-deb-monto");
+    if (monto) monto.value = "";
+    ocultarAviso("fact-deb-error");
+    mostrarModal("modal-debito");
+  }
+
+  function cerrarDebito() {
+    state.debitoMovimientoId = null;
+    ocultarModal("modal-debito");
+  }
+
+  /* POST /movimientos-caja/{id}/debitar con el motivo obligatorio. */
+  async function confirmarDebito(ev) {
+    ev.preventDefault();
+    if (!state.debitoMovimientoId) return;
+    const btn = document.getElementById("modal-deb-save");
+    const monto = valorDe("fact-deb-monto");
+    const payload = { observaciones: valorDe("fact-deb-motivo").trim() };
+    if (monto !== "") payload.monto_cobrado_os = Number(monto);
+    try {
+      bloquear(btn, true);
+      const movimiento = await api(
+        `${RUTA_CAJA}/${state.debitoMovimientoId}/debitar`,
+        { method: "POST", body: JSON.stringify(payload) }
+      );
+      cerrarDebito();
+      toast(
+        "exito",
+        `Orden #${movimiento.id} debitada`,
+        `Sin cobrar ${fmtMoneda(
+          movimiento.monto_pendiente_os - (movimiento.monto_cobrado_os || 0)
+        )}`
+      );
+      await Promise.all([cargarCajaDelDia(), cargarPresentacion()]);
+    } catch (err) {
+      mostrarAviso("fact-deb-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* Exporta la presentación del período para presentarla ante la cobertura. */
+  function exportarPresentacion() {
+    const p = state.factPresentacion;
+    if (!p || !p.movimientos.length) {
+      toast("info", "No hay nada para exportar", "Consultá primero el período de la cobertura.");
+      return;
+    }
+    const filas = [
+      [`Presentación ${p.numero_presentacion}`],
+      ["Cobertura", p.obra_social_nombre, "Código", p.obra_social_codigo || "-"],
+      ["Período", `${String(p.mes).padStart(2, "0")}/${p.anio}`],
+      ["Emitida", p.generada ? "Sí" : "No (borrador)"],
+      [],
+      ["Fecha", "Paciente", "DNI", "Prácticas", "Presentado", "Efectivo", "Estado", "Observaciones"],
+    ];
+    p.movimientos.forEach((m) => {
+      filas.push([
+        parteFecha(m.turno_fecha_hora_inicio || m.fecha),
+        m.paciente_nombre || "",
+        m.paciente_dni || "",
+        practicasTexto(m),
+        fmtMoneda(m.monto_pendiente_os),
+        fmtMoneda(m.monto_efectivo),
+        m.estado_pago,
+        m.observaciones || "",
+      ]);
+    });
+    filas.push([]);
+    filas.push(["Totales", "", "", "", fmtMoneda(p.total_presentado), fmtMoneda(p.total_efectivo)]);
+    descargarCSV(`presentacion-${p.numero_presentacion}.csv`, filas);
+    toast("exito", "Resumen exportado", `presentacion-${p.numero_presentacion}.csv`);
+  }
+
+  /* El mismo resumen, pero en PDF: es el que se le entrega a la cobertura. */
+  async function exportarPresentacionPDF() {
+    const p = state.factPresentacion;
+    if (!p || !p.movimientos.length) {
+      toast("info", "No hay nada para exportar", "Consultá primero el período de la cobertura.");
+      return;
+    }
+    const nombre = `presentacion-${p.numero_presentacion}.pdf`;
+    try {
+      await descargarArchivo(
+        `${RUTA_LIS_OS}/pdf?obra_social_id=${p.obra_social_id}&anio=${p.anio}&mes=${p.mes}`,
+        nombre
+      );
+      toast("exito", "PDF generado", nombre);
+    } catch (err) {
+      toast("error", "No se pudo generar el PDF", err.message);
+    }
+  }
+
+  /* --------------------- Liquidación de profesionales -------------------- */
+  /* GET /liquidaciones/profesionales: producción y honorarios del mes. */
+  async function cargarLiquidacionMedicos() {
+    const [anio, mes] = mesDeInput("fact-med-mes");
+    state.factMedDoctor = valorDe("fact-med-doctor");
+    const consulta =
+      `anio=${anio}&mes=${mes}` +
+      (state.factMedDoctor ? `&doctor_id=${state.factMedDoctor}` : "");
+    try {
+      state.factMedicos = await api(`${RUTA_LIS_PROF}?${consulta}`);
+      renderLiquidacionMedicos();
+    } catch (err) {
+      toast("error", "No se pudo cargar la liquidación", err.message);
+    }
+  }
+
+  function renderLiquidacionMedicos() {
+    const set = (id, texto) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    };
+    const r = state.factMedicos;
+    const cont = document.getElementById("fact-lista-medicos");
+    if (!r) {
+      ["fact-med-produccion", "fact-med-honorarios", "fact-med-efectivo", "fact-med-os"].forEach((id) => set(id, "—"));
+      if (cont) cont.innerHTML = vacio("Sin reporte cargado", "Elegí el período y tocá «Ver reporte».");
+      return;
+    }
+
+    set("fact-med-produccion", fmtMoneda(r.total_produccion));
+    set("fact-med-honorarios", fmtMoneda(r.total_honorarios));
+    set("fact-med-efectivo", fmtMoneda(r.total_efectivo));
+    set("fact-med-os", fmtMoneda(r.total_os));
+
+    if (!cont) return;
+    if (!r.doctores.length) {
+      cont.innerHTML = vacio("No hay profesionales activos", "Cargalos en la pestaña «Doctores».");
+      return;
+    }
+
+    const filas = r.doctores
+      .map((d) => {
+        const datos =
+          `${esc(d.doctor_especialidad)} · ${d.cantidad_turnos} atención(es)` +
+          (d.activo ? "" : " · dado de baja");
+        return (
+          `<tr>` +
+          `<td><div class="flex items-center gap-3">${avatar(d.doctor_nombre, d.doctor_id)}` +
+          `<div><p class="fact-med-nombre">${esc(d.doctor_nombre)}</p>` +
+          `<p class="fact-med-dato">${datos}</p></div></div></td>` +
+          `<td><span class="fact-med-tipo">${esc(textoPagoDoctor(d))}</span></td>` +
+          `<td class="text-right">${fmtMoneda(d.produccion_efectivo)}</td>` +
+          `<td class="text-right">${fmtMoneda(d.produccion_os)}</td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(d.produccion_total)}</td>` +
+          `<td class="text-right font-bold text-brand-700">${fmtMoneda(d.honorarios)}</td>` +
+          `<td class="text-xs text-slate-500">${esc(d.detalle_honorarios)}</td>` +
+          `</tr>`
+        );
+      })
+      .join("");
+
+    /* Tabla de subtotales: una fila por profesional y el total del consultorio
+       al pie (la producción del mes y lo que se le liquida a cada uno). */
+    const atenciones = r.doctores.reduce((suma, d) => suma + d.cantidad_turnos, 0);
+    cont.innerHTML =
+      `<div class="card overflow-hidden">` +
+      `<div class="overflow-x-auto"><table class="data-table">` +
+      `<thead><tr>` +
+      `<th>Profesional</th><th>Forma de pago</th>` +
+      `<th class="text-right">Efectivo</th>` +
+      `<th class="text-right">Obras sociales</th>` +
+      `<th class="text-right">Producción</th>` +
+      `<th class="text-right">Honorarios</th>` +
+      `<th>Cálculo del mes</th></tr></thead>` +
+      `<tbody>${filas}</tbody>` +
+      `<tfoot><tr class="bg-slate-50">` +
+      `<td colspan="2" class="font-bold text-slate-700">Totales del período</td>` +
+      `<td class="text-right font-bold">${fmtMoneda(r.total_efectivo)}</td>` +
+      `<td class="text-right font-bold">${fmtMoneda(r.total_os)}</td>` +
+      `<td class="text-right font-bold">${fmtMoneda(r.total_produccion)}</td>` +
+      `<td class="text-right font-bold text-brand-700">${fmtMoneda(r.total_honorarios)}</td>` +
+      `<td class="text-xs text-slate-500">${atenciones} atención(es) facturada(s)</td>` +
+      `</tr></tfoot>` +
+      `</table></div></div>`;
+  }
+
+  /* Exporta el reporte del mes (lo que se le liquida a cada profesional). */
+  function exportarLiquidacionMedicos() {
+    const r = state.factMedicos;
+    if (!r || !r.doctores.length) {
+      toast("info", "No hay reporte para exportar", "Consultá primero el período.");
+      return;
+    }
+    const filas = [
+      ["Liquidación de profesionales", `${String(r.mes).padStart(2, "0")}/${r.anio}`],
+      [],
+      [
+        "Profesional", "Especialidad", "Tipo de pago", "Valor", "Atenciones",
+        "Producción efectivo", "Presentado a la OS", "Producción total",
+        "Honorarios", "Cálculo",
+      ],
+    ];
+    r.doctores.forEach((d) => {
+      filas.push([
+        d.doctor_nombre,
+        d.doctor_especialidad,
+        d.tipo_pago,
+        d.valor_pago == null ? "" : d.valor_pago,
+        d.cantidad_turnos,
+        fmtMoneda(d.produccion_efectivo),
+        fmtMoneda(d.produccion_os),
+        fmtMoneda(d.produccion_total),
+        fmtMoneda(d.honorarios),
+        d.detalle_honorarios,
+      ]);
+    });
+    filas.push([]);
+    filas.push([
+      "Totales", "", "", "", "", fmtMoneda(r.total_efectivo), fmtMoneda(r.total_os),
+      fmtMoneda(r.total_produccion), fmtMoneda(r.total_honorarios),
+    ]);
+    const nombre = `liquidacion-profesionales-${r.anio}-${String(r.mes).padStart(2, "0")}.csv`;
+    descargarCSV(nombre, filas);
+    toast("exito", "Reporte exportado", nombre);
+  }
+
+  /* El mismo reporte, pero en PDF: es el que se le entrega al profesional. */
+  async function exportarLiquidacionMedicosPDF() {
+    const r = state.factMedicos;
+    if (!r || !r.doctores.length) {
+      toast("info", "No hay reporte para exportar", "Consultá primero el período.");
+      return;
+    }
+    /* El PDF sigue el filtro del reporte: si se liquidó a un solo profesional,
+       se pide (y se nombra) sólo el suyo. */
+    const profesional = porId(state.doctores, Number(state.factMedDoctor));
+    const nombre = profesional
+      ? `liquidacion-${slug(profesional.nombre)}-${r.anio}-${String(r.mes).padStart(2, "0")}.pdf`
+      : `liquidacion-profesionales-${r.anio}-${String(r.mes).padStart(2, "0")}.pdf`;
+    try {
+      const consulta =
+        `anio=${r.anio}&mes=${r.mes}` +
+        (state.factMedDoctor ? `&doctor_id=${state.factMedDoctor}` : "");
+      await descargarArchivo(`${RUTA_LIS_PROF}/pdf?${consulta}`, nombre);
+      toast("exito", "PDF generado", nombre);
+    } catch (err) {
+      toast("error", "No se pudo generar el PDF", err.message);
+    }
+  }
+
+  /* ------------------- Catálogo de prestaciones y aranceles -------------- */
+  /* GET /prestaciones: el catálogo completo (la vista filtra las dadas de baja
+     con "Mostrar las dadas de baja") y, después, los aranceles de la cobertura
+     elegida. */
+  async function cargarPrestaciones() {
+    try {
+      state.factPrestaciones = (await api(RUTA_PRESTACIONES)) || [];
+      cargarSelectoresFacturacion();
+      renderPrestaciones();
+      await cargarAranceles();
+    } catch (err) {
+      toast("error", "No se pudo cargar el catálogo de prestaciones", err.message);
+    }
+  }
+
+  function renderPrestaciones() {
+    const tbody = document.getElementById("fact-lista-prestaciones");
+    const contador = document.getElementById("fact-prest-contador");
+    const activas = state.factPrestaciones.filter((p) => p.activa);
+    if (contador) {
+      contador.textContent = `${activas.length} activa${activas.length === 1 ? "" : "s"}`;
+    }
+    if (!tbody) return;
+
+    const visibles = state.factMostrarInactivas
+      ? state.factPrestaciones
+      : activas;
+    if (!visibles.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="6">` +
+        vacio(
+          "Aún no hay prestaciones cargadas",
+          "Usá «Nueva prestación» para cargar la primera práctica facturable."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    const conArancel = {};
+    state.factAranceles.forEach((a) => {
+      conArancel[String(a.prestacion_id)] = a;
+    });
+
+    tbody.innerHTML = visibles
+      .map((p) => {
+        const arancel = conArancel[String(p.id)];
+        const estado = p.activa
+          ? `<span class="badge badge-green">${ICON.check}Activa</span>`
+          : `<span class="badge badge-slate">Dada de baja</span>`;
+        const alterno = p.activa
+          ? `<button type="button" class="btn btn-danger-soft btn-sm" data-fact-baja-prest="${p.id}" ` +
+            `title="Dejar de ofrecer ${esc(p.descripcion)} sin borrarla">Dar de baja</button>`
+          : `<button type="button" class="btn btn-soft btn-sm" data-fact-reactivar-prest="${p.id}" ` +
+            `title="Volver a ofrecer ${esc(p.descripcion)} al facturar">Reactivar</button>`;
+        return (
+          `<tr${p.activa ? "" : ' class="opacity-70"'}>` +
+          `<td class="font-mono text-xs">${esc(p.codigo_nomenclador)}</td>` +
+          `<td class="font-semibold text-slate-800">${esc(p.descripcion)}</td>` +
+          `<td class="text-right">${fmtMoneda(p.valor_base)}</td>` +
+          `<td>${estado}</td>` +
+          `<td>${arancel
+            ? `<span class="badge badge-brand">${fmtMoneda(arancel.monto_total)}</span>`
+            : `<span class="text-[11px] text-slate-400">sin cargar</span>`}</td>` +
+          `<td><div class="flex items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-ghost btn-sm" data-fact-editar-prest="${p.id}">Editar</button>` +
+          `${alterno}</div></td></tr>`
+        );
+      })
+      .join("");
+  }
+
+  /* Modal de prestación: alta (``id`` vacío) o edición del catálogo. */
+  function abrirModalPrestacion(id) {
+    const prestacion = id
+      ? state.factPrestaciones.find((p) => p.id === Number(id))
+      : null;
+    state.factPrestacionEditId = prestacion ? prestacion.id : null;
+    const set = (campo, valor) => {
+      const el = document.getElementById(campo);
+      if (el) el.value = valor;
+    };
+    const setTexto = (campo, valor) => {
+      const el = document.getElementById(campo);
+      if (el) el.textContent = valor;
+    };
+    setTexto(
+      "modal-prest-titulo",
+      prestacion ? `Editar ${prestacion.codigo_nomenclador}` : "Nueva prestación"
+    );
+    set("fact-prest-codigo", prestacion ? prestacion.codigo_nomenclador : "");
+    set("fact-prest-descripcion", prestacion ? prestacion.descripcion : "");
+    set("fact-prest-valor", prestacion ? prestacion.valor_base : 0);
+    const activa = document.getElementById("fact-prest-activa");
+    if (activa) activa.checked = prestacion ? Boolean(prestacion.activa) : true;
+    ocultarAviso("fact-prest-error");
+    mostrarModal("modal-prestacion");
+  }
+
+  function cerrarModalPrestacion() {
+    state.factPrestacionEditId = null;
+    ocultarModal("modal-prestacion");
+  }
+
+  /* POST /prestaciones (alta) o PUT /prestaciones/{id} (edición completa). */
+  async function guardarPrestacion(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById("modal-prest-save");
+    const editando = Boolean(state.factPrestacionEditId);
+    const payload = {
+      codigo_nomenclador: valorDe("fact-prest-codigo").trim(),
+      descripcion: valorDe("fact-prest-descripcion").trim(),
+      valor_base: Number(valorDe("fact-prest-valor")) || 0,
+      activa: Boolean(document.getElementById("fact-prest-activa").checked),
+    };
+    try {
+      bloquear(btn, true);
+      await api(rutaPrestacion(state.factPrestacionEditId), {
+        method: editando ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      });
+      cerrarModalPrestacion();
+      toast(
+        "exito",
+        editando ? "Prestación actualizada" : "Prestación creada",
+        `${payload.codigo_nomenclador} · ${payload.descripcion}`
+      );
+      await cargarPrestaciones();
+    } catch (err) {
+      mostrarAviso("fact-prest-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* Baja lógica (DELETE) y reactivación (PATCH): la práctica nunca se borra. */
+  async function cambiarEstadoPrestacion(id, activa) {
+    const prestacion = state.factPrestaciones.find((p) => p.id === Number(id));
+    if (!prestacion) return;
+    try {
+      if (activa) {
+        await api(rutaPrestacion(prestacion.id), {
+          method: "PATCH",
+          body: JSON.stringify({ activa: true }),
+        });
+      } else {
+        await api(rutaPrestacion(prestacion.id), { method: "DELETE" });
+      }
+      toast(
+        "exito",
+        `Prestación ${activa ? "reactivada" : "dada de baja"}`,
+        `${prestacion.codigo_nomenclador} · ${prestacion.descripcion}`
+      );
+      await cargarPrestaciones();
+    } catch (err) {
+      toast("error", "No se pudo cambiar el estado de la prestación", err.message);
+    }
+  }
+
+  /* ---------------------- Aranceles de la cobertura ---------------------- */
+  async function cargarAranceles() {
+    const osId = state.factArrObraSocial;
+    if (!osId) {
+      state.factAranceles = [];
+      renderAranceles();
+      renderPrestaciones();
+      return;
+    }
+    try {
+      state.factAranceles = (await api(`${OBRAS_SOCIALES}/${osId}/aranceles`)) || [];
+      renderAranceles();
+      renderPrestaciones();
+    } catch (err) {
+      toast("error", "No se pudieron cargar los aranceles", err.message);
+    }
+  }
+
+  function renderAranceles() {
+    const tbody = document.getElementById("fact-lista-aranceles");
+    if (!tbody) return;
+    const obra = obraSocialPorId(state.factArrObraSocial);
+    if (!obra) {
+      tbody.innerHTML =
+        `<tr><td colspan="6">` +
+        vacio("Elegí una cobertura", "Los aranceles se cargan por obra social.") +
+        `</td></tr>`;
+      return;
+    }
+    if (!state.factAranceles.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="6">` +
+        vacio(
+          `${obra.nombre} no tiene aranceles cargados`,
+          "Mientras falten, esas prácticas se cobran a valor de referencia al facturar."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = state.factAranceles
+      .map(
+        (a) =>
+          `<tr>` +
+          `<td class="font-mono text-xs">${esc(a.prestacion_codigo || "—")}</td>` +
+          `<td class="font-semibold text-slate-800">${esc(a.prestacion_descripcion || "—")}</td>` +
+          `<td class="text-right text-slate-500">${fmtMoneda(a.monto_cubre_os)}</td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(a.monto_coseguro_paciente)}</td>` +
+          `<td class="text-right">${fmtMoneda(a.monto_total)}</td>` +
+          `<td><div class="flex items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-ghost btn-sm" data-fact-editar-arancel="${a.id}">Editar</button>` +
+          `<button type="button" class="btn btn-danger-soft btn-sm" data-fact-eliminar-arancel="${a.id}" ` +
+          `title="Quitar el arancel de ${esc(obra.nombre)} para esa práctica">Quitar</button>` +
+          `</div></td></tr>`
+      )
+      .join("");
+  }
+
+  /* Modal de arancel: alta (``id`` vacío) o edición de los montos. */
+  function abrirModalArancel(id) {
+    const arancel = id
+      ? state.factAranceles.find((a) => a.id === Number(id))
+      : null;
+    const obra = obraSocialPorId(state.factArrObraSocial);
+    if (!obra) {
+      toast("info", "Elegí una obra social", "Los aranceles se cargan por cobertura.");
+      return;
+    }
+    if (!state.factPrestaciones.length) {
+      toast("info", "Cargá primero el catálogo", "Sin prestaciones no hay arancel que cargar.");
+      return;
+    }
+
+    state.factArancelEditId = arancel ? arancel.id : null;
+    const set = (campo, valor) => {
+      const el = document.getElementById(campo);
+      if (el) el.value = valor;
+    };
+    const setTexto = (campo, valor) => {
+      const el = document.getElementById(campo);
+      if (el) el.textContent = valor;
+    };
+    setTexto(
+      "modal-arr-titulo",
+      arancel ? `Editar arancel de ${obra.nombre}` : `Cargar arancel de ${obra.nombre}`
+    );
+    setTexto(
+      "modal-arr-sub",
+      arancel
+        ? "Se actualizan los montos de esa práctica (el par cobertura/práctica no cambia)."
+        : "Cuánto cubre la cobertura y cuánto pone el paciente."
+    );
+    cargarSelectoresFacturacion();
+    const sel = document.getElementById("fact-arr-prestacion");
+    if (sel) {
+      sel.value = arancel ? String(arancel.prestacion_id) : "";
+      // En edición la práctica no se puede cambiar: identifica el arancel.
+      sel.disabled = Boolean(arancel);
+    }
+    set("fact-arr-cubre", arancel ? arancel.monto_cubre_os : 0);
+    set("fact-arr-coseguro", arancel ? arancel.monto_coseguro_paciente : 0);
+    renderTotalArancel();
+    ocultarAviso("fact-arr-error");
+    mostrarModal("modal-arancel");
+  }
+
+  function cerrarModalArancel() {
+    state.factArancelEditId = null;
+    const sel = document.getElementById("fact-arr-prestacion");
+    if (sel) sel.disabled = false;
+    ocultarAviso("fact-arr-error");
+    ocultarModal("modal-arancel");
+  }
+
+  /* Total en vivo del arancel: cobertura + coseguro. */
+  function renderTotalArancel() {
+    const total =
+      (Number(valorDe("fact-arr-cubre")) || 0) +
+      (Number(valorDe("fact-arr-coseguro")) || 0);
+    const el = document.getElementById("fact-arr-total");
+    if (el) el.textContent = fmtMoneda(total);
+  }
+
+  /* POST /obras-sociales/{id}/aranceles (alta) o PUT /aranceles/{id} (edición). */
+  async function guardarArancel(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById("modal-arr-save");
+    const obraId = state.factArrObraSocial;
+    const prestacionId = Number(valorDe("fact-arr-prestacion"));
+    if (!obraId || !prestacionId) {
+      mostrarAviso("fact-arr-error", "Elegí la práctica que se va a arancelar.");
+      return;
+    }
+    const payload = {
+      prestacion_id: prestacionId,
+      monto_cubre_os: Number(valorDe("fact-arr-cubre")) || 0,
+      monto_coseguro_paciente: Number(valorDe("fact-arr-coseguro")) || 0,
+    };
+    const editando = Boolean(state.factArancelEditId);
+    try {
+      bloquear(btn, true);
+      if (editando) {
+        await api(rutaArancel(state.factArancelEditId), {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await api(`${OBRAS_SOCIALES}/${obraId}/aranceles`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+      const obra = obraSocialPorId(obraId);
+      cerrarModalArancel();
+      toast(
+        "exito",
+        editando ? "Arancel actualizado" : "Arancel cargado",
+        `${obra ? obra.nombre : "Cobertura"} · cubre ${fmtMoneda(payload.monto_cubre_os)} ` +
+          `· coseguro ${fmtMoneda(payload.monto_coseguro_paciente)}`
+      );
+      await cargarAranceles();
+    } catch (err) {
+      mostrarAviso("fact-arr-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* DELETE /aranceles/{id}: es configuración, se puede quitar y volver a cargar
+     (las facturas emitidas conservan sus importes congelados). */
+  async function eliminarArancel(id) {
+    const arancel = state.factAranceles.find((a) => a.id === Number(id));
+    if (!arancel) return;
+    const ok = window.confirm(
+      `¿Quitar el arancel de ${arancel.prestacion_codigo} ` +
+        `(${arancel.prestacion_descripcion})? Las facturas ya emitidas no cambian.`
+    );
+    if (!ok) return;
+    try {
+      await api(rutaArancel(arancel.id), { method: "DELETE" });
+      toast("exito", "Arancel eliminado", `${arancel.prestacion_codigo}`);
+      await cargarAranceles();
+    } catch (err) {
+      toast("error", "No se pudo eliminar el arancel", err.message);
+    }
+  }
+
+  /* ------------------- Convenios por obra social (grilla) ---------------- */
+  /* La grilla de convenios es la tabla de precios acordada con una cobertura:
+     cada práctica del nomenclador base de Córdoba con el monto que cubre la OS y
+     el **coseguro sugerido** (arancel base - monto). Se guarda en lote y también
+     se puede completar desde la planilla estándar de Excel (importador masivo). */
+  function rutaConvenio(obraSocialId, sufijo) {
+    const base = `${OBRAS_SOCIALES}/${obraSocialId}/convenio`;
+    return sufijo ? `${base}/${sufijo}` : base;
+  }
+
+  /* Importador masivo: el endpoint cuelga de la obra social, no de /convenio. */
+  function rutaImportarAranceles(obraSocialId) {
+    return `${OBRAS_SOCIALES}/${obraSocialId}/importar-aranceles`;
+  }
+
+  /* Coseguro sugerido: el arancel base menos lo que cubre la OS. Nunca negativo
+     (si la cobertura paga de más, el mostrador no cobra nada). Es la misma regla
+     que aplica el servidor al guardar y al importar la planilla. */
+  function coseguroDeConvenio(valorBase, montoOs) {
+    const diferencia = (Number(valorBase) || 0) - (Number(montoOs) || 0);
+    return diferencia > 0 ? Math.round(diferencia * 100) / 100 : 0;
+  }
+
+  /* Lo que se está mostrando en una fila: si la secretaría escribió un monto
+     nuevo, esa edición manda sobre el valor que trajo el servidor. */
+  function valoresConvenio(fila) {
+    const clave = String(fila.prestacion_id);
+    const tocado = Object.prototype.hasOwnProperty.call(state.convEdiciones, clave);
+    return {
+      cubre: tocado ? state.convEdiciones[clave] : Number(fila.monto_cubre_os) || 0,
+      tocado: tocado,
+    };
+  }
+
+  function actualizarPendientesConvenio() {
+    const pendientes = Object.keys(state.convEdiciones).length;
+    const badge = document.getElementById("conv-pendientes");
+    if (badge) {
+      badge.textContent = `${pendientes} sin guardar`;
+      badge.classList.toggle("hide", pendientes === 0);
+    }
+    const btn = document.getElementById("conv-guardar");
+    if (btn) btn.disabled = pendientes === 0;
+  }
+
+  /* Totales de la grilla: arancel base, lo que cubre la OS y el coseguro
+     sugerido, con los montos que se están viendo en pantalla (ediciones incluidas). */
+  function renderTotalesConvenio() {
+    const set = (id, texto) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    };
+    const convenio = state.factConvenio;
+    if (!convenio) {
+      ["conv-total-base", "conv-total-os", "conv-total-coseguro"].forEach((id) =>
+        set(id, "—")
+      );
+      ["conv-pie-base", "conv-pie-os", "conv-pie-coseguro"].forEach((id) =>
+        set(id, fmtMoneda(0))
+      );
+      actualizarPendientesConvenio();
+      return;
+    }
+
+    let base = 0;
+    let cubre = 0;
+    let sugerido = 0;
+    convenio.filas.forEach((fila) => {
+      const valores = valoresConvenio(fila);
+      base += Number(fila.valor_base) || 0;
+      cubre += valores.cubre;
+      sugerido += coseguroDeConvenio(fila.valor_base, valores.cubre);
+    });
+    set("conv-total-base", fmtMoneda(base));
+    set("conv-total-os", fmtMoneda(cubre));
+    set("conv-total-coseguro", fmtMoneda(sugerido));
+    set("conv-pie-base", fmtMoneda(base));
+    set("conv-pie-os", fmtMoneda(cubre));
+    set("conv-pie-coseguro", fmtMoneda(sugerido));
+    actualizarPendientesConvenio();
+  }
+
+  /* GET /obras-sociales/{id}/convenio: la grilla completa de la cobertura. */
+  async function cargarConvenio() {
+    const osId = state.factArrObraSocial;
+    state.convEdiciones = {};
+    if (!osId) {
+      state.factConvenio = null;
+      renderConvenio();
+      return;
+    }
+    try {
+      state.factConvenio = await api(rutaConvenio(osId));
+      ocultarAviso("conv-error");
+      renderConvenio();
+    } catch (err) {
+      state.factConvenio = null;
+      renderConvenio();
+      toast("error", "No se pudo cargar el convenio", err.message);
+    }
+  }
+
+  /* Una fila de la grilla: el monto que cubre la OS es editable y el coseguro
+     sugerido se recalcula a cada tecla (sin redibujar, para no perder el foco). */
+  function filaConvenioHtml(fila) {
+    const convenio = state.factConvenio || {};
+    const valores = valoresConvenio(fila);
+    const sugerido = coseguroDeConvenio(fila.valor_base, valores.cubre);
+    const estado = fila.cargado
+      ? `<span class="badge badge-green">${ICON.check}Cargado</span>`
+      : `<span class="badge badge-slate">Sin cargar</span>`;
+    return (
+      `<tr data-conv-fila="${fila.prestacion_id}"` +
+      `${valores.tocado ? ' class="conv-cambiado"' : ""}>` +
+      `<td class="font-mono text-xs">${esc(fila.codigo_nomenclador)}</td>` +
+      `<td class="font-semibold text-slate-800">${esc(fila.descripcion)}</td>` +
+      `<td class="text-right text-slate-500">${fmtMoneda(fila.valor_base)}</td>` +
+      `<td class="text-right"><input type="number" min="0" step="0.01" ` +
+      `class="field conv-monto" data-conv-monto="${fila.prestacion_id}" ` +
+      `value="${valores.cubre}" title="Monto que cubre ` +
+      `${esc(convenio.obra_social_nombre || "la obra social")} por esta práctica" /></td>` +
+      `<td class="text-right"><span class="conv-coseguro" ` +
+      `data-conv-coseguro="${fila.prestacion_id}">${fmtMoneda(sugerido)}</span></td>` +
+      `<td>${estado}</td></tr>`
+    );
+  }
+
+  function renderConvenio() {
+    const tbody = document.getElementById("conv-lista");
+    const contador = document.getElementById("conv-contador");
+    if (!tbody) return;
+    const convenio = state.factConvenio;
+    if (!convenio) {
+      if (contador) contador.textContent = "—";
+      tbody.innerHTML =
+        `<tr><td colspan="6">` +
+        vacio(
+          "Elegí una obra social",
+          "El convenio (los precios acordados) se carga por cobertura."
+        ) +
+        `</td></tr>`;
+      renderTotalesConvenio();
+      return;
+    }
+
+    const busqueda = normalizarTexto(state.convBusqueda).trim();
+    const visibles = busqueda
+      ? convenio.filas.filter(
+          (fila) =>
+            normalizarTexto(
+              `${fila.codigo_nomenclador} ${fila.descripcion}`
+            ).indexOf(busqueda) !== -1
+        )
+      : convenio.filas;
+    if (contador) {
+      contador.textContent = busqueda
+        ? `${visibles.length} de ${convenio.filas.length}`
+        : String(convenio.filas.length);
+    }
+    tbody.innerHTML = visibles.length
+      ? visibles.map(filaConvenioHtml).join("")
+      : `<tr><td colspan="6">` +
+        vacio(
+          `Sin coincidencias para «${state.convBusqueda}»`,
+          "Probá con el código del nomenclador o con parte del nombre."
+        ) +
+        `</td></tr>`;
+    renderTotalesConvenio();
+  }
+
+  /* Edición en vivo del monto que cubre la OS: actualiza la edición pendiente, el
+     coseguro sugerido de esa fila y los totales de la grilla. */
+  function fijarMontoConvenio(prestacionId, valorTexto) {
+    const filas = (state.factConvenio && state.factConvenio.filas) || [];
+    const fila = filas.find((f) => String(f.prestacion_id) === String(prestacionId));
+    if (!fila) return;
+    const clave = String(prestacionId);
+    const numero = valorTexto === "" ? 0 : Number(valorTexto);
+    if (!isFinite(numero) || numero < 0) {
+      toast(
+        "info",
+        "Monto inválido",
+        "El monto que cubre la obra social no puede ser negativo."
+      );
+      return;
+    }
+
+    if (numero === (Number(fila.monto_cubre_os) || 0)) {
+      delete state.convEdiciones[clave];
+    } else {
+      state.convEdiciones[clave] = numero;
+    }
+
+    const celda = document.querySelector(`[data-conv-coseguro="${prestacionId}"]`);
+    if (celda) {
+      celda.textContent = fmtMoneda(coseguroDeConvenio(fila.valor_base, numero));
+    }
+    const renglon = document.querySelector(`[data-conv-fila="${prestacionId}"]`);
+    if (renglon) {
+      renglon.classList.toggle(
+        "conv-cambiado",
+        Object.prototype.hasOwnProperty.call(state.convEdiciones, clave)
+      );
+    }
+    renderTotalesConvenio();
+  }
+
+  /* PUT /obras-sociales/{id}/convenio: guarda sólo las filas modificadas. */
+  async function guardarConvenio() {
+    const osId = state.factArrObraSocial;
+    const btn = document.getElementById("conv-guardar");
+    const ids = Object.keys(state.convEdiciones);
+    if (!osId) {
+      toast("info", "Elegí una obra social", "El convenio se guarda por cobertura.");
+      return;
+    }
+    if (!ids.length) {
+      toast(
+        "info",
+        "No hay cambios para guardar",
+        "Modificá el monto que cubre la OS en alguna práctica."
+      );
+      return;
+    }
+
+    const filas = ids.map((id) => ({
+      prestacion_id: Number(id),
+      monto_cubre_os: state.convEdiciones[id],
+    }));
+    try {
+      bloquear(btn, true);
+      const convenio = await api(rutaConvenio(osId), {
+        method: "PUT",
+        body: JSON.stringify({ filas: filas }),
+      });
+      state.factConvenio = convenio;
+      state.convEdiciones = {};
+      ocultarAviso("conv-error");
+      renderConvenio();
+      toast(
+        "exito",
+        "Convenio guardado",
+        `${convenio.actualizados} actualizada${convenio.actualizados === 1 ? "" : "s"} y ` +
+          `${convenio.creados} nueva${convenio.creados === 1 ? "" : "s"} para ` +
+          `${convenio.obra_social_nombre}.`
+      );
+      // La pestaña "Prestaciones y aranceles" muestra la misma tabla de precios.
+      await cargarAranceles();
+    } catch (err) {
+      mostrarAviso("conv-error", err.message);
+    } finally {
+      bloquear(btn, false);
+      // ``bloquear`` vuelve a habilitar el botón: con la grilla ya guardada no
+      // quedan cambios pendientes, así que "Guardar cambios" queda inactivo.
+      actualizarPendientesConvenio();
+    }
+  }
+
+  /* ----------------- Importador masivo (plantilla estándar) -------------- */
+  /* El circuito es: descargar la plantilla de ejemplo (dos columnas: ``codigo`` y
+     ``precio_cobertura``), completarla en Excel, arrastrarla al recuadro y
+     confirmar. Primero se pide una **vista previa** (``simular``) para que la
+     secretaría vea cuántos códigos entran y cuáles tienen error. */
+  async function descargarPlantillaConvenio() {
+    const osId = state.factArrObraSocial;
+    const btn = document.getElementById("conv-plantilla");
+    if (!osId) {
+      toast("info", "Elegí una obra social", "La plantilla se arma por cobertura.");
+      return;
+    }
+    const formato = valorDe("conv-formato") === "xlsx" ? "xlsx" : "csv";
+    const obra = obraSocialPorId(osId);
+    try {
+      bloquear(btn, true);
+      await descargarArchivo(
+        rutaConvenio(osId, `plantilla?formato=${formato}`),
+        `plantilla-aranceles-${slug(obra ? obra.nombre : "cobertura")}.${formato}`
+      );
+      toast(
+        "info",
+        "Plantilla descargada",
+        "Completá la columna «precio_cobertura» y arrastrá el archivo acá."
+      );
+    } catch (err) {
+      toast("error", "No se pudo descargar la plantilla", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* Lee el archivo elegido y lo pasa a base64 (sirve igual para CSV y para XLSX). */
+  function base64DeArchivo(archivo) {
+    return new Promise(function (resolve, reject) {
+      const lector = new FileReader();
+      lector.onload = function () {
+        const resultado = String(lector.result || "");
+        const coma = resultado.indexOf(",");
+        resolve(coma === -1 ? "" : resultado.slice(coma + 1));
+      };
+      lector.onerror = function () {
+        reject(new Error("No se pudo leer el archivo elegido."));
+      };
+      lector.readAsDataURL(archivo);
+    });
+  }
+
+  async function elegirArchivoConvenio(archivo) {
+    if (!archivo) return;
+    try {
+      const contenido = await base64DeArchivo(archivo);
+      state.convArchivo = { nombre: archivo.name, contenido: contenido };
+      const etiqueta = document.getElementById("conv-archivo-nombre");
+      if (etiqueta) {
+        const kb = Math.max(1, Math.round(archivo.size / 1024));
+        etiqueta.textContent = `Archivo elegido: ${archivo.name} (${kb} KB)`;
+        etiqueta.classList.remove("hide");
+      }
+      await previsualizarImportacion();
+    } catch (err) {
+      toast("error", "No se pudo leer el archivo", err.message);
+    }
+  }
+
+  /* POST /obras-sociales/{id}/importar-aranceles con ``simular`` (vista previa) o
+     sin él (importación real). */
+  async function importarPlanillaConvenio(simular) {
+    const osId = state.factArrObraSocial;
+    const btn = document.getElementById(simular ? "conv-plantilla" : "conv-confirmar");
+    if (!osId || !state.convArchivo) return;
+    try {
+      bloquear(btn, true);
+      const reporte = await api(rutaImportarAranceles(osId), {
+        method: "POST",
+        body: JSON.stringify({
+          nombre_archivo: state.convArchivo.nombre,
+          contenido_base64: state.convArchivo.contenido,
+          simular: simular,
+        }),
+      });
+      state.convReporte = reporte;
+      ocultarAviso("conv-error");
+      renderReporteImportacion(reporte);
+      if (!simular) {
+        toast(
+          "exito",
+          "Aranceles importados",
+          `${reporte.creados} nueva${reporte.creados === 1 ? "" : "s"} y ` +
+            `${reporte.actualizados} actualizada${reporte.actualizados === 1 ? "" : "s"} ` +
+            `en ${reporte.obra_social_nombre}` +
+            (reporte.errores ? ` · ${reporte.errores} fila(s) con error.` : ".")
+        );
+        limpiarImportacionConvenio(true);
+        await cargarConvenio();
+      }
+    } catch (err) {
+      mostrarAviso("conv-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  function previsualizarImportacion() {
+    return importarPlanillaConvenio(true);
+  }
+
+  function confirmarImportacion() {
+    return importarPlanillaConvenio(false);
+  }
+
+  /* Reporte de la planilla: cuántas filas entran, cuántas fallan y por qué. */
+  function renderReporteImportacion(reporte) {
+    const cont = document.getElementById("conv-reporte");
+    if (!cont) return;
+    const confirmar = document.getElementById("conv-confirmar");
+    const limpiar = document.getElementById("conv-limpiar");
+    const errores = (reporte.detalle || []).filter((f) => f.estado === "ERROR");
+    const aImportar = reporte.creados + reporte.actualizados;
+    const chip = (texto, clase) => `<span class="badge ${clase}">${esc(texto)}</span>`;
+
+    cont.innerHTML =
+      `<div class="conv-reporte-totales">` +
+      chip(`${reporte.filas_leidas} fila(s) leídas`, "badge-slate") +
+      chip(`${reporte.creados} nueva(s)`, "badge-brand") +
+      chip(`${reporte.actualizados} actualizada(s)`, "badge-green") +
+      chip(`${reporte.sin_cambios} sin cambios`, "badge-slate") +
+      chip(`${reporte.ignoradas} sin precio`, "badge-amber") +
+      chip(
+        `${reporte.errores} con error`,
+        reporte.errores ? "badge-red" : "badge-slate"
+      ) +
+      `</div>` +
+      `<p class="text-[11px] text-slate-400 mt-2">` +
+      (reporte.simulado
+        ? "Vista previa: todavía no se guardó nada. Revisá los errores y confirmá la importación."
+        : "Importación aplicada: el convenio ya tiene estos precios.") +
+      `</p>` +
+      (errores.length
+        ? `<ul class="conv-reporte-lista">` +
+          errores
+            .slice(0, 40)
+            .map(
+              (fila) =>
+                `<li><span class="conv-linea">línea ${fila.linea}</span> · ` +
+                `<span class="font-mono">${esc(fila.codigo || "—")}</span> · ` +
+                `<span class="text-rose-600">${esc(fila.mensaje || "error")}</span></li>`
+            )
+            .join("") +
+          (errores.length > 40
+            ? `<li class="text-slate-400">… y ${errores.length - 40} fila(s) más con error.</li>`
+            : "") +
+          `</ul>`
+        : "");
+    cont.classList.remove("hide");
+    if (limpiar) limpiar.classList.remove("hide");
+    if (confirmar) {
+      const mostrar = reporte.simulado && aImportar > 0;
+      confirmar.classList.toggle("hide", !mostrar);
+      confirmar.textContent = `Confirmar importación (${aImportar})`;
+    }
+  }
+
+  /* Vuelve el importador a cero. Con ``conservarReporte`` deja a la vista el
+     resultado de la importación que se acaba de aplicar. */
+  function limpiarImportacionConvenio(conservarReporte) {
+    state.convArchivo = null;
+    const input = document.getElementById("conv-archivo");
+    if (input) input.value = "";
+    const etiqueta = document.getElementById("conv-archivo-nombre");
+    if (etiqueta) {
+      etiqueta.textContent = "";
+      etiqueta.classList.add("hide");
+    }
+    const confirmar = document.getElementById("conv-confirmar");
+    if (confirmar) confirmar.classList.add("hide");
+    const limpiar = document.getElementById("conv-limpiar");
+    if (limpiar) limpiar.classList.add("hide");
+    if (!conservarReporte) {
+      state.convReporte = null;
+      const cont = document.getElementById("conv-reporte");
+      if (cont) {
+        cont.innerHTML = "";
+        cont.classList.add("hide");
+      }
+    }
+  }
+
   /* ------------------------------ Navegación ----------------------------- */
   const VISTAS = {
     dashboard: ["Panel Principal", "Resumen del consultorio y estado de los recordatorios"],
@@ -1668,6 +3555,10 @@
     "obras-sociales": [
       "Obras Sociales",
       "Catálogo de coberturas que se ofrecen al registrar un paciente",
+    ],
+    facturacion: [
+      "Facturación y Caja",
+      "Cierre de visitas, coseguros del mostrador y liquidación de obras sociales y profesionales",
     ],
   };
 
@@ -1706,6 +3597,11 @@
       // mismo odontólogo seleccionado y los tramos ya cacheados.
       renderExcepciones();
     }
+    if (v === "facturacion") {
+      // Al entrar se refresca la caja del día y la pestaña que estaba activa
+      // (cada una pide al servidor lo que muestra).
+      cargarFacturacion();
+    }
   }
 
   /* --------------------------- Helpers de UI ----------------------------- */
@@ -1724,21 +3620,150 @@
   }
 
   /* ------------------------------- Acciones ------------------------------ */
+  /* ------------- Liquidación del profesional: forma de pago (Módulo 3) ----- */
+  /* Cómo se le paga a cada odontólogo. El selector de la vista "Doctores"
+     replica el enum ``TipoPagoDoctor`` del backend y define los textos del campo
+     numérico que se habilita al elegir comisión o sueldo:
+
+     * ``DUENO``    → se queda con el 100 % de su producción (porcentaje opcional);
+     * ``COMISION`` → un porcentaje (0-100) de la producción del mes;
+     * ``SUELDO``   → un importe fijo por mes, sin importar la producción. */
+  /* Las etiquetas visibles ("Dueño", "Comisión", "Sueldo fijo") salen de
+     TIPO_PAGO_TEXTO: es el mismo texto que usan el reporte, el CSV y el PDF. */
+  const PAGO_MODALIDAD = {
+    DUENO: {
+      campo: "Porcentaje de la producción (%)",
+      ayuda:
+        "Dueño del consultorio: se lleva el 100% de las prestaciones que factura. " +
+        "Cargá un porcentaje sólo si retiene una parte (ej.: 60).",
+      ejemplo: "100 (por defecto)",
+      requerido: false,
+    },
+    COMISION: {
+      campo: "Porcentaje de la comisión (%)",
+      ayuda: "Porcentaje sobre la producción del mes, entre 0 y 100. Ej.: 40 → se lleva el 40%.",
+      ejemplo: "Ej.: 40",
+      requerido: true,
+    },
+    SUELDO: {
+      campo: "Sueldo mensual ($)",
+      ayuda: "Importe fijo por mes, sin importar cuánto produjo en el período.",
+      ejemplo: "Ej.: 900000",
+      requerido: true,
+    },
+  };
+
+  /* Ids de los campos de pago en el formulario de alta y en el modal de edición. */
+  const IDS_PAGO_ALTA = {
+    select: "doc-tipo-pago",
+    grupo: "doc-valor-grupo",
+    label: "doc-valor-label",
+    input: "doc-valor-pago",
+    ayuda: "doc-pago-ayuda",
+  };
+  const IDS_PAGO_EDIT = {
+    select: "doc-edit-tipo-pago",
+    grupo: "doc-edit-valor-grupo",
+    label: "doc-edit-valor-label",
+    input: "doc-edit-valor-pago",
+    ayuda: "doc-edit-pago-ayuda",
+  };
+
+  function datosPago(tipoPago) {
+    return PAGO_MODALIDAD[tipoPago] || PAGO_MODALIDAD.DUENO;
+  }
+
+  /* Texto corto de la forma de pago: "Comisión · 40%", "Sueldo fijo · $ 900.000,00". */
+  function textoPagoDoctor(doctor) {
+    const etiqueta = TIPO_PAGO_TEXTO[doctor.tipo_pago] || doctor.tipo_pago;
+    if (doctor.valor_pago == null) return etiqueta;
+    const valor =
+      doctor.tipo_pago === "SUELDO"
+        ? fmtMoneda(doctor.valor_pago)
+        : `${doctor.valor_pago}%`;
+    return `${etiqueta} · ${valor}`;
+  }
+
+  /* Aplica el tipo elegido al formulario: habilita u oculta el campo numérico y
+     ajusta su etiqueta, la ayuda y el ``required``. ``valorInicial`` precarga el
+     importe guardado (así un dueño con porcentaje no pierde el dato al editar);
+     al cambiar el select se pasa ``null`` y el campo arranca vacío. */
+  function configurarCamposPago(tipoPago, ids, valorInicial) {
+    const datos = datosPago(tipoPago);
+    const grupo = document.getElementById(ids.grupo);
+    const label = document.getElementById(ids.label);
+    const entrada = document.getElementById(ids.input);
+    const ayuda = document.getElementById(ids.ayuda);
+    if (ayuda) ayuda.textContent = datos.ayuda;
+    if (label) label.textContent = datos.campo;
+    if (grupo) {
+      const mostrar =
+        datos.requerido || (valorInicial != null && valorInicial !== "");
+      grupo.classList.toggle("hide", !mostrar);
+    }
+    if (entrada) {
+      entrada.required = datos.requerido;
+      entrada.placeholder = datos.ejemplo;
+      entrada.value = valorInicial == null ? "" : valorInicial;
+      if (tipoPago === "SUELDO") entrada.removeAttribute("max");
+      else entrada.max = "100";
+    }
+  }
+
+  /* Lee el tipo de pago y el importe del formulario (``null`` si no aplica). */
+  function leerPagoFormulario(ids) {
+    const select = document.getElementById(ids.select);
+    const tipoPago = (select && select.value) || "DUENO";
+    const grupo = document.getElementById(ids.grupo);
+    const oculto = !grupo || grupo.classList.contains("hide");
+    const entrada = document.getElementById(ids.input);
+    const texto = entrada ? String(entrada.value).trim() : "";
+    const numero = Number(texto);
+    const valor =
+      oculto || texto === "" || Number.isNaN(numero) ? null : numero;
+    return { tipo_pago: tipoPago, valor_pago: valor };
+  }
+
+  /* Validación previa al envío: evita el 422 del backend con un mensaje claro. */
+  function errorDePago(tipoPago, valorPago) {
+    if (tipoPago === "COMISION") {
+      if (valorPago == null) return "Ingresá el porcentaje de la comisión (0 a 100).";
+      if (valorPago < 0 || valorPago > 100)
+        return "El porcentaje de la comisión debe estar entre 0 y 100.";
+    }
+    if (tipoPago === "SUELDO" && (valorPago == null || valorPago <= 0)) {
+      return "Ingresá el sueldo mensual del profesional (mayor que 0).";
+    }
+    if (tipoPago === "DUENO" && valorPago != null && (valorPago < 0 || valorPago > 100)) {
+      return "El porcentaje que retiene el dueño debe estar entre 0 y 100.";
+    }
+    return "";
+  }
+
   async function crearDoctor(ev) {
     ev.preventDefault();
     const form = ev.target;
     const btn = form.querySelector("button[type=submit]");
+    const pago = leerPagoFormulario(IDS_PAGO_ALTA);
+    const errorPago = errorDePago(pago.tipo_pago, pago.valor_pago);
+    if (errorPago) {
+      mostrarAviso("doc-error", errorPago);
+      return;
+    }
     const payload = {
       nombre: document.getElementById("doc-nombre").value.trim(),
       especialidad: document.getElementById("doc-especialidad").value.trim(),
       activo: document.getElementById("doc-activo").checked,
+      ...pago,
     };
     try {
       bloquear(btn, true);
       const nuevo = await api("/doctores", { method: "POST", body: JSON.stringify(payload) });
       form.reset();
       document.getElementById("doc-activo").checked = true;
-      toast("exito", "Doctor guardado", `${nuevo.nombre} · ${nuevo.especialidad}`);
+      configurarCamposPago("DUENO", IDS_PAGO_ALTA, null);
+      ocultarAviso("doc-error");
+      toast("exito", "Doctor guardado", `${nuevo.nombre} · ${nuevo.especialidad} · ${textoPagoDoctor(nuevo)}`);
       await cargarTodo();
     } catch (err) {
       toast("error", "No se pudo guardar el doctor", err.message);
@@ -1788,6 +3813,10 @@
     document.getElementById("doc-edit-nombre").value = doctor.nombre || "";
     document.getElementById("doc-edit-especialidad").value = doctor.especialidad || "";
     document.getElementById("doc-edit-activo").checked = Boolean(doctor.activo);
+    /* Forma de pago: el select manda y el campo numérico se precarga con el valor
+       guardado (un dueño con porcentaje no pierde el dato al reeditar). */
+    document.getElementById("doc-edit-tipo-pago").value = doctor.tipo_pago || "DUENO";
+    configurarCamposPago(doctor.tipo_pago, IDS_PAGO_EDIT, doctor.valor_pago);
     ocultarAviso("doctor-error");
     mostrarModal("modal-doctor");
   }
@@ -1802,10 +3831,17 @@
     ev.preventDefault();
     if (!state.doctorEditId) return;
     const btn = document.getElementById("modal-doctor-save");
+    const pago = leerPagoFormulario(IDS_PAGO_EDIT);
+    const errorPago = errorDePago(pago.tipo_pago, pago.valor_pago);
+    if (errorPago) {
+      mostrarAviso("doctor-error", errorPago);
+      return;
+    }
     const payload = {
       nombre: document.getElementById("doc-edit-nombre").value.trim(),
       especialidad: document.getElementById("doc-edit-especialidad").value.trim(),
       activo: document.getElementById("doc-edit-activo").checked,
+      ...pago,
     };
     try {
       bloquear(btn, true);
@@ -1814,7 +3850,7 @@
         body: JSON.stringify(payload),
       });
       cerrarModalDoctor();
-      toast("exito", "Doctor actualizado", `${doctor.nombre} · ${doctor.especialidad}`);
+      toast("exito", "Doctor actualizado", `${doctor.nombre} · ${doctor.especialidad} · ${textoPagoDoctor(doctor)}`);
       await cargarTodo();
     } catch (err) {
       mostrarAviso("doctor-error", err.message);
@@ -2472,11 +4508,23 @@
       cerrarModal();
       cerrarModalDoctor();
       cerrarModalObraSocial();
+      cerrarModalCobro();
+      cerrarModalPrestacion();
+      cerrarModalArancel();
+      cerrarDebito();
     });
 
     document.getElementById("form-doctor").addEventListener("submit", crearDoctor);
     // Gestión de doctores: edición en modal (PUT) y baja/reactivación lógica.
     document.getElementById("form-doctor-edicion").addEventListener("submit", guardarEdicionDoctor);
+    // Forma de pago: el select habilita el campo numérico (porcentaje o sueldo).
+    document.getElementById("doc-tipo-pago").addEventListener("change", function (e) {
+      configurarCamposPago(e.target.value, IDS_PAGO_ALTA, null);
+    });
+    document.getElementById("doc-edit-tipo-pago").addEventListener("change", function (e) {
+      configurarCamposPago(e.target.value, IDS_PAGO_EDIT, null);
+    });
+    configurarCamposPago("DUENO", IDS_PAGO_ALTA, null);
     document.getElementById("modal-doctor-close").addEventListener("click", cerrarModalDoctor);
     document.getElementById("modal-doctor-cancel").addEventListener("click", cerrarModalDoctor);
     document.getElementById("modal-doctor").addEventListener("click", function (e) {
@@ -2699,6 +4747,316 @@
       );
       marcarRecordatorioEnviado(btn.dataset.recEnviar, r ? r.paciente : "");
     });
+
+    /* Delegación: botón "Cobrar" de la tarjeta de un turno (agenda del día y
+       tarjetas del calendario). Abre el formulario de cierre de la visita. */
+    document.addEventListener("click", function (e) {
+      const btn = e.target.closest("[data-cobrar-turno]");
+      if (!btn) return;
+      abrirModalCobro(btn.dataset.cobrarTurno);
+    });
+
+    /* --- Vista "Facturación y Caja" (Módulo 3) --------------------------- */
+    const btnFactRefrescar = document.getElementById("fact-refrescar");
+    if (btnFactRefrescar) btnFactRefrescar.addEventListener("click", cargarFacturacion);
+
+    const btnFactCobrar = document.getElementById("fact-cobrar-visita");
+    if (btnFactCobrar) {
+      btnFactCobrar.addEventListener("click", function () {
+        abrirModalCobro(null);
+      });
+    }
+
+    document.querySelectorAll("[data-fact-tab]").forEach((b) =>
+      b.addEventListener("click", function () {
+        cambiarTabFacturacion(b.dataset.factTab);
+      })
+    );
+
+    // Caja del día: el selector de fecha recarga la caja.
+    const factFecha = document.getElementById("fact-fecha");
+    if (factFecha) {
+      factFecha.addEventListener("change", function () {
+        state.factFecha = factFecha.value || hoyISO();
+        cargarCajaDelDia();
+      });
+    }
+
+    // Liquidación de obras sociales.
+    const lisOs = document.getElementById("fact-lis-os");
+    if (lisOs) {
+      lisOs.addEventListener("change", function () {
+        state.factArrObraSocial = lisOs.value;
+        const otro = document.getElementById("fact-arr-os");
+        if (otro) otro.value = lisOs.value;
+        cargarPresentacion();
+      });
+    }
+    const lisMes = document.getElementById("fact-lis-mes");
+    if (lisMes) lisMes.addEventListener("change", cargarPresentacion);
+    const lisVer = document.getElementById("fact-lis-ver");
+    if (lisVer) lisVer.addEventListener("click", cargarPresentacion);
+    const lisGenerar = document.getElementById("fact-lis-generar");
+    if (lisGenerar) lisGenerar.addEventListener("click", generarPresentacion);
+    const lisExportar = document.getElementById("fact-lis-exportar");
+    if (lisExportar) lisExportar.addEventListener("click", exportarPresentacion);
+    const lisPdf = document.getElementById("fact-lis-pdf");
+    if (lisPdf) lisPdf.addEventListener("click", exportarPresentacionPDF);
+    const lisCobrarTildadas = document.getElementById("fact-lis-cobrar-tildadas");
+    if (lisCobrarTildadas) {
+      lisCobrarTildadas.addEventListener("click", function () {
+        aplicarTildes("cobrar");
+      });
+    }
+    const lisDebitarTildadas = document.getElementById("fact-lis-debitar-tildadas");
+    if (lisDebitarTildadas) {
+      lisDebitarTildadas.addEventListener("click", function () {
+        aplicarTildes("debitar");
+      });
+    }
+    const lisTodos = document.getElementById("fact-lis-todos");
+    if (lisTodos) {
+      lisTodos.addEventListener("change", function () {
+        const p = state.factPresentacion;
+        state.factTildadas =
+          lisTodos.checked && p
+            ? p.movimientos
+                .filter(
+                  (m) =>
+                    m.estado_pago === "PENDIENTE" ||
+                    m.estado_pago === "EN_PROCESO_LIQUIDACION"
+                )
+                .map((m) => m.id)
+            : [];
+        renderPresentacion();
+      });
+    }
+    document.addEventListener("change", function (e) {
+      const chk = e.target.closest("[data-fact-tilde]");
+      if (chk) alternarTilde(chk.dataset.factTilde);
+    });
+
+    // Liquidación de médicos.
+    const medVer = document.getElementById("fact-med-ver");
+    if (medVer) medVer.addEventListener("click", cargarLiquidacionMedicos);
+    const medMes = document.getElementById("fact-med-mes");
+    if (medMes) medMes.addEventListener("change", cargarLiquidacionMedicos);
+    const medDoctor = document.getElementById("fact-med-doctor");
+    if (medDoctor) medDoctor.addEventListener("change", cargarLiquidacionMedicos);
+    const medExportar = document.getElementById("fact-med-exportar");
+    if (medExportar) medExportar.addEventListener("click", exportarLiquidacionMedicos);
+    const medPdf = document.getElementById("fact-med-pdf");
+    if (medPdf) medPdf.addEventListener("click", exportarLiquidacionMedicosPDF);
+
+    // Catálogo de prestaciones y aranceles.
+    const btnNuevaPrest = document.getElementById("fact-nueva-prestacion");
+    if (btnNuevaPrest) {
+      btnNuevaPrest.addEventListener("click", function () {
+        abrirModalPrestacion(null);
+      });
+    }
+    const chkPrestInactivas = document.getElementById("fact-prest-inactivas");
+    if (chkPrestInactivas) {
+      chkPrestInactivas.checked = state.factMostrarInactivas;
+      chkPrestInactivas.addEventListener("change", function (e) {
+        state.factMostrarInactivas = e.target.checked;
+        renderPrestaciones();
+      });
+    }
+    const arrOs = document.getElementById("fact-arr-os");
+    if (arrOs) {
+      arrOs.addEventListener("change", function () {
+        state.factArrObraSocial = arrOs.value;
+        const otro = document.getElementById("fact-lis-os");
+        if (otro) otro.value = arrOs.value;
+        cargarAranceles();
+      });
+    }
+    const btnNuevoArancel = document.getElementById("fact-nuevo-arancel");
+    if (btnNuevoArancel) {
+      btnNuevoArancel.addEventListener("click", function () {
+        abrirModalArancel(null);
+      });
+    }
+    ["fact-arr-cubre", "fact-arr-coseguro"].forEach((id) => {
+      const campo = document.getElementById(id);
+      if (campo) campo.addEventListener("input", renderTotalArancel);
+    });
+
+    // Convenios: grilla de precios por cobertura e importador de planillas.
+    const convOs = document.getElementById("conv-os");
+    if (convOs) {
+      convOs.addEventListener("change", function () {
+        state.factArrObraSocial = convOs.value;
+        ["fact-lis-os", "fact-arr-os"].forEach((id) => {
+          const otro = document.getElementById(id);
+          if (otro) otro.value = convOs.value;
+        });
+        limpiarImportacionConvenio(false);
+        cargarConvenio();
+      });
+    }
+    const convBuscar = document.getElementById("conv-buscar");
+    if (convBuscar) {
+      convBuscar.addEventListener("input", function (e) {
+        state.convBusqueda = e.target.value;
+        renderConvenio();
+      });
+    }
+    const convGuardar = document.getElementById("conv-guardar");
+    if (convGuardar) convGuardar.addEventListener("click", guardarConvenio);
+    const convPlantilla = document.getElementById("conv-plantilla");
+    if (convPlantilla) {
+      convPlantilla.addEventListener("click", descargarPlantillaConvenio);
+    }
+    const convConfirmar = document.getElementById("conv-confirmar");
+    if (convConfirmar) {
+      convConfirmar.addEventListener("click", confirmarImportacion);
+    }
+    const convLimpiar = document.getElementById("conv-limpiar");
+    if (convLimpiar) {
+      convLimpiar.addEventListener("click", function () {
+        limpiarImportacionConvenio(false);
+      });
+    }
+
+    // Recuadro de arrastrar y soltar (con clic para elegir el archivo a mano).
+    const convZona = document.getElementById("conv-drop");
+    const convArchivo = document.getElementById("conv-archivo");
+    if (convZona && convArchivo) {
+      convZona.addEventListener("click", function () {
+        convArchivo.click();
+      });
+      ["dragenter", "dragover"].forEach((evento) => {
+        convZona.addEventListener(evento, function (e) {
+          e.preventDefault();
+          convZona.classList.add("activo");
+        });
+      });
+      ["dragleave", "dragend", "drop"].forEach((evento) => {
+        convZona.addEventListener(evento, function (e) {
+          e.preventDefault();
+          convZona.classList.remove("activo");
+        });
+      });
+      convZona.addEventListener("drop", function (e) {
+        const archivos = e.dataTransfer ? e.dataTransfer.files : null;
+        if (archivos && archivos.length) elegirArchivoConvenio(archivos[0]);
+      });
+    }
+    if (convArchivo) {
+      convArchivo.addEventListener("change", function (e) {
+        const archivos = e.target.files;
+        if (archivos && archivos.length) elegirArchivoConvenio(archivos[0]);
+      });
+    }
+
+    // Formularios y selector del modal de cobro.
+    const formCobro = document.getElementById("form-cobro");
+    if (formCobro) formCobro.addEventListener("submit", registrarCobro);
+    // Buscador rápido del nomenclador dentro del formulario de cobro.
+    const cobroBuscar = document.getElementById("fact-cobro-buscar");
+    if (cobroBuscar) {
+      cobroBuscar.addEventListener("input", function (e) {
+        state.cobroBusqueda = e.target.value;
+        renderCobroPrestaciones();
+      });
+    }
+    const formPrest = document.getElementById("form-prestacion");
+    if (formPrest) formPrest.addEventListener("submit", guardarPrestacion);
+    const formArancel = document.getElementById("form-arancel");
+    if (formArancel) formArancel.addEventListener("submit", guardarArancel);
+    const formDebito = document.getElementById("form-debito");
+    if (formDebito) formDebito.addEventListener("submit", confirmarDebito);
+
+    const selCobroTurno = document.getElementById("fact-cobro-turno");
+    if (selCobroTurno) {
+      selCobroTurno.addEventListener("change", function () {
+        cargarTurnoParaCobro(selCobroTurno.value).then(function (listo) {
+          if (!listo) abrirModalCobro(null);
+        });
+      });
+    }
+
+    // Cierres de los modales del módulo (botón, cancelar y clic en el fondo).
+    [
+      ["modal-cobro-close", cerrarModalCobro],
+      ["modal-cobro-cancel", cerrarModalCobro],
+      ["modal-prest-close", cerrarModalPrestacion],
+      ["modal-prest-cancel", cerrarModalPrestacion],
+      ["modal-arr-close", cerrarModalArancel],
+      ["modal-arr-cancel", cerrarModalArancel],
+      ["modal-deb-close", cerrarDebito],
+      ["modal-deb-cancel", cerrarDebito],
+    ].forEach(function (par) {
+      const boton = document.getElementById(par[0]);
+      if (boton) boton.addEventListener("click", par[1]);
+    });
+    [
+      ["modal-cobro", cerrarModalCobro],
+      ["modal-prestacion", cerrarModalPrestacion],
+      ["modal-arancel", cerrarModalArancel],
+      ["modal-debito", cerrarDebito],
+    ].forEach(function (par) {
+      const fondo = document.getElementById(par[0]);
+      if (fondo) {
+        fondo.addEventListener("click", function (e) {
+          if (e.target.id === par[0]) par[1]();
+        });
+      }
+    });
+
+    // Delegación: tildes y cantidades del formulario de cobro.
+    document.addEventListener("change", function (e) {
+      const chk = e.target.closest("[data-cobro-tilde]");
+      if (chk) alternarSeleccionCobro(chk.dataset.cobroTilde, chk.checked);
+    });
+    document.addEventListener("input", function (e) {
+      // Monto que cubre la OS en la grilla de convenios: recalcula el coseguro.
+      const monto = e.target.closest("[data-conv-monto]");
+      if (monto) {
+        fijarMontoConvenio(monto.dataset.convMonto, monto.value);
+        return;
+      }
+      const campo = e.target.closest("[data-cobro-cantidad]");
+      if (campo) fijarCantidadCobro(campo.dataset.cobroCantidad, campo.value);
+    });
+
+    // Delegación: acciones de caja, presentación, prestaciones y aranceles.
+    document.addEventListener("click", function (e) {
+      const cobrar = e.target.closest("[data-fact-cobrar]");
+      if (cobrar) {
+        cobrarMovimiento(cobrar.dataset.factCobrar);
+        return;
+      }
+      const debitar = e.target.closest("[data-fact-debitar]");
+      if (debitar) {
+        abrirDebito(debitar.dataset.factDebitar);
+        return;
+      }
+      const editarPrest = e.target.closest("[data-fact-editar-prest]");
+      if (editarPrest) {
+        abrirModalPrestacion(editarPrest.dataset.factEditarPrest);
+        return;
+      }
+      const bajaPrest = e.target.closest("[data-fact-baja-prest]");
+      if (bajaPrest) {
+        cambiarEstadoPrestacion(bajaPrest.dataset.factBajaPrest, false);
+        return;
+      }
+      const reactivarPrest = e.target.closest("[data-fact-reactivar-prest]");
+      if (reactivarPrest) {
+        cambiarEstadoPrestacion(reactivarPrest.dataset.factReactivarPrest, true);
+        return;
+      }
+      const editarArancel = e.target.closest("[data-fact-editar-arancel]");
+      if (editarArancel) {
+        abrirModalArancel(editarArancel.dataset.factEditarArancel);
+        return;
+      }
+      const quitarArancel = e.target.closest("[data-fact-eliminar-arancel]");
+      if (quitarArancel) eliminarArancel(quitarArancel.dataset.factEliminarArancel);
+    });
   }
 
   /* -------------------------------- Init --------------------------------- */
@@ -2767,6 +5125,22 @@
     cargarExcepcionesDeRango,
     rangosVigentesDeFecha,
     diaSemanaDe,
+    // Facturación y caja (Módulo 3): cierre de visitas, obra social y liquidaciones
+    cargarFacturacion,
+    cargarCajaDelDia,
+    renderCaja,
+    abrirModalCobro,
+    cargarPresentacion,
+    cargarLiquidacionMedicos,
+    cargarPrestaciones,
+    cargarAranceles,
+    fmtMoneda,
+    badgeEstadoPago,
+    practicasTexto,
+    rutaPrestacion,
+    rutaArancel,
+    ESTADO_PAGO,
+    TIPO_PAGO_TEXTO,
   };
 })();
 

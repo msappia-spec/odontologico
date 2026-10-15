@@ -1,8 +1,9 @@
-# Sistema Odontológico — Módulos 1 y 2
+# Sistema Odontológico — Módulos 1, 2 y 3
 
 **Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
-**Módulo 2: Historias Clínicas y Evoluciones Médicas** — Backend en
-**FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
+**Módulo 2: Historias Clínicas y Evoluciones Médicas** ·
+**Módulo 3: Obras Sociales, Liquidación de Médicos y Facturación Mixta** —
+Backend en **FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
 
 El **Módulo 1** implementa:
 
@@ -67,6 +68,82 @@ El **Módulo 1** implementa:
 
 ---
 
+## 💳 Módulo 3 · Obras Sociales, Liquidación de Médicos y Facturación Mixta
+
+Facturación mixta: cada visita se cobra en parte **en el mostrador** (coseguro
+del paciente) y en parte se **presenta a la obra social** para cobrarla por
+período. El módulo cubre todo el circuito, desde el precio de cada práctica
+hasta la liquidación mensual de los profesionales.
+
+1. **Catálogo de prestaciones** (`Prestacion`): cada práctica facturable con su
+   `codigo_nomenclador` (único: `uq_prestacion_codigo`), su descripción y su
+   `valor_base` (el precio cuando el paciente no tiene cobertura). La baja es
+   **lógica** (`activa = false`): sus aranceles y las facturas ya emitidas se
+   conservan.
+2. **Aranceles por obra social** (`ArancelObraSocial`): para cada par
+   (obra social, prestación) define **cuánto cubre la cobertura**
+   (`monto_cubre_os`) y **cuánto queda de coseguro** para el paciente
+   (`monto_coseguro_paciente`). Un par por vez: índice único
+   `uq_arancel_os_prestacion` (`409` si se repite).
+3. **Modalidad de pago del odontólogo**: `Doctor.tipo_pago`
+   (`DUENO`, `COMISION`, `SUELDO`) y `Doctor.valor_pago` (porcentaje 0-100 o
+   importe fijo mensual). La coherencia se valida en el alta y la edición
+   (`422` si una comisión no trae porcentaje, o un sueldo no trae importe) y los
+   doctores que ya existían quedan como `DUENO` (comportamiento histórico).
+4. **Cierre de la visita (facturación mixta)**: al terminar la atención la
+   secretaría elige qué prestaciones se hicieron y el sistema calcula, según la
+   cobertura del paciente, **cuánto paga la OS** y **cuánto se cobra de
+   coseguro en efectivo**; el resultado se guarda como **un movimiento de caja
+   por turno** (`MovimientoCaja`, índice único `uq_movimiento_caja_turno`).
+   - Paciente **sin cobertura** → se cobra el `valor_base` completo (particular)
+     y el movimiento nace saldado (`COBRADO`).
+   - Paciente **con cobertura pero sin arancel cargado** → la facturación se
+     **rechaza** con `422` (no se inventan importes). Se puede forzar el cobro a
+     valor de referencia con `permitir_particular: true`, que deja la
+     advertencia registrada en el movimiento.
+   - Un turno **cancelado** no se factura (`422`) y un turno **ya facturado**
+     responde `409`. Al facturar, un turno `PENDIENTE` pasa a `CONFIRMADO`.
+5. **Detalle congelado** (`DetalleMovimientoCaja`): cada práctica facturada
+   guarda el código, la descripción y los importes **al momento del cierre**, de
+   modo que editar el arancel mañana no cambia una factura ni una presentación ya
+   emitida.
+6. **Liquidación de obras sociales**: se agrupan los movimientos `PENDIENTE` de
+   un mes por cobertura y se emite la **presentación del período**
+   (`PRES-OS3-202611`), que los pasa a `EN_PROCESO_LIQUIDACION`. Cuando entra el
+   depósito bancario, la secretaría marca cada orden como **cobrada**
+   (`COBRADO`, con el importe realmente depositado si difiere) o **debitada**
+   (`DEBITADO_OS`, con el motivo obligatorio). Se puede hacer de a una o sobre
+   las órdenes tildadas, y el resumen del período se **exporta a CSV** (para
+   Excel) o en **PDF** (para presentarlo ante la prepaga).
+7. **Liquidación de profesionales**: a fin de mes, el reporte calcula la
+   producción de cada odontólogo (coseguros cobrados + lo presentado a las obras
+   sociales) y sus **honorarios** según su tipo de pago: dueño (100 % de su
+   producción, o el porcentaje configurado), comisión (porcentaje) o sueldo fijo.
+   La modalidad se configura en **Doctores → Editar** (*Tipo de pago*, con el
+   porcentaje o el importe mensual que habilita cada opción) y el reporte se
+   entrega en **CSV** o en un **PDF** con el detalle del cálculo.
+8. **Panel "Facturación y Caja"**: nueva sección del menú con cinco pestañas —
+   *Caja del día*, *Liquidación de obras sociales*, *Liquidación de médicos*,
+   *Prestaciones y aranceles* y *Convenios*— más el **formulario de cobro** (que
+   muestra el cartel **«Cobrar Coseguro en mostrador: $X.XXX»**, el arancel de
+   cada práctica y lo que cubre la obra social) y el botón *Cobrar* de cada
+   tarjeta de turno de la agenda.
+9. **Convenios por obra social e importación de precios**: la pestaña *Convenios*
+   muestra **todo el nomenclador base de Córdoba** para la cobertura elegida y,
+   al lado del arancel de referencia de cada práctica, el campo **Monto que cubre
+   la OS**; el **coseguro sugerido** (arancel base − lo que cubre la OS, nunca
+   negativo) se calcula **en vivo** en el navegador y se guarda de verdad en
+   `aranceles_obra_social` (los totales de la grilla —arancel base, cubre la OS y
+   coseguro sugerido— se actualizan con cada tecla). La misma pantalla trae el
+   **importador masivo**: *Descargar Plantilla Excel de Ejemplo* baja una planilla
+   de **dos columnas** (`codigo` y `precio_cobertura`) en `.csv` (el que abre
+   Excel es-AR) o `.xlsx`, se completa en Excel y se **arrastra** al recuadro; el
+   sistema traduce cada código contra el nomenclador, muestra una **vista previa**
+   (nuevas, actualizadas, sin cambios, sin precio y filas con error) y recién
+   entonces confirma la importación.
+
+---
+
 ## 📁 Estructura del proyecto
 
 ```
@@ -77,6 +154,9 @@ Odontologico/
 │   │   ├── config.py               # Configuración (pydantic-settings / .env)
 │   │   ├── datetime_utils.py       # Utilidades de fecha/hora (UTC naive)
 │   │   ├── exceptions.py           # Excepciones de dominio -> códigos HTTP
+│   │   ├── money.py                # Redondeo y suma de importes (centavos)
+│   │   ├── planilla_aranceles.py   # Módulo 3: planilla de precios (CSV/XLSX) del importador
+│   │   ├── pdf.py                  # Generador de PDF sin dependencias (reportes)
 │   │   └── logging_config.py       # Configuración de logging
 │   ├── db/
 │   │   ├── base_class.py           # DeclarativeBase (SQLAlchemy 2.0)
@@ -93,19 +173,28 @@ Odontologico/
 │   │   ├── turno.py                # Modelo Turno (+ constraints)
 │   │   ├── historia_clinica.py     # Módulo 2: ficha clínica del paciente (1 a 1)
 │   │   ├── evolucion_medica.py     # Módulo 2: atención inmutable (bloquea UPDATE/DELETE)
-│   │   └── archivo_adjunto.py      # Módulo 2: radiografías/estudios de la evolución
+│   │   ├── archivo_adjunto.py      # Módulo 2: radiografías/estudios de la evolución
+│   │   ├── prestacion.py           # Módulo 3: catálogo de prácticas facturables
+│   │   ├── arancel_obra_social.py  # Módulo 3: cobertura y coseguro por práctica
+│   │   └── movimiento_caja.py      # Módulo 3: cierre de la visita + detalle congelado
 │   ├── schemas/                    # Esquemas Pydantic v2 (I/O de la API)
 │   │   ├── doctor.py, paciente.py, turno.py, whatsapp.py
 │   │   ├── obra_social.py          # Catálogo de obras sociales
 │   │   ├── disponibilidad.py       # Rangos semanales y bloques ofrecidos
-│   │   └── historia_clinica.py     # Módulo 2: alta de evolución y ficha (sólo lectura)
+│   │   ├── historia_clinica.py     # Módulo 2: alta de evolución y ficha (sólo lectura)
+│   │   └── prestacion.py, arancel.py, facturacion.py # Módulo 3: precios, caja y liquidaciones
 │   ├── services/                   # Lógica de negocio
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
-│   │   ├── doctor_service.py       # Alta, edición (PUT/PATCH) y baja lógica
+│   │   ├── doctor_service.py       # Alta, edición (PUT/PATCH), baja lógica y pago
 │   │   ├── paciente_service.py     # Alta/edición, búsqueda y resolución de la cobertura
 │   │   ├── obra_social_service.py  # CRUD del catálogo (nombre único, baja lógica)
 │   │   ├── disponibilidad_service.py # CRUD de la agenda semanal por odontólogo
 │   │   ├── historia_clinica_service.py # Módulo 2: ficha + alta/consulta de evoluciones
+│   │   ├── prestacion_service.py   # Módulo 3: catálogo de prácticas (código único)
+│   │   ├── arancel_service.py      # Módulo 3: aranceles por cobertura (resolución)
+│   │   ├── facturacion_service.py  # Módulo 3: cierre de visita, caja y liquidación OS
+│   │   ├── liquidacion_service.py  # Módulo 3: producción y honorarios por profesional
+│   │   ├── reporte_pdf_service.py  # Módulo 3: los dos cierres de mes en PDF
 │   │   └── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
 │   └── api/v1/
 │       ├── router.py               # Router agregador
@@ -114,6 +203,9 @@ Odontologico/
 │           ├── pacientes.py, turnos.py
 │           ├── historias_clinicas.py # Módulo 2: historia clínica (sólo GET y POST)
 │           ├── obras_sociales.py   # Catálogo de obras sociales: CRUD + baja lógica
+│           ├── prestaciones.py     # Módulo 3: CRUD del catálogo de prácticas
+│           ├── aranceles.py        # Módulo 3: aranceles por cobertura + convenios e importador
+│           ├── facturacion.py      # Módulo 3: facturar, caja y liquidaciones
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
 │           └── whatsapp.py         # Webhook + recordatorios Click-to-Chat
@@ -128,8 +220,10 @@ Odontologico/
 │       └── medico.js               # Profesional + agenda + acciones + nueva evolución
 ├── scripts/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
+│   ├── seed_nomenclador_cba.py          # Nomenclador Córdoba (prestaciones + valor base)
 │   ├── publicar.py                      # Publicar en un paso: pruebas + commit + push + deploy
 │   ├── migrar_historias_clinicas.py      # Migración Módulo 2: ficha, evoluciones y adjuntos
+│   ├── migrar_facturacion.py            # Migración Módulo 3: prácticas, aranceles, caja y pagos
 │   ├── migrar_turnos_unique_parcial.py  # Migración al índice único parcial de turnos
 │   ├── migrar_pacientes_datos.py        # Migración: DNI y cobertura del paciente
 │   └── migrar_obra_social.py            # Migración: obra_social (texto) → catálogo
@@ -139,9 +233,13 @@ Odontologico/
 │   ├── test_disponibilidad.py      # Agenda semanal y bloques ofrecidos
 │   ├── test_doctores.py            # Edición, baja lógica y reactivación del doctor
 │   ├── test_historias_clinicas.py  # Módulo 2: alta, cronología e inmutabilidad
+│   ├── test_facturacion.py         # Módulo 3: precios, cierre de caja y liquidaciones
+│   ├── test_convenios.py           # Módulo 3: convenios por obra social e importador de precios
+│   ├── test_reportes_pdf.py        # Módulo 3: reportes en PDF (estructura y datos)
 │   ├── test_obras_sociales.py      # Catálogo de coberturas y su vínculo con pacientes
 │   ├── test_pacientes.py
 │   ├── test_recordatorios_click_to_chat.py # Enlaces wa.me y recordatorios pendientes
+│   ├── test_seed_nomenclador_cba.py # Seed del nomenclador de Córdoba (idempotente)
 │   ├── test_turnos.py
 │   ├── test_turnos_actualizacion.py # PATCH /turnos/{id} (reprogramar, cancelar…)
 │   ├── test_turnos_paciente_ubicuo.py
@@ -172,6 +270,9 @@ Copy-Item .env.example .env
 
 # 4) Cargar datos de ejemplo (crea odontologico.db)
 python -m scripts.seed
+
+# 4-bis) (Opcional) Precargar el nomenclador odontológico de Córdoba
+python -m scripts.seed_nomenclador_cba
 
 # 5) Levantar el servidor
 uvicorn app.main:app --reload
@@ -373,10 +474,11 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Calendario** | Grilla mensual de turnos con **color por estado** (`CONFIRMADO` en verde, `PENDIENTE` con el color del odontólogo y `CANCELADO` en gris atenuado), *tooltip* con el detalle del turno, **filtro por odontólogo** (*Todos los odontólogos* + un botón por profesional) y panel del día con turnos ocupados y horarios disponibles. Los horarios disponibles salen de la **agenda semanal configurada por profesional**, no de una lista fija. Al hacer clic en un **horario disponible con un odontólogo filtrado**, el modal se abre con ese profesional ya seleccionado y **bloqueado** (con un aviso en pantalla), para que el turno no se agende por error en otra agenda. |
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
 | **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos —se pueden cargar **varios por día**, p. ej. lunes 08:00-13:00 y 15:00-19:00—, botón para eliminar cada rango, formulario *desde / hasta* para agregar otro y contador de rangos. Incluye **Restaurar plantilla sugerida** (lun-vie doble turno y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
-| **Doctores** | Formulario de alta estilizado + tabla con la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT`), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
+| **Doctores** | Formulario de alta estilizado + tabla con la **forma de pago** de cada profesional, la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT` que incluye el desplegable **Tipo de pago** —*Dueño*, *Comisión por porcentaje* o *Sueldo fijo*— y habilita el campo numérico del porcentaje o del sueldo mensual), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
 | **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**— y Nº de afiliado) + tabla de pacientes con acción *Editar*. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. |
+| **Facturación y Caja** | **Módulo 3.** Cinco pestañas: *Caja del día* (KPIs de efectivo y saldo de obras sociales + movimientos del día con acciones *Cobrar* / *Debitar*), *Liquidación de obras sociales* (cobertura + mes, totales del período, botón **Generar presentación del período**, tildado de órdenes pagadas o debitadas, cierre en lote y **exportación a CSV** o **PDF para la cobertura**), *Liquidación de médicos* (elegís el profesional y el mes: **tabla de subtotales** con la producción, el efectivo, lo presentado a las obras sociales, los honorarios por profesional y los totales del consultorio al pie —según la forma de pago configurada en *Doctores*— más exportación a CSV o **PDF de la liquidación**, que respeta el profesional elegido), *Prestaciones y aranceles* (catálogo de prácticas y tabla de aranceles por cobertura) y *Convenios* (**todo el nomenclador de Córdoba** para la cobertura elegida, con el campo **Monto que cubre la OS**, el **coseguro sugerido** calculado en vivo, los totales de la grilla, guardado en lote y el **importador masivo**: *Descargar Plantilla Excel de Ejemplo* —dos columnas: `codigo` y `precio_cobertura`, en `.csv` o `.xlsx`— + recuadro de **arrastrar y soltar** con vista previa por fila y confirmación). El **formulario de cobro** —que se abre con el botón *Cobrar una visita* o desde la tarjeta de un turno— tiene un **buscador rápido** por código del nomenclador o nombre, muestra por cada práctica su **arancel**, lo que **cubre la obra social** y el **coseguro**, avisa que el saldo queda **PENDIENTE para la liquidación de la cobertura** y calcula el cartel **«Cobrar Coseguro en mostrador: $X.XXX»** con el total de las prácticas; se confirma con **Confirmar y cerrar atención**, que registra el movimiento de caja y finaliza el turno. |
 
 ### Colores por estado del turno
 
@@ -547,16 +649,22 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 
 | Entidad      | Campos |
 |--------------|--------|
-| **Doctor**   | `id`, `nombre`, `especialidad`, `activo` |
+| **Doctor**   | `id`, `nombre`, `especialidad`, `activo`, `tipo_pago`, `valor_pago` |
 | **Paciente** | `id`, `nombre`, `telefono`, `email`, `dni`, `obra_social_id`, `numero_afiliado` |
 | **ObraSocial** | `id`, `nombre`, `codigo`, `activa` |
 | **Turno**    | `id`, `paciente_id`, `doctor_id`, `fecha_hora_inicio`, `fecha_hora_fin`, `estado_turno`, `estado_whatsapp`, `whatsapp_mensaje_id` |
 | **DisponibilidadDoctor** | `id`, `doctor_id`, `dia_semana`, `hora_inicio`, `hora_fin` |
+| **Prestacion** | `id`, `codigo_nomenclador`, `descripcion`, `valor_base`, `activa` |
+| **ArancelObraSocial** | `id`, `obra_social_id`, `prestacion_id`, `monto_cubre_os`, `monto_coseguro_paciente` |
+| **MovimientoCaja** | `id`, `turno_id`, `doctor_id`, `fecha`, `monto_efectivo`, `monto_pendiente_os`, `monto_cobrado_os`, `estado_pago`, `observaciones` |
+| **DetalleMovimientoCaja** | `id`, `movimiento_caja_id`, `prestacion_id`, `codigo_nomenclador`, `descripcion`, `cantidad`, `monto_cubre_os`, `monto_coseguro_paciente` |
 
 **Enumeraciones**
 
 - `EstadoTurno`: `PENDIENTE`, `CONFIRMADO`, `CANCELADO`
 - `EstadoWhatsApp`: `PENDIENTE_ENVIO`, `ENVIADO`, `FALLIDO`, `RESPONDIDO`
+- `TipoPagoDoctor`: `DUENO`, `COMISION`, `SUELDO` (cómo se liquida la producción)
+- `EstadoPagoMovimiento`: `PENDIENTE`, `EN_PROCESO_LIQUIDACION`, `COBRADO`, `DEBITADO_OS`
 
 **Restricciones de integridad del turno**
 
@@ -605,6 +713,33 @@ CDN, HTML y `fetch` contra la misma API `v1`.
   la tenían siguen apuntándole (su nombre se sigue viendo en la ficha).
 - `codigo` es opcional (`VARCHAR(30)`) y sirve para identificar la cobertura ante
   el financiador; enviarlo vacío se guarda como `NULL`.
+
+**Restricciones de integridad de la facturación (Módulo 3)**
+
+- `uq_prestacion_codigo` → **índice único** sobre `codigo_nomenclador`: el código
+  con el que la obra social reconoce la práctica no se repite (la verificación
+  previa del servicio tampoco distingue mayúsculas → `409`). La baja de la
+  práctica es **lógica** (`activa = false`).
+- `uq_arancel_os_prestacion` → **índice único** sobre
+  (`obra_social_id`, `prestacion_id`): una cobertura tiene **un** arancel por
+  práctica (repetirlo responde `409`). El borrado del arancel es **físico**
+  (`DELETE /aranceles/{id}`): es una tabla de precios, y las facturas ya emitidas
+  conservan sus importes congelados en el detalle.
+- `uq_movimiento_caja_turno` → **índice único** sobre `turno_id`: un turno se
+  factura **una sola vez** (el cierre de caja es el comprobante de esa visita; la
+  segunda facturación responde `409`).
+- `ix_movimiento_caja_fecha` → índice por `fecha`: la caja diaria y las
+  liquidaciones consultan por rango de fechas (mes calendario).
+- `turno_id` y `doctor_id` son `ForeignKey(..., ondelete="RESTRICT")`: el
+  movimiento es un registro contable y no se borra en cascada (mismo criterio que
+  `EvolucionMedica.doctor_id`).
+- `doctor_id` en `detalles_movimiento_caja` es `RESTRICT`, pero el detalle guarda
+  su **propia copia** de la práctica (`codigo_nomenclador`, `descripcion` y los
+  importes): la factura no cambia si luego se edita el catálogo.
+- Los **importes** (`valor_base`, montos de arancel, `monto_efectivo`,
+  `monto_pendiente_os`) son `Float` y se redondean a **dos decimales** con
+  `app.core.money` (aritmética decimal, para que el total del mostrador coincida
+  exactamente con el que calcula la obra social).
 
 > **Sobre la baja de doctores.** `activo` en `Doctor` funciona igual que `activa`
 > en el catálogo: `DELETE /api/v1/doctores/{id}` marca `activo = false`
@@ -678,6 +813,44 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > En PostgreSQL, `Base.metadata.create_all` (que corre al arrancar la app) también
 > crea las tres tablas; el encabezado del script incluye el DDL equivalente.
 >
+> **Migración de la facturación (Módulo 3).** El catálogo de prácticas, los
+> aranceles y las tablas de caja son nuevas, y `doctores` suma las columnas
+> `tipo_pago` y `valor_pago`. `create_all` crea las tablas nuevas pero **no**
+> agrega columnas a una tabla existente, así que las bases con datos necesitan
+> este paso (aditivo, no borra nada), con la app detenida:
+>
+> ```bash
+> python -m scripts.migrar_facturacion
+> ```
+>
+> Crea `prestaciones`, `aranceles_obra_social`, `movimientos_caja` y
+> `detalles_movimiento_caja` con sus índices únicos (`uq_prestacion_codigo`,
+> `uq_arancel_os_prestacion`, `uq_movimiento_caja_turno`), agrega
+> `doctores.tipo_pago` (`VARCHAR(15) NOT NULL DEFAULT 'DUENO'`) y
+> `doctores.valor_pago` (admite `NULL`), guarda una copia del `.db` y verifica que
+> `pacientes`, `doctores`, `turnos` y `obras_sociales` conserven sus filas. Es
+> idempotente y los doctores que ya existían quedan como **dueños** (se liquidan
+> con el 100 % de su producción) hasta que se les configure otra modalidad.
+> El encabezado del script incluye el `ALTER TABLE` y el DDL equivalente para
+> PostgreSQL.
+>
+> **Nomenclador odontológico de Córdoba (opcional, no es una migración).** La
+> grilla referencial del Colegio Odontológico de la Provincia de Córdoba se
+> precarga en la tabla `prestaciones` con `python -m scripts.seed_nomenclador_cba`:
+> 9 códigos oficiales (`10100` consulta, `10400` urgencia, `20100`/`21600`
+> obturaciones, `30100`/`30200` conductos, `50100` tartrectomía, `10010`/`10030`
+> cirugía) con la descripción por capítulo y un **valor base orientativo**. Usa la
+> misma `DATABASE_URL` que la aplicación (SQLite local o PostgreSQL en la nube) y
+> **no duplica**: compara los códigos ya existentes sin distinguir mayúsculas ni
+> espacios (idx. `uq_prestacion_codigo`) y los omite, así que se puede ejecutar
+> todas las veces que haga falta. Acepta `--actualizar` (reescribe descripción y
+> precio de los ya cargados, útil tras un aumento de la grilla), `--dry-run`
+> (muestra sin escribir) y `--sin-detalle` (sólo el resumen). No toca pacientes,
+> odontólogos ni turnos; los **aranceles por obra social** se cargan aparte, en
+> *Facturación y Caja → Convenios* (la grilla completa del nomenclador, con la
+> planilla de Excel para importarlos en lote) o de a uno en *Prestaciones y
+> aranceles*, porque son el acuerdo con cada cobertura.
+>
 > **Migración de la cobertura al catálogo.** Las bases creadas con el campo de
 > texto `Paciente.obra_social` necesitan el paso a la clave foránea
 > `obra_social_id` (tabla `obras_sociales`, nombre único sin distinguir
@@ -743,6 +916,36 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `GET`  | `/whatsapp/recordatorios-pendientes` | **Recordatorios pendientes** con enlace Click-to-Chat (`?dias=1..30`, por defecto 3) |
 | `GET`  | `/whatsapp/webhook` | Verificación del webhook (Meta) |
 | `POST` | `/whatsapp/webhook` | **Webhook de entrada** de WhatsApp |
+| `POST` | `/prestaciones` | **Módulo 3:** crear prestación (código de nomenclador único → `409`) |
+| `GET`  | `/prestaciones` | Listar el catálogo de prácticas (`?activas=true/false`, `?buscar=`) |
+| `GET`  | `/prestaciones/{id}` | Obtener prestación |
+| `PUT`  | `/prestaciones/{id}` | Reemplazar prestación (payload completo) |
+| `PATCH`| `/prestaciones/{id}` | Actualizar prestación (parcial; `{"activa": true}` la reactiva) |
+| `DELETE`| `/prestaciones/{id}` | **Baja lógica** de la práctica (`activa = false`) |
+| `GET`  | `/obras-sociales/{id}/aranceles` | **Módulo 3:** aranceles de la cobertura (`?prestacion_id=`) |
+| `POST` | `/obras-sociales/{id}/aranceles` | Cargar el arancel de una práctica (par repetido → `409`) |
+| `GET`  | `/aranceles/{id}` | Obtener arancel |
+| `PUT`  | `/aranceles/{id}` | Reemplazar los montos (cambiar la práctica → `422`) |
+| `PATCH`| `/aranceles/{id}` | Actualizar los montos (parcial) |
+| `DELETE`| `/aranceles/{id}` | Eliminar el arancel (`204`) |
+| `GET`  | `/obras-sociales/{id}/convenio` | **Módulo 3:** grilla completa del nomenclador con la cobertura, el coseguro guardado y el **coseguro sugerido** |
+| `PUT`  | `/obras-sociales/{id}/convenio` | Guardar la grilla en lote (si no se manda el coseguro, se sugiere `arancel base − monto`) |
+| `GET`  | `/obras-sociales/{id}/convenio/plantilla` | Descargar la **plantilla de ejemplo** (`?formato=csv` —default— o `xlsx`) |
+| `POST` | `/obras-sociales/{id}/importar-aranceles` | **Importador masivo**: procesa la planilla (`contenido`/`contenido_base64`, `simular`) y devuelve el reporte por fila |
+| `POST` | `/turnos/{id}/facturar` | **Cerrar la visita**: calcula coseguro + saldo OS y crea el movimiento de caja |
+| `POST` | `/turnos/{id}/presupuesto` | Calcula el **cartel del mostrador** sin escribir nada |
+| `GET`  | `/turnos/{id}/prestaciones-disponibles` | Prácticas con el arancel resuelto para el paciente del turno |
+| `GET`  | `/turnos/{id}/facturacion` | Estado de facturación del turno (y su movimiento) |
+| `GET`  | `/movimientos-caja` | Caja con filtros (`?desde=&hasta=&obra_social_id=&doctor_id=&estado_pago=&turno_id=`) |
+| `GET`  | `/movimientos-caja/resumen` | Totales del día (`?desde=&hasta=`, por defecto hoy) |
+| `GET`  | `/movimientos-caja/{id}` | Obtener el cierre de una visita |
+| `POST` | `/movimientos-caja/{id}/cobrar` | Marcar el **cobro** de la OS (`monto_cobrado_os` opcional; idempotente) |
+| `POST` | `/movimientos-caja/{id}/debitar` | Marcar el **débito** de la OS (motivo obligatorio) |
+| `GET`  | `/liquidaciones/obras-sociales` | **Presentación del período** de una cobertura (`?obra_social_id=&anio=&mes=`) |
+| `POST` | `/liquidaciones/obras-sociales` | **Generar la presentación**: `PENDIENTE` → `EN_PROCESO_LIQUIDACION` |
+| `GET`  | `/liquidaciones/profesionales` | **Liquidación del mes** por odontólogo (`?anio=&mes=&doctor_id=`) |
+| `GET`  | `/liquidaciones/obras-sociales/pdf` | La **presentación en PDF** para la cobertura (`application/pdf`, descarga) |
+| `GET`  | `/liquidaciones/profesionales/pdf` | La **liquidación en PDF** para el profesional (`application/pdf`, descarga) |
 
 > **Métodos soportados.** Cada ruta acepta únicamente los métodos de esta tabla;
 > cualquier otro responde `405 Method Not Allowed` (p. ej. `PUT` o `DELETE` sobre
@@ -759,6 +962,26 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 > tres capas (rutas, servicio y eventos del ORM → `403`
 > `RegistroInmutableError`) y
 > `tests/test_historias_clinicas.py` la vigila en cada corrida de las pruebas.
+>
+> **Reglas del cierre de caja (Módulo 3).** Un turno se factura **una sola vez**
+> (`POST /turnos/{id}/facturar`; el segundo intento responde **409** y la base lo
+> garantiza con `uq_movimiento_caja_turno`) y un turno cancelado no se factura
+> (**422**). Si el paciente tiene cobertura y falta el arancel de una práctica, la
+> facturación se rechaza con **422** salvo `permitir_particular: true`. Los montos
+> **no se editan**: se corrigen registrando el cobro o el débito con su
+> observación (`/movimientos-caja/{id}/cobrar` y `/debitar`), de modo que el
+> circuito del dinero quede trazado. `POST /liquidaciones/obras-sociales` sin
+> movimientos `PENDIENTE` responde **422** (no se emite una presentación vacía).
+>
+> **Reportes en PDF (Módulo 3).** Los dos cierres de mes se bajan también como
+> **PDF** (`/liquidaciones/obras-sociales/pdf` y
+> `/liquidaciones/profesionales/pdf`), además del CSV que arma el panel: son los
+> que se imprimen o se adjuntan. Se generan en el backend con `app/core/pdf.py`,
+> un generador propio del formato PDF 1.4 (Helvetica con `WinAnsiEncoding`,
+> tablas con encabezado repetido y pie «Página X de Y») que **no agrega
+> dependencias** al despliegue, y se alimentan con los **mismos servicios** que
+> la pantalla: los importes no se recalculan. El archivo se entrega como
+> descarga (`Content-Disposition`); una cobertura inexistente responde **404**.
 >
 > **CORS.** `app/main.py` registra `CORSMiddleware` con
 > `allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]` (la lista
@@ -843,6 +1066,82 @@ curl "$API/evoluciones/1"
 # inmutables. No hay forma de editar ni de borrar una evolución por la API.
 curl -X PATCH $API/evoluciones/1 -H "Content-Type: application/json" -d '{"diagnostico":"Otro"}'
 curl -X DELETE $API/evoluciones/1
+
+# --- Módulo 3: prestaciones, aranceles, facturación y liquidaciones ----------
+
+# Catálogo de prácticas (el código de nomenclador es único)
+curl -X POST $API/prestaciones -H "Content-Type: application/json" \
+  -d '{"codigo_nomenclador":"01.01","descripcion":"Consulta y diagnóstico","valor_base":18000}'
+
+# Arancel de esa práctica para la obra social 1 (lo que cubre + el coseguro)
+curl -X POST $API/obras-sociales/1/aranceles -H "Content-Type: application/json" \
+  -d '{"prestacion_id":1,"monto_cubre_os":12000,"monto_coseguro_paciente":6000}'
+
+curl "$API/obras-sociales/1/aranceles"          # tabla de precios de la cobertura
+
+# Grilla de convenios: todo el nomenclador con lo que cubre la OS y el coseguro
+curl "$API/obras-sociales/1/convenio"
+
+# Guardar el monto que cubre la OS (el coseguro se sugiere: arancel base - monto)
+curl -X PUT $API/obras-sociales/1/convenio -H "Content-Type: application/json" \
+  -d '{"filas":[{"prestacion_id":1,"monto_cubre_os":12000}]}'
+
+# Plantilla de ejemplo de dos columnas (codigo / precio_cobertura) para Excel
+curl -OJ "$API/obras-sociales/1/convenio/plantilla?formato=csv"   # o formato=xlsx
+
+# Importar la planilla completada ("simular": true para ver el reporte sin guardar)
+curl -X POST "$API/obras-sociales/1/importar-aranceles" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre_archivo":"convenio.csv","simular":true,
+       "contenido":"codigo;precio_cobertura\n10100;12000\n"}'
+
+# Qué le corresponde al paciente del turno 1 (arancel ya resuelto por práctica)
+curl "$API/turnos/1/prestaciones-disponibles"
+
+# Cartel del mostrador SIN escribir nada (es la misma cuenta que la facturación)
+curl -X POST $API/turnos/1/presupuesto -H "Content-Type: application/json" \
+  -d '{"prestaciones":[{"prestacion_id":1,"cantidad":1}]}'
+
+# Cerrar la visita: separa el coseguro (efectivo) del saldo de la obra social
+curl -X POST $API/turnos/1/facturar -H "Content-Type: application/json" -d '{
+  "prestaciones": [{"prestacion_id": 1, "cantidad": 1}],
+  "observaciones": "Se cobró el coseguro en efectivo"}'
+
+# Si falta el arancel de una práctica la facturación responde 422; para cobrarla
+# a valor de referencia (particular) sólo en esa visita: "permitir_particular": true
+
+# Caja del día y su resumen
+curl "$API/movimientos-caja?desde=2026-10-15&hasta=2026-10-15"
+curl "$API/movimientos-caja/resumen?desde=2026-10-15&hasta=2026-10-15"
+
+# Presentación del período de la obra social 1 (octubre 2026): sólo lectura
+curl "$API/liquidaciones/obras-sociales?obra_social_id=1&anio=2026&mes=10"
+
+# Generar la presentación: los movimientos PENDIENTE pasan a EN_PROCESO_LIQUIDACION
+curl -X POST $API/liquidaciones/obras-sociales -H "Content-Type: application/json" \
+  -d '{"obra_social_id":1,"anio":2026,"mes":10}'
+
+# Cuando entra el depósito: cobrar una orden (con el importe realmente acreditado)
+curl -X POST $API/movimientos-caja/1/cobrar -H "Content-Type: application/json" \
+  -d '{"monto_cobrado_os":11500,"observaciones":"Depósito 44821"}'
+
+# O debitarla (el motivo es obligatorio; admite débito parcial con monto_cobrado_os)
+curl -X POST $API/movimientos-caja/2/debitar -H "Content-Type: application/json" \
+  -d '{"observaciones":"Práctica rechazada por auditoría"}'
+
+# Liquidación de profesionales del mes (dueño / comisión / sueldo)
+curl "$API/liquidaciones/profesionales?anio=2026&mes=10"
+curl "$API/liquidaciones/profesionales?anio=2026&mes=10&doctor_id=1"
+
+# Los mismos dos reportes, en PDF ($API es la URL de la app; -o guarda el archivo)
+curl -o presentacion-os1-202610.pdf \
+  "$API/liquidaciones/obras-sociales/pdf?obra_social_id=1&anio=2026&mes=10"
+curl -o liquidacion-profesionales-2026-10.pdf \
+  "$API/liquidaciones/profesionales/pdf?anio=2026&mes=10"
+
+# Modalidad de pago del odontólogo (dueño, comisión del 40 % o sueldo fijo)
+curl -X PATCH $API/doctores/1 -H "Content-Type: application/json" \
+  -d '{"tipo_pago":"COMISION","valor_pago":40}'
 
 # Agenda semanal del odontólogo 1: lunes con dos tramos (mañana y tarde)
 curl -X POST $API/doctores/1/disponibilidad -H "Content-Type: application/json" \
@@ -960,7 +1259,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**169 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**461 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
@@ -968,7 +1267,11 @@ rango, **disponibilidad semanal por odontólogo** (`test_disponibilidad.py`),
 pacientes (alta, edición y DNI único), **gestión de doctores**
 (`test_doctores.py`: `PUT` de reemplazo, `PATCH` parcial, baja lógica `DELETE` con
 sus turnos conservados, filtro `?activos=`, `404` al agendar con un profesional
-dado de baja y el modal/botones de la vista), **catálogo de obras sociales**
+dado de baja y el modal/botones de la vista), **la forma de pago del
+profesional** (`test_doctores_pago.py`: tipo y valor de pago persistidos y
+validados en el alta, el `PUT` del modal y el `PATCH`, la liquidación del mes que
+sale de esa regla y los controles del panel que habilitan el campo numérico),
+**catálogo de obras sociales**
 (`test_obras_sociales.py`: CRUD, nombre único `409` sin distinguir mayúsculas,
 baja lógica y reactivación, filtros, vínculo por `obra_social_id`, compatibilidad
 con el texto heredado y la cobertura del paciente que sobrevive a la baja), la
@@ -1021,6 +1324,82 @@ de los ya enviados, paciente sin teléfono, validación de `dias` con `422` y
 lista vacía), la codificación de la URL y el flujo completo (abrir el enlace
 marca `ENVIADO`, no altera el estado clínico y el turno sale de la lista).
 
+La **facturación mixta del Módulo 3** se cubre en `tests/test_facturacion.py`
+(*59 pruebas*): el catálogo de prestaciones (código único `409`, normalización y
+baja lógica), los aranceles por cobertura (`409` al repetir el par, `PUT`/`PATCH`
+de montos, borrado `204` y `422` al intentar cambiar la práctica), el **cierre de
+la visita** (separación de coseguro y saldo de la OS, cantidad multiplicada,
+particular que nace `COBRADO`, `422` sin arancel y con `permitir_particular`
+cobrando a valor de referencia con la advertencia registrada, `409` al facturar
+dos veces, `422` con un turno cancelado, confirmación del turno pendiente,
+importes congelados en el detalle y `404` de la práctica dada de baja), la **caja**
+(listado con filtros por día, cobertura, estado y turno; resumen del día;
+cobro con importe distinto al presentado e idempotente; débito con motivo
+obligatorio y débito parcial; `409` al cruzar cobro y débito), la **presentación
+del período** (agrupación por cobertura y mes, `PENDIENTE` →
+`EN_PROCESO_LIQUIDACION`, `422` sin pendientes, cierre individual de cobros y
+débitos con sus totales) y la **liquidación de profesionales** (dueño 100 %,
+comisión 40 %, sueldo fijo, producción con coseguros y obras sociales, mes
+aislado y `422` de una comisión sin porcentaje). También verifica el **esquema**
+(el DDL de las tablas nuevas compila con el dialecto de PostgreSQL, los enums son
+`VARCHAR` —no tipos nativos— y los índices únicos existen) y el **panel**: la
+pestaña *Facturación y Caja* con sus cinco paneles, el cartel del coseguro con
+los tres importes del mostrador (arancel, cubre la OS y coseguro), el buscador de
+prácticas, la tabla de subtotales de la liquidación de médicos, los
+endpoints que consume `app.js` y un chequeo de contrato HTML ↔ JS (todos los
+`getElementById` de `app.js` existen como `id` en `index.html`).
+
+Los **convenios por obra social y el importador masivo de precios** se cubren en
+`tests/test_convenios.py` (*36 pruebas*): la **grilla del convenio** (todo el
+nomenclador con el arancel base, el coseguro sugerido y los totales; `404` si la
+cobertura no existe), el **guardado en lote** (persistencia real en
+`aranceles_obra_social`, coseguro sugerido cuando no se manda, altas y
+actualizaciones, `sin_cambios`, atomicidad ante una práctica inexistente,
+`422` con montos negativos o filas repetidas y `404` con una práctica dada de
+baja), la **plantilla** (dos columnas exactas, BOM, precios precargados, `.xlsx`
+válido, `422` con un formato desconocido), el **importador** (planilla `;`/`,` con
+y sin cabecera, códigos con puntos, importes es-AR y en-US, miles con coma,
+creación y actualización de aranceles, **simulación que no escribe**, códigos
+desconocidos y precios ilegibles reportados por línea sin cortar la importación,
+filas sin precio ignoradas, archivo vacío/roto/`.xls` con `422`, `.xlsx` con
+`sharedStrings`, ida y vuelta de la plantilla descargada) y el **panel** (la
+pestaña *Convenios* con su grilla y sus totales, el botón *Descargar Plantilla
+Excel de Ejemplo*, el recuadro de arrastrar y soltar, el cálculo del coseguro en
+JavaScript, los endpoints que consume y los estilos). Cierra con la
+**integración**: el precio importado es el que cobra el mostrador y el saldo de la
+obra social queda `PENDIENTE` en `movimientos_caja` para la liquidación del
+período.
+
+La **forma de pago del odontólogo y su liquidación** se cubren en
+`tests/test_doctores_pago.py` (*28 pruebas*): el alta guarda la comisión con su
+porcentaje, el sueldo fijo mensual y hasta la retención parcial de un dueño (con
+round-trip por `GET` y listado), los casos incoherentes responden **422**
+(comisión sin porcentaje, sueldo sin importe, porcentaje fuera de 0-100), el
+`PATCH` cambia la modalidad sin tocar los datos personales, el `PUT` del modal
+guarda la que se eligió y `PATCH {"tipo_pago": "DUENO", "valor_pago": null}` la
+devuelve al 100 %; la **liquidación** del mes calcula los honorarios con la regla
+vigente (100 % dueño, porcentaje de comisión, fijo del sueldo) y cambia cuando
+cambia la configuración; y el **panel** ofrece el desplegable *Tipo de pago* con
+las tres opciones del enum, el campo numérico que se habilita por tipo, el error
+de la modalidad mostrado dentro del formulario, la columna *Forma de pago* en la
+tabla de profesionales, la tabla de subtotales de la liquidación de médicos, el
+buscador rápido del formulario de cobro y el **PDF** que respeta el profesional
+elegido.
+
+Los **reportes en PDF del Módulo 3** se cubren en `tests/test_reportes_pdf.py`
+(*21 pruebas*): el generador `app/core/pdf.py` (firma del archivo, tabla `xref`
+con el offset **real** de cada objeto, `/Length` de cada contenido —si el stream
+miente sobre su largo ningún visor abre el PDF—, paginado con el encabezado de
+la tabla repetido, alineación a la derecha de los totales, codificación WinAnsi
+de los acentos y degradación de los símbolos que la codificación no tiene), los
+dos endpoints (tipo `application/pdf`, `Content-Disposition` con el nombre del
+archivo, **404** de una cobertura inexistente, **422** del período inválido y que
+las rutas JSON sigan respondiendo igual), el contenido del reporte (la cobertura,
+el paciente **con acentos**, el DNI, los importes en formato `$ 15.000,00` y los
+estados traducidos al castellano, no el enum) y que los datos duros (fecha, DNI,
+importes, estado) entren en **una sola línea** con los anchos reales de las
+columnas.
+
 
 ---
 
@@ -1049,5 +1428,34 @@ marca `ENVIADO`, no altera el estado clínico y el turno sale de la lista).
   —incluidos `PUT`, `PATCH` y `DELETE`— y orígenes configurables por entorno
   (`CORS_ORIGINS`). La interfaz se sirve desde el mismo origen y no lo necesita,
   pero así la API queda consumible desde otros clientes sin tocar código.
+- **Facturación con importes congelados (Módulo 3)**: el cierre de una visita
+  guarda en `detalles_movimiento_caja` una **copia** del código, la descripción y
+  los importes de cada práctica. Editar el arancel o el catálogo después **no**
+  cambia una factura ni una presentación ya emitida (trazabilidad contable), y la
+  factura sobrevive a la baja lógica de la práctica.
+- **Un solo motor de cálculo**: el cartel del mostrador
+  (`POST /turnos/{id}/presupuesto`) y la facturación real
+  (`POST /turnos/{id}/facturar`) usan la misma función
+  (`facturacion_service._resolver_prestaciones`), así que el importe que ve la
+  secretaría antes de confirmar es exactamente el que queda guardado. La ayuda de
+  carga (`/turnos/{id}/prestaciones-disponibles`) expone el arancel ya resuelto
+  por práctica para que el formulario no tenga que calcular nada.
+- **Aritmética decimal para el dinero**: los importes se guardan como `Float`
+  (decisión del módulo) pero se suman y redondean a dos decimales con
+  `app.core.money` (`Decimal` + `ROUND_HALF_UP`), evitando los típicos
+  `0.30000000000000004` en un total de caja.
+- **Presentación determinística**: el número de presentación del período
+  (`PRES-OS3-202611`) se **deriva** de la cobertura y el mes en lugar de guardarse
+  en una tabla propia. La presentación se reconstruye desde los movimientos (una
+  única fuente de verdad) y el estado de cada orden vive en el propio movimiento
+  (`PENDIENTE` → `EN_PROCESO_LIQUIDACION` → `COBRADO` / `DEBITADO_OS`).
+- **Cobros y débitos sin editar la factura**: corregir el circuito del dinero se
+  hace marcando el cobro (con el importe realmente depositado si difiere) o el
+  débito (con el motivo obligatorio) del movimiento, nunca reescribiendo los
+  montos: así queda trazado qué pasó con cada orden presentada.
+- **Baja lógica vs. configuración**: las prácticas y las coberturas usan borrado
+  lógico (`activa`) porque los registros históricos las referencian, mientras que
+  el **arancel** (una tabla de precios) se puede borrar y volver a cargar sin
+  afectar ninguna liquidación pasada.
 
 

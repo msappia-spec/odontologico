@@ -977,3 +977,201 @@ select.field {
   border-radius: .75rem;
 }
 
+/* ==========================================================================
+   Módulo 3 · Facturación y Caja (obras sociales, coseguros y liquidaciones)
+   ========================================================================== */
+
+/* Pestañas internas de la vista "Facturación y Caja". */
+.fact-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  padding-top: .9rem;
+  border-top: 1px solid #eef2f6;
+}
+.fact-tab {
+  padding: .45rem .85rem;
+  font-size: .78rem;
+  font-weight: 700;
+  color: #55677a;
+  background: #f6f8fb;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.fact-tab:hover { background: #eef4f3; color: var(--brand-700); }
+.fact-tab.active {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+  color: #fff;
+  box-shadow: 0 10px 20px -12px rgba(13, 133, 120, .9);
+}
+
+/* Tarjetas de totales (caja, presentación y liquidación de médicos). */
+.fact-kpi {
+  padding: .8rem .9rem;
+  background: #fff;
+  border: 1px solid #e6ecf1;
+  border-radius: .85rem;
+}
+.fact-kpi-titulo {
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.fact-kpi-valor {
+  margin-top: .25rem;
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--ink-900);
+}
+
+/* Fichas del encabezado del modal de cobro (paciente, cobertura, afiliado). */
+.fact-chip {
+  padding: .45rem .6rem;
+  background: #f8fafc;
+  border: 1px solid #eef2f6;
+  border-radius: .7rem;
+  min-width: 0;
+}
+.fact-chip-label {
+  display: block;
+  font-size: .58rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.fact-chip-valor {
+  display: block;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--ink-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Cartel del mostrador: el importe que la secretaría cobra al paciente. */
+.fact-cartel {
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, #0d8578 0%, #17a394 100%);
+  color: #fff;
+  box-shadow: 0 20px 36px -22px rgba(13, 133, 120, .95);
+}
+.fact-cartel-label {
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  opacity: .92;
+}
+.fact-cartel-monto { margin-top: .1rem; font-size: 2.05rem; font-weight: 800; line-height: 1.15; }
+.fact-cartel-nota { margin-top: .3rem; font-size: .72rem; opacity: .92; }
+/* Sin prácticas seleccionadas el cartel pierde color: no hay nada que cobrar. */
+.fact-cartel.fact-cartel-vacio {
+  background: linear-gradient(135deg, #64748b 0%, #94a3b8 100%);
+  box-shadow: none;
+}
+
+/* Til des de las órdenes presentadas a la obra social. */
+.fact-check {
+  width: 1rem;
+  height: 1rem;
+  border-radius: .3rem;
+  border: 1px solid #cbd5e1;
+  accent-color: var(--brand-600);
+}
+tr.fact-tildada { background: var(--brand-50); }
+tr.fact-tildada:hover { background: var(--brand-100); }
+
+/* Lista de prácticas dentro de una fila de la caja. */
+.fact-practicas { font-size: .74rem; line-height: 1.35; color: #55677a; }
+.fact-practicas li { list-style: none; }
+
+/* Convenios: grilla de precios por obra social e importador de planillas. */
+.conv-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .15rem;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  background: #fbfdfd;
+  border: 2px dashed #cbe3de;
+  border-radius: 1rem;
+  cursor: pointer;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+.conv-drop:hover { background: var(--brand-50); border-color: var(--brand-300); }
+/* Clase que agrega app.js mientras el archivo está sobre la zona. */
+.conv-drop.activo {
+  background: var(--brand-50);
+  border-color: var(--brand-500);
+  transform: scale(1.004);
+}
+.conv-drop-icono { width: 1.9rem; height: 1.9rem; color: var(--brand-600); }
+.conv-drop-titulo { font-size: .85rem; font-weight: 700; color: var(--ink-900); }
+.conv-drop-nota { font-size: .72rem; color: #94a3b8; }
+
+/* El monto que cubre la OS se edita en la propia fila de la grilla. */
+.conv-monto { width: 9rem; text-align: right; }
+.conv-coseguro { font-size: .82rem; font-weight: 700; color: var(--brand-700); }
+.conv-sin-cargar { font-size: .7rem; color: #94a3b8; }
+/* Fila tocada y todavía sin guardar: queda destacada hasta confirmar. */
+tr.conv-cambiado { background: #fffbeb; }
+tr.conv-cambiado:hover { background: #fef3c7; }
+
+/* Reporte de la previsualización de la planilla importada. */
+.conv-reporte-totales { display: flex; flex-wrap: wrap; gap: .4rem; }
+.conv-reporte-lista {
+  max-height: 15rem;
+  overflow: auto;
+  margin-top: .6rem;
+  font-size: .72rem;
+  line-height: 1.4;
+  color: #55677a;
+}
+.conv-reporte-lista li { list-style: none; padding: .12rem 0; }
+.conv-reporte-lista .conv-linea { color: #94a3b8; font-variant-numeric: tabular-nums; }
+
+/* Reporte de producción por odontólogo. */
+.fact-med {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .9rem;
+  padding: .9rem 1rem;
+  background: #fff;
+  border: 1px solid #e6ecf1;
+  border-radius: .9rem;
+}
+.fact-med-nombre { font-weight: 800; color: var(--ink-900); }
+.fact-med-dato { font-size: .72rem; color: #8494a5; }
+.fact-med-montos { display: flex; flex-wrap: wrap; gap: 1.1rem; margin-left: auto; text-align: right; }
+.fact-med-monto-titulo {
+  font-size: .6rem;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.fact-med-monto-valor { font-size: 1rem; font-weight: 800; color: var(--ink-900); }
+.fact-med-monto-valor.fact-med-honorario { color: var(--brand-700); }
+.fact-med-tipo {
+  display: inline-flex;
+  align-items: center;
+  padding: .12rem .5rem;
+  font-size: .62rem;
+  font-weight: 800;
+  border-radius: 999px;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border: 1px solid var(--brand-100);
+}
+
+

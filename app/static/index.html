@@ -72,6 +72,11 @@
           <span class="flex-1">Recordatorios</span>
           <span id="nav-rec-pendientes" class="nav-badge hide">0</span>
         </a>
+        <a class="nav-link" data-view="facturacion">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20M6 15h4"/></svg>
+          <span class="flex-1">Facturación y Caja</span>
+          <span id="nav-fact-pendientes" class="nav-badge hide">0</span>
+        </a>
         <p class="px-3 pt-4 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Registros</p>
         <a class="nav-link" data-view="doctores">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3v0"/><path d="M10 10.6V16a2 2 0 0 0 2 2"/><circle cx="12" cy="7" r="4"/><path d="M9 21v-2a4 4 0 0 1 4-4"/></svg>
@@ -508,11 +513,26 @@
                   <label class="field-label" for="doc-especialidad">Especialidad</label>
                   <input id="doc-especialidad" name="especialidad" class="field" placeholder="Ej.: Ortodoncia" required maxlength="120" />
                 </div>
+                <!-- Módulo 3: cómo se liquida la producción del profesional. -->
+                <div>
+                  <label class="field-label" for="doc-tipo-pago">Tipo de pago</label>
+                  <select id="doc-tipo-pago" name="tipo_pago" class="field">
+                    <option value="DUENO">Dueño (se lleva el 100% de la prestación)</option>
+                    <option value="COMISION">Comisión por porcentaje</option>
+                    <option value="SUELDO">Sueldo fijo mensual</option>
+                  </select>
+                  <p id="doc-pago-ayuda" class="text-[11px] text-slate-400 mt-1.5">Dueño: se liquida el 100% de las prestaciones que factura.</p>
+                </div>
+                <div id="doc-valor-grupo" class="hide">
+                  <label class="field-label" for="doc-valor-pago" id="doc-valor-label">Porcentaje de la producción (%)</label>
+                  <input id="doc-valor-pago" name="valor_pago" type="number" min="0" step="1" class="field" placeholder="Ej.: 40" />
+                </div>
                 <label class="flex items-center gap-2.5 cursor-pointer select-none">
                   <input id="doc-activo" name="activo" type="checkbox" checked
                          class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
                   <span class="text-sm text-slate-600">Profesional activo</span>
                 </label>
+                <div id="doc-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
                 <button type="submit" class="btn btn-primary w-full">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
                   Guardar doctor
@@ -531,7 +551,7 @@
               <div class="overflow-x-auto">
                 <table class="data-table">
                   <thead>
-                    <tr><th>Profesional</th><th>Especialidad</th><th>Estado</th><th>Turnos</th><th class="text-right">Acciones</th></tr>
+                    <tr><th>Profesional</th><th>Especialidad</th><th>Forma de pago</th><th>Estado</th><th>Turnos</th><th class="text-right">Acciones</th></tr>
                   </thead>
                   <tbody id="lista-doctores"></tbody>
                 </table>
@@ -706,7 +726,386 @@
           <div id="rec-lista" class="space-y-3"></div>
         </section>
 
-      </main>
+        <!-- ============== VISTA: FACTURACIÓN Y CAJA (Módulo 3) ============== -->
+        <section id="view-facturacion" class="anim-fade space-y-5 hide">
+
+          <!-- Encabezado: cobrar una visita, caja del día y pestañas internas -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center flex-none">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20M6 15h4"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-extrabold tracking-tight text-slate-900">Facturación y Caja</h2>
+                <p id="fact-subtitulo" class="text-xs text-slate-500">
+                  Cierre de visitas, coseguros del mostrador, liquidación de obras sociales y de profesionales.
+                </p>
+              </div>
+              <button type="button" id="fact-refrescar" class="btn btn-soft btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Actualizar
+              </button>
+              <button type="button" id="fact-cobrar-visita" class="btn btn-primary btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                Cobrar una visita
+              </button>
+            </div>
+
+            <!-- Pestañas internas: caja diaria, obras sociales, médicos y precios -->
+            <div class="fact-tabs mt-4" role="tablist">
+              <button type="button" class="fact-tab active" data-fact-tab="caja" role="tab">Caja del día</button>
+              <button type="button" class="fact-tab" data-fact-tab="obras" role="tab">Liquidación de obras sociales</button>
+              <button type="button" class="fact-tab" data-fact-tab="medicos" role="tab">Liquidación de médicos</button>
+              <button type="button" class="fact-tab" data-fact-tab="precios" role="tab">Prestaciones y aranceles</button>
+              <button type="button" class="fact-tab" data-fact-tab="convenios" role="tab">Convenios</button>
+            </div>
+          </div>
+
+          <!-- PANEL 1 · CAJA DEL DÍA -------------------------------------- -->
+          <div id="fact-panel-caja" class="space-y-4" data-fact-panel="caja">
+            <div class="card p-4 sm:p-5">
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="min-w-[150px]">
+                  <label class="field-label" for="fact-fecha">Día de caja</label>
+                  <input type="date" id="fact-fecha" class="field" />
+                </div>
+                <p class="text-[11px] text-slate-400 flex-1">
+                  El efectivo del mostrador (coseguros y particulares) se cobra al cerrar cada visita.
+                  Lo que paga la obra social queda pendiente hasta la liquidación del período.
+                </p>
+              </div>
+              <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Cobrado en efectivo</p>
+                  <p id="fact-kpi-efectivo" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Pendiente de obras sociales</p>
+                  <p id="fact-kpi-pendiente" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Acreditado por la OS</p>
+                  <p id="fact-kpi-cobrado" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Visitadas cerradas</p>
+                  <p id="fact-kpi-cantidad" class="fact-kpi-valor">&mdash;</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="card overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+                <div>
+                  <h2 class="font-bold text-slate-900">Movimientos del día</h2>
+                  <p class="text-[11px] text-slate-400">Cada fila es el cierre de una visita, con su detalle de prácticas.</p>
+                </div>
+                <span id="fact-caja-contador" class="badge badge-brand">0</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Hora</th><th>Paciente</th><th>Cobertura</th><th>Profesional</th>
+                      <th>Prácticas</th><th class="text-right">Efectivo</th>
+                      <th class="text-right">OS</th><th>Estado</th><th class="text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fact-lista-caja"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL 2 · LIQUIDACIÓN DE OBRAS SOCIALES --------------------- -->
+          <div id="fact-panel-obras" class="space-y-4 hide" data-fact-panel="obras">
+            <div class="card p-4 sm:p-5">
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="min-w-[200px]">
+                  <label class="field-label" for="fact-lis-os">Obra social / prepaga</label>
+                  <select id="fact-lis-os" class="field"></select>
+                </div>
+                <div class="min-w-[150px]">
+                  <label class="field-label" for="fact-lis-mes">Período</label>
+                  <input type="month" id="fact-lis-mes" class="field" />
+                </div>
+                <button type="button" id="fact-lis-ver" class="btn btn-soft btn-sm">Ver el período</button>
+                <button type="button" id="fact-lis-generar" class="btn btn-primary btn-sm">Generar presentación del período</button>
+                <button type="button" id="fact-lis-exportar" class="btn btn-ghost btn-sm">Exportar resumen</button>
+                <button type="button" id="fact-lis-pdf" class="btn btn-ghost btn-sm">PDF para la cobertura</button>
+              </div>
+              <p id="fact-lis-numero" class="mt-3 text-xs text-slate-500">
+                Elegí la cobertura y el mes: la presentación agrupa las visitas pendientes de ese período.
+              </p>
+              <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Presentado a la OS</p>
+                  <p id="fact-lis-presentado" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Acreditado</p>
+                  <p id="fact-lis-cobrado" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Debitado por la OS</p>
+                  <p id="fact-lis-debitado" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Sin acreditar</p>
+                  <p id="fact-lis-pendiente" class="fact-kpi-valor">&mdash;</p>
+                </div>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 mt-4 pt-4 border-t border-slate-100">
+                <p class="text-[11px] text-slate-400 flex-1">
+                  Cuando entra el depósito bancario, tildá las órdenes depositadas (o debitadas) y aplicá el
+                  cierre. Cada orden se marca de a una con su propio estado.
+                </p>
+                <button type="button" id="fact-lis-cobrar-tildadas" class="btn btn-soft btn-sm">Marcar cobradas</button>
+                <button type="button" id="fact-lis-debitar-tildadas" class="btn btn-danger-soft btn-sm">Marcar debitadas</button>
+              </div>
+            </div>
+
+            <div class="card overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+                <div>
+                  <h2 class="font-bold text-slate-900">Órdenes del período</h2>
+                  <p class="text-[11px] text-slate-400">De la más vieja a la más nueva, con su estado de cobro.</p>
+                </div>
+                <span id="fact-lis-contador" class="badge badge-brand">0</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th class="w-10"><input type="checkbox" id="fact-lis-todos" class="fact-check" title="Tildar todas" /></th>
+                      <th>Fecha</th><th>Paciente</th><th>Afiliado</th><th>Prácticas</th>
+                      <th class="text-right">Presentado</th><th class="text-right">Efectivo</th>
+                      <th>Estado</th><th class="text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fact-lista-presentacion"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL 3 · LIQUIDACIÓN DE MÉDICOS --------------------------- -->
+          <div id="fact-panel-medicos" class="space-y-4 hide" data-fact-panel="medicos">
+            <div class="card p-4 sm:p-5">
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="min-w-[150px]">
+                  <label class="field-label" for="fact-med-mes">Período</label>
+                  <input type="month" id="fact-med-mes" class="field" />
+                </div>
+                <div class="min-w-[220px]">
+                  <label class="field-label" for="fact-med-doctor">Profesional</label>
+                  <select id="fact-med-doctor" class="field">
+                    <option value="">Todos los odontólogos</option>
+                  </select>
+                </div>
+                <button type="button" id="fact-med-ver" class="btn btn-soft btn-sm">Ver reporte</button>
+                <button type="button" id="fact-med-exportar" class="btn btn-ghost btn-sm">Exportar reporte</button>
+                <button type="button" id="fact-med-pdf" class="btn btn-ghost btn-sm">PDF de la liquidación</button>
+              </div>
+              <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Producción del mes</p>
+                  <p id="fact-med-produccion" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Honorarios a liquidar</p>
+                  <p id="fact-med-honorarios" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Cobrado en efectivo</p>
+                  <p id="fact-med-efectivo" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Presentado a obras sociales</p>
+                  <p id="fact-med-os" class="fact-kpi-valor">&mdash;</p>
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-3">
+                La producción es la atención facturada del mes (coseguros cobrados + lo presentado a las obras
+                sociales), no lo efectivamente cobrado de la prepaga. Los honorarios salen del tipo de pago de
+                cada profesional (dueño, comisión o sueldo).
+              </p>
+            </div>
+            <div id="fact-lista-medicos" class="space-y-3"></div>
+          </div>
+
+          <!-- PANEL 4 · PRESTACIONES Y ARANCELES ------------------------- -->
+          <div id="fact-panel-precios" class="space-y-4 hide" data-fact-panel="precios">
+            <div class="card overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
+                <div class="flex-1 min-w-[200px]">
+                  <h2 class="font-bold text-slate-900">Catálogo de prestaciones</h2>
+                  <p class="text-[11px] text-slate-400">
+                    El código de nomenclador es único; el valor base es el precio de referencia para particulares.
+                  </p>
+                </div>
+                <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                  <input id="fact-prest-inactivas" type="checkbox"
+                         class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+                  <span class="text-sm text-slate-600">Mostrar las dadas de baja</span>
+                </label>
+                <span id="fact-prest-contador" class="badge badge-brand">0</span>
+                <button type="button" id="fact-nueva-prestacion" class="btn btn-primary btn-sm">Nueva prestación</button>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th><th>Práctica</th><th class="text-right">Valor base</th>
+                      <th>Estado</th><th>Arancel de la cobertura elegida</th><th class="text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fact-lista-prestaciones"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-end gap-3">
+                <div class="flex-1 min-w-[200px]">
+                  <h2 class="font-bold text-slate-900">Aranceles por obra social</h2>
+                  <p class="text-[11px] text-slate-400">
+                    Cuánto cubre cada cobertura y cuánto queda de coseguro para el mostrador.
+                    Para cargar la grilla completa del nomenclador usá la pestaña «Convenios».
+                  </p>
+                </div>
+                <div class="min-w-[220px]">
+                  <label class="field-label" for="fact-arr-os">Obra social</label>
+                  <select id="fact-arr-os" class="field"></select>
+                </div>
+                <button type="button" id="fact-nuevo-arancel" class="btn btn-primary btn-sm">Cargar arancel</button>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th><th>Práctica</th><th class="text-right">Cubre la OS</th>
+                      <th class="text-right">Coseguro del paciente</th><th class="text-right">Total</th>
+                      <th class="text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fact-lista-aranceles"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL 5 · CONVENIOS POR OBRA SOCIAL ------------------------- -->
+          <div id="fact-panel-convenios" class="space-y-4 hide" data-fact-panel="convenios">
+            <div class="card p-4 sm:p-5">
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="flex-1 min-w-[220px]">
+                  <h2 class="font-bold text-slate-900">Configuración de convenios por obra social</h2>
+                  <p class="text-[11px] text-slate-400">
+                    Elegí la cobertura y cargá cuánto cubre cada práctica del nomenclador de Córdoba:
+                    el coseguro que se cobra en el mostrador se sugiere solo.
+                  </p>
+                </div>
+                <div class="min-w-[200px]">
+                  <label class="field-label" for="conv-os">Obra social</label>
+                  <select id="conv-os" class="field"></select>
+                </div>
+                <div class="min-w-[170px]">
+                  <label class="field-label" for="conv-buscar">Buscar práctica</label>
+                  <input id="conv-buscar" class="field" autocomplete="off" placeholder="Código o nombre" />
+                </div>
+                <button type="button" id="conv-guardar" class="btn btn-primary btn-sm">Guardar cambios</button>
+                <span id="conv-pendientes" class="badge badge-amber hide">0 sin guardar</span>
+              </div>
+
+              <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Prácticas del nomenclador</p>
+                  <p id="conv-contador" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Arancel base (Colegio)</p>
+                  <p id="conv-total-base" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Cubre la obra social</p>
+                  <p id="conv-total-os" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Coseguro sugerido</p>
+                  <p id="conv-total-coseguro" class="fact-kpi-valor">&mdash;</p>
+                </div>
+              </div>
+
+              <div id="conv-error" class="hide mt-3 text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+
+              <div class="overflow-x-auto mt-4">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th><th>Práctica</th><th class="text-right">Arancel base</th>
+                      <th class="text-right">Monto que cubre la OS</th>
+                      <th class="text-right">Coseguro sugerido</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="conv-lista"></tbody>
+                  <tfoot>
+                    <tr>
+                      <td colspan="2">Totales de la grilla</td>
+                      <td class="text-right" id="conv-pie-base">$0,00</td>
+                      <td class="text-right" id="conv-pie-os">$0,00</td>
+                      <td class="text-right" id="conv-pie-coseguro">$0,00</td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            <!-- Importador masivo: plantilla estándar + arrastrar y soltar -->
+            <div class="card p-4 sm:p-5">
+              <div class="flex flex-wrap items-end gap-3">
+                <div class="flex-1 min-w-[240px]">
+                  <h2 class="font-bold text-slate-900">Importar precios con la plantilla estándar</h2>
+                  <p class="text-[11px] text-slate-400">
+                    Descargá la plantilla (dos columnas: <span class="font-mono">codigo</span> y
+                    <span class="font-mono">precio_cobertura</span>), completala en Excel y arrastrala acá.
+                  </p>
+                </div>
+                <div class="min-w-[150px]">
+                  <label class="field-label" for="conv-formato">Formato de la plantilla</label>
+                  <select id="conv-formato" class="field">
+                    <option value="csv">Excel/CSV (.csv)</option>
+                    <option value="xlsx">Excel (.xlsx)</option>
+                  </select>
+                </div>
+                <button type="button" id="conv-plantilla" class="btn btn-soft btn-sm">
+                  Descargar Plantilla Excel de Ejemplo
+                </button>
+              </div>
+
+              <div id="conv-drop" class="conv-drop mt-4">
+                <svg class="conv-drop-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v12"/></svg>
+                <p class="conv-drop-titulo">Arrastrá la planilla y soltala acá</p>
+                <p class="conv-drop-nota">o hacé clic para elegirla desde la computadora (.csv o .xlsx)</p>
+                <input id="conv-archivo" type="file" class="hidden" accept=".csv,.txt,.xlsx" />
+              </div>
+
+              <div id="conv-archivo-nombre" class="hide mt-2 text-[11px] text-slate-500"></div>
+              <div id="conv-reporte" class="hide mt-3"></div>
+
+              <div class="flex flex-wrap gap-2 mt-3">
+                <button type="button" id="conv-confirmar" class="btn btn-primary btn-sm hide">
+                  Confirmar importación
+                </button>
+                <button type="button" id="conv-limpiar" class="btn btn-ghost btn-sm hide">
+                  Elegir otro archivo
+                </button>
+              </div>
+            </div>
+          </div>
+
     </div>
   </div>
 
@@ -787,6 +1186,19 @@
           <label class="field-label" for="doc-edit-especialidad">Especialidad</label>
           <input id="doc-edit-especialidad" name="especialidad" class="field" required maxlength="120" />
         </div>
+        <div>
+          <label class="field-label" for="doc-edit-tipo-pago">Tipo de pago</label>
+          <select id="doc-edit-tipo-pago" class="field">
+            <option value="DUENO">Dueño (se lleva el 100% de la prestación)</option>
+            <option value="COMISION">Comisión por porcentaje</option>
+            <option value="SUELDO">Sueldo fijo mensual</option>
+          </select>
+          <p id="doc-edit-pago-ayuda" class="text-[11px] text-slate-400 mt-1.5">Dueño: se liquida el 100% de las prestaciones que factura.</p>
+        </div>
+        <div id="doc-edit-valor-grupo" class="hide">
+          <label class="field-label" for="doc-edit-valor-pago" id="doc-edit-valor-label">Porcentaje de la producción (%)</label>
+          <input id="doc-edit-valor-pago" type="number" min="0" step="1" class="field" placeholder="Ej.: 40" />
+        </div>
         <label class="flex items-center gap-2.5 cursor-pointer select-none">
           <input id="doc-edit-activo" name="activo" type="checkbox"
                  class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
@@ -836,8 +1248,235 @@
     </div>
   </div>
 
+  <!-- ============ MODAL: COBRAR UNA VISITA (Módulo 3) ============ -->
+  <div id="modal-cobro" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h3 id="modal-cobro-titulo" class="text-lg font-extrabold text-slate-900">Cobrar una visita</h3>
+          <p id="modal-cobro-sub" class="text-xs text-slate-500">Elegí las prestaciones que se realizaron.</p>
+        </div>
+        <button type="button" id="modal-cobro-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <form id="form-cobro" class="space-y-4" autocomplete="off">
+        <!-- Visita a cobrar: aparece cuando se entra por el botón general -->
+        <div id="fact-cobro-elegir" class="hide">
+          <label class="field-label" for="fact-cobro-turno">Visita a cobrar</label>
+          <select id="fact-cobro-turno" class="field"></select>
+        </div>
+
+        <!-- Datos del turno que se está cerrando -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div class="fact-chip">
+            <span class="fact-chip-label">Paciente</span>
+            <span id="fact-cobro-paciente" class="fact-chip-valor">&mdash;</span>
+          </div>
+          <div class="fact-chip">
+            <span class="fact-chip-label">Cobertura</span>
+            <span id="fact-cobro-cobertura" class="fact-chip-valor">&mdash;</span>
+          </div>
+          <div class="fact-chip">
+            <span class="fact-chip-label">Afiliado</span>
+            <span id="fact-cobro-afiliado" class="fact-chip-valor">&mdash;</span>
+          </div>
+          <div class="fact-chip">
+            <span class="fact-chip-label">Profesional</span>
+            <span id="fact-cobro-profesional" class="fact-chip-valor">&mdash;</span>
+          </div>
+        </div>
+
+        <!-- Buscador rápido del nomenclador: filtra la lista por código o nombre
+             sin perder lo que ya está tildado. -->
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="flex-1 min-w-[220px]">
+            <label class="field-label" for="fact-cobro-buscar">Buscar práctica</label>
+            <input id="fact-cobro-buscar" class="field" autocomplete="off"
+                   placeholder="Código del nomenclador o nombre (ej.: 01.01 o consulta)" />
+          </div>
+          <span id="fact-cobro-contador" class="badge badge-brand" title="Prácticas que coinciden con la búsqueda">0</span>
+        </div>
+
+        <!-- Prácticas realizadas: cada fila muestra el arancel, lo que cubre la OS y el coseguro -->
+        <div>
+          <p class="field-label mb-1.5">Prestaciones realizadas</p>
+          <div class="border border-slate-200 rounded-xl overflow-hidden max-h-[34vh] overflow-y-auto">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="w-10"></th><th>Práctica</th>
+                  <th class="text-right">Arancel</th>
+                  <th class="text-right">Cubre la OS</th>
+                  <th class="text-right">Coseguro</th>
+                  <th class="w-20">Cant.</th>
+                </tr>
+              </thead>
+              <tbody id="fact-cobro-lista"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Cartel del mostrador: el importe que se le cobra al paciente -->
+        <div id="fact-cobro-cartel" class="fact-cartel">
+          <p class="fact-cartel-label">Cobrar Coseguro en mostrador</p>
+          <p id="fact-cobro-efectivo" class="fact-cartel-monto">$0,00</p>
+          <p id="fact-cobro-detalle" class="fact-cartel-nota">Sin prestaciones seleccionadas.</p>
+          <p class="fact-cartel-nota">Total de las prácticas: <span id="fact-cobro-total" class="font-bold">$0,00</span></p>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-xs text-slate-500">
+            Se presenta a la obra social:
+            <span id="fact-cobro-os" class="font-bold text-slate-800">$0,00</span>
+          </p>
+          <span id="fact-cobro-pendiente" class="badge badge-amber">
+            Queda PENDIENTE para la liquidación de la cobertura
+          </span>
+        </div>
+
+        <label class="flex items-start gap-2.5 cursor-pointer select-none">
+          <input id="fact-cobro-particular" type="checkbox"
+                 class="mt-0.5 w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+          <span class="text-xs text-slate-600">
+            Cobrar a valor de referencia las prácticas sin arancel cargado para la cobertura
+            (quedan como particular en esta visita).
+          </span>
+        </label>
+
+        <div>
+          <label class="field-label" for="fact-cobro-obs">Observaciones <span class="text-slate-400 normal-case">(opcional)</span></label>
+          <input id="fact-cobro-obs" class="field" maxlength="2000" placeholder="Ej.: se cobró coseguro en efectivo" />
+        </div>
+
+        <div id="fact-cobro-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-cobro-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-cobro-save" class="btn btn-primary flex-1"
+                  title="Cierra la visita: registra el movimiento de caja y marca el turno como finalizado">Confirmar y cerrar atención</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: PRESTACIÓN (catálogo del Módulo 3) ============ -->
+  <div id="modal-prestacion" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-lg p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 id="modal-prest-titulo" class="text-lg font-extrabold text-slate-900">Nueva prestación</h3>
+          <p class="text-xs text-slate-500">Código de nomenclador, práctica y valor de referencia.</p>
+        </div>
+        <button type="button" id="modal-prest-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-prestacion" class="space-y-4" autocomplete="off">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="field-label" for="fact-prest-codigo">Código de nomenclador</label>
+            <input id="fact-prest-codigo" class="field" required maxlength="30" placeholder="Ej.: 01.01" />
+          </div>
+          <div>
+            <label class="field-label" for="fact-prest-valor">Valor base (particular)</label>
+            <input id="fact-prest-valor" class="field" type="number" min="0" step="0.01" value="0" />
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="fact-prest-descripcion">Descripción de la práctica</label>
+          <input id="fact-prest-descripcion" class="field" required maxlength="200" placeholder="Ej.: Consulta y diagnóstico" />
+        </div>
+        <label class="flex items-center gap-2.5 cursor-pointer select-none">
+          <input id="fact-prest-activa" type="checkbox" checked
+                 class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+          <span class="text-sm text-slate-600">Activa (se ofrece al facturar)</span>
+        </label>
+        <div id="fact-prest-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-prest-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-prest-save" class="btn btn-primary flex-1">Guardar prestación</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: ARANCEL DE UNA COBERTURA ============ -->
+  <div id="modal-arancel" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-lg p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 id="modal-arr-titulo" class="text-lg font-extrabold text-slate-900">Cargar arancel</h3>
+          <p id="modal-arr-sub" class="text-xs text-slate-500">Cuánto cubre la cobertura y cuánto pone el paciente.</p>
+        </div>
+        <button type="button" id="modal-arr-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-arancel" class="space-y-4" autocomplete="off">
+        <div>
+          <label class="field-label" for="fact-arr-prestacion">Práctica</label>
+          <select id="fact-arr-prestacion" class="field" required></select>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="field-label" for="fact-arr-cubre">Cubre la obra social</label>
+            <input id="fact-arr-cubre" class="field" type="number" min="0" step="0.01" value="0" />
+          </div>
+          <div>
+            <label class="field-label" for="fact-arr-coseguro">Coseguro del paciente</label>
+            <input id="fact-arr-coseguro" class="field" type="number" min="0" step="0.01" value="0" />
+          </div>
+        </div>
+        <p class="text-xs text-slate-500">
+          Total de la práctica acordada:
+          <span id="fact-arr-total" class="font-bold text-slate-800">$0,00</span>
+        </p>
+        <div id="fact-arr-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-arr-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-arr-save" class="btn btn-primary flex-1">Guardar arancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: DÉBITO DE LA OBRA SOCIAL ============ -->
+  <div id="modal-debito" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-lg p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 class="text-lg font-extrabold text-slate-900">Debitar una orden</h3>
+          <p class="text-xs text-slate-500">Queda registrado por qué el consultorio deja de cobrarla.</p>
+        </div>
+        <button type="button" id="modal-deb-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-debito" class="space-y-4" autocomplete="off">
+        <p id="fact-deb-detalle" class="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2"></p>
+        <div>
+          <label class="field-label" for="fact-deb-motivo">Motivo del débito</label>
+          <input id="fact-deb-motivo" class="field" required minlength="3" maxlength="2000" placeholder="Ej.: práctica rechazada por auditoría" />
+        </div>
+        <div>
+          <label class="field-label" for="fact-deb-monto">
+            Importe depositado <span class="text-slate-400 normal-case">(opcional: débito parcial)</span>
+          </label>
+          <input id="fact-deb-monto" class="field" type="number" min="0" step="0.01" placeholder="0,00 si la OS no pagó nada" />
+        </div>
+        <div id="fact-deb-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-deb-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-deb-save" class="btn btn-danger-soft flex-1">Registrar débito</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- ===================== TOASTS ===================== -->
   <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col gap-3"></div>
+
 
   <script src="/static/app.js"></script>
   <script src="/static/calendar.js"></script>

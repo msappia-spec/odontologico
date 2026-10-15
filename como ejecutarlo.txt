@@ -1,3 +1,6 @@
+./publicar.bat
+
+
 Ya está andando. Esto es lo que tenés que poner:
 
 ## 🔗 La URL para entrar
@@ -48,6 +51,7 @@ El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistem
 7. Tocás el **cesto** 🗑️ de un turno → confirmar → pasa a **CANCELADO** (gris, tachado) y el horario vuelve a ofrecerse como disponible.
 8. Todo lo que agendás, reprogramás, confirmás o cancelás acá aparece al instante en el **Panel Principal** de la secretaría (y a la inversa). En el panel la misma acción es el botón **Confirmar asistencia** de la tarjeta del turno.
 9. Tocás el botón de **historia clínica** (segundo ícono del encabezado, 📋) → **buscás al paciente por nombre o DNI** → elegís la ficha y se abre su **Historia Clínica**: la **línea de tiempo** con todas sus atenciones (de la más nueva a la más vieja, con el odontólogo que atendió en cada una) y, arriba, el **formulario para cargar la evolución** de la consulta (Motivo, Diagnóstico, Tratamiento y Observaciones). Al guardar, la atención queda registrada y aparece también en el panel de la secretaría.
+10. En el **Panel Principal**, cada tarjeta de turno tiene el botón **Cobrar** (además de *Editar*, *Confirmar asistencia* y *Cancelar*): al tocarlo se abre el **formulario de cierre de la visita** con las prácticas realizadas, el **cartel «Cobrar Coseguro en mostrador: $X.XXX»** y el saldo que se le presenta a la obra social. Al confirmar, el ingreso entra en la **Caja del día**.
 
 > ⚙️ Si tocás el código **del backend** (archivos `.py`), hay que **reiniciar** uvicorn para que tome los cambios. El **HTML/CSS/JS** de la vista móvil se recarga solo con F5 (los sirve desde disco).
 
@@ -64,6 +68,42 @@ El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistem
   Es idempotente (si ya están, avisa *"nada que migrar"*), deja copia del `.db` y no toca pacientes, odontólogos ni turnos.
 - **Pruebas:** `tests/test_historias_clinicas.py` (25 pruebas: alta, ficha, cronología, búsqueda e inmutabilidad).
 - **Buscar sin acentos:** `suarez` encuentra a *Suárez* y `30.123.456` encuentra a `30123456` (el buscador normaliza el nombre y limpia el documento).
+
+## 💳 Módulo 3 · Obras sociales, facturación y liquidación de médicos
+
+**En el Panel Principal** hay una pestaña nueva en el menú: **Facturación y Caja**, con cinco solapas internas.
+
+1. **Caja del día** — KPIs de lo cobrado en efectivo y de lo que todavía deben las obras sociales, y la tabla de visitas cerradas del día con sus acciones *Cobrar* / *Debitar* (para cuando entra el depósito de la prepaga). El botón **Cobrar una visita** abre el formulario de cierre con las visitas del día que faltan facturar.
+2. **Liquidación de obras sociales** — elegís la cobertura y el mes; la tabla muestra todas las visitas del período con su estado (*Sin presentar*, *Presentada*, *Cobrada*, *Debitada*). **Generar presentación del período** pasa las pendientes a *en liquidación* y devuelve el número de presentación (`PRES-OS3-202610`). Cuando entra el dinero, tildás las órdenes y usás **Marcar cobradas** o **Marcar debitadas** (el débito pide el motivo). **Exportar resumen** baja un CSV con el detalle para presentar ante la prepaga, y **PDF para la cobertura** baja ese mismo resumen en PDF (ficha de la presentación, cada orden con su estado y los totales) para imprimir o adjuntar.
+3. **Liquidación de médicos** — elegís el **profesional** (o *Todos los odontólogos*) y el mes: la tabla muestra la producción de cada uno (coseguros cobrados + lo presentado a las obras sociales), el efectivo, los honorarios y **cómo se calculó**, con los totales del consultorio al pie. Los honorarios salen de la **forma de pago** de cada profesional, que se configura en *Doctores → Editar*: **Dueño** (se lleva el 100 % de la prestación; podés cargarle un porcentaje si retiene una parte), **Comisión por porcentaje** (ej.: 40 %) o **Sueldo fijo** (el importe mensual, sin importar la producción). Se exporta a CSV y, al lado, **PDF de la liquidación** baja el mismo reporte en PDF (con el detalle de cómo se calculó cada honorario) del profesional elegido, que es el que se le entrega.
+4. **Prestaciones y aranceles** — el catálogo de prácticas (código de nomenclador, descripción y valor base para particulares) y, por cada obra social, **cuánto cubre y cuánto queda de coseguro** (carga de a una práctica por vez).
+5. **Convenios** — la pantalla para cargar **toda la grilla de precios de una cobertura**: elegís la obra social y aparece el **nomenclador base de Córdoba** completo, con el **arancel base** de cada práctica, el campo **Monto que cubre la OS** y el **coseguro sugerido** (arancel base − lo que cubre la OS) que se recalcula **mientras escribís**; los totales de la grilla (arancel base, cubre la OS y coseguro sugerido) se actualizan en el acto y **Guardar cambios** los persiste de verdad. Para los convenios largos está el **importador masivo**: **Descargar Plantilla Excel de Ejemplo** baja una planilla de dos columnas (`codigo` y `precio_cobertura`, en `.csv` para Excel es-AR o en `.xlsx`), la completás en Excel y la **arrastrás** al recuadro de la pantalla; el sistema te muestra una **vista previa** (cuántas filas entran, cuántas se actualizan, cuántas no traen precio y cuáles tienen error —con el número de línea—) y recién al tocar **Confirmar importación** se actualizan los aranceles de esa obra social.
+
+**Cómo se cobra una visita (el circuito diario):**
+
+1. Al terminar la atención, en la agenda del panel tocás **Cobrar** en la tarjeta del turno.
+2. Tildás las **prácticas realizadas** (con la cantidad si se repiten); si el nomenclador es largo, el **buscador** filtra por código o por nombre sin perder lo que ya tildaste. Cada fila muestra el **arancel** de la práctica, lo que **cubre la obra social** y el **coseguro**. El cartel verde muestra en el acto **«Cobrar Coseguro en mostrador: $X.XXX»**, el total de las prácticas y, debajo, lo que se le presenta a la obra social con el aviso **«Queda PENDIENTE para la liquidación de …»** (ese saldo recién se cierra cuando entra el depósito, en *Liquidación de obras sociales*).
+3. Tocás **Confirmar y cerrar atención**: el sistema guarda el cierre de la visita (efectivo + saldo de la OS), el turno queda **finalizado** (pasa a *Confirmado*) y el movimiento de caja aparece en la *Caja del día*.
+
+**Cosas importantes:**
+
+- **Sin cobertura** el paciente paga el **valor base** completo (particular) y el cierre queda saldado; no hay nada que presentarle a nadie.
+- Si el paciente **tiene cobertura pero falta el arancel** de una práctica, el cobro se **rechaza** (no se inventan importes): cargá el arancel en *Convenios* (o de a uno en *Prestaciones y aranceles*), o tildá *Cobrar a valor de referencia* para esa visita.
+- Un turno se factura **una sola vez** (el cierre es el comprobante de la visita) y un turno **cancelado** no se puede facturar.
+- **Las facturas no se editan:** si la obra social paga distinto o rechaza una práctica, se marca el **cobro** (con el importe realmente depositado) o el **débito** (con el motivo). Así queda trazado qué pasó con cada orden.
+- **Bases ya creadas:** para que aparezcan las tablas nuevas y las columnas de pago de los odontólogos sin borrar nada (una sola vez, con el servidor detenido):
+  ```powershell
+  .\.venv\Scripts\python.exe -m scripts.migrar_facturacion
+  ```
+  Es idempotente (si ya está, avisa *"nada que migrar"*), deja copia del `.db` y no toca pacientes, odontólogos ni turnos. Los odontólogos que ya tenías quedan como **dueños** (cobran el 100 % de su producción) hasta que les configures otra forma de pago en *Doctores → Editar*.
+- **Nomenclador de Córdoba (opcional):** para arrancar con la grilla referencial del Colegio Odontológico de la Provincia de Córdoba, corré:
+  ```powershell
+  .\.venv\Scripts\python.exe -m scripts.seed_nomenclador_cba
+  ```
+  Carga 9 códigos oficiales (`10100` consulta, `10400` urgencia, `20100`/`21600` obturaciones, `30100`/`30200` conductos, `50100` limpieza, `10010`/`10030` extracciones) con su descripción por capítulo y un **valor base orientativo**, que después ajustás a tu grilla. **No duplica nada** (si el código ya está, lo saltea), así que se puede ejecutar todas las veces que quieras. Con `--actualizar` reescribe descripción y precio de los que ya están (útil después de un aumento) y con `--dry-run` te muestra qué haría sin escribir. Los **aranceles por obra social** se cargan aparte, en *Facturación y Caja → Convenios* (la grilla completa de la cobertura, con la plantilla de Excel para importarlos en lote) o de a uno en *Prestaciones y aranceles*, porque cada cobertura acuerda los suyos.
+- **Reportes en PDF:** los dos cierres de mes también se bajan en PDF (los botones **PDF para la cobertura** y **PDF de la liquidación**): vienen con la fecha de emisión, el detalle de cada orden o profesional y los totales, así que sirven para imprimir o adjuntar. Se arman en el backend (no dependen de ninguna librería externa y no hace falta tener internet) y se pueden pedir por API: `GET /api/v1/liquidaciones/obras-sociales/pdf?obra_social_id=1&anio=2026&mes=10` y `GET /api/v1/liquidaciones/profesionales/pdf?anio=2026&mes=10`. El CSV sigue disponible con *Exportar resumen* / *Exportar reporte* para trabajar en Excel.
+- **Datos de ejemplo:** `python -m scripts.seed` carga un catálogo de 7 prácticas y 14 aranceles de ejemplo (OSDE, Swiss Medical, IOMA, Medicus y Galeno) para probar el circuito completo. Ojo: el seed **también agrega** las odontólogas, los pacientes y los turnos de demostración, así que en una base con datos reales conviene cargar los precios a mano desde el panel.
+- **Pruebas:** `tests/test_facturacion.py` (59 pruebas: precios, cierre de caja, cobros y débitos, presentación del período, liquidación de profesionales, compatibilidad con PostgreSQL y el contrato del panel), `tests/test_convenios.py` (36 pruebas: la grilla de convenios con el coseguro sugerido y su guardado en lote, la plantilla de Excel de dos columnas, el importador masivo con vista previa —`.csv` y `.xlsx`, errores por fila— y el cierre de la visita que deja el saldo de la obra social **pendiente**), `tests/test_doctores_pago.py` (28 pruebas: la configuración de la forma de pago del profesional —dueño, comisión y sueldo— y su efecto en la liquidación del mes, más los controles del formulario y la tabla del panel) y `tests/test_reportes_pdf.py` (21 pruebas: que el PDF sea válido —firma, tabla `xref`, largos, paginado— y que los dos reportes salgan con los datos correctos).
 
 ## ☁️ Ya está subido a internet (Vercel)
 

@@ -20,6 +20,39 @@ class EstadoWhatsApp(str, enum.Enum):
     RESPONDIDO = "RESPONDIDO"
 
 
+class TipoPagoDoctor(str, enum.Enum):
+    """Modalidad con la que se le paga al odontólogo su producción (Módulo 3).
+
+    * ``DUENO``: es dueño del consultorio y se queda con (casi) toda su
+      producción; ``valor_pago`` es el porcentaje que retiene (si no se informa,
+      se asume el 100 %).
+    * ``COMISION``: cobra un porcentaje fijo de lo que produjo (``valor_pago``
+      entre 0 y 100, obligatorio).
+    * ``SUELDO``: cobra un monto fijo por mes (``valor_pago``), sin importar
+      cuánto produjo; la producción se sigue midiendo para el reporte.
+    """
+
+    DUENO = "DUENO"
+    COMISION = "COMISION"
+    SUELDO = "SUELDO"
+
+
+class EstadoPagoMovimiento(str, enum.Enum):
+    """Situación de cobro de un movimiento de caja (Módulo 3).
+
+    El ciclo natural es: al cerrar la visita el movimiento nace ``PENDIENTE``
+    (la obra social todavía no pagó); al generar la presentación del período
+    pasa a ``EN_PROCESO_LIQUIDACION``; y al acreditarse el depósito bancario se
+    cierra como ``COBRADO`` (la OS pagó) o ``DEBITADO_OS`` (la OS rechazó o
+    descontó el importe).
+    """
+
+    PENDIENTE = "PENDIENTE"
+    EN_PROCESO_LIQUIDACION = "EN_PROCESO_LIQUIDACION"
+    COBRADO = "COBRADO"
+    DEBITADO_OS = "DEBITADO_OS"
+
+
 class TipoDisponibilidadEspecifica(str, enum.Enum):
     """Efecto de un tramo horario cargado para **una fecha concreta**.
 

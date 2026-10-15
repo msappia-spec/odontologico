@@ -13,24 +13,41 @@ from urllib.parse import urlparse
 import pytest
 
 from scripts.publicar import (
+    RESET,
+    ROJO,
+    SUBCOMANDOS_SOLO_LECTURA,
+    URL_POR_DEFECTO,
     Completado,
     Consulta,
     ErrorPublicacion,
+    _comando_legible,
     _correr,
     _nombres_del_status,
     _preparar_salida,
     _resolver_ejecutable,
     archivos_modificados,
     asunto_automatico,
+    colores_activos,
     commits_pendientes,
+    control_de_calidad,
     cuerpo_del_commit,
+    exigir_proyecto_enlazado,
+    exigir_remoto,
+    fallas_de_pytest,
     main,
+    momento_legible,
+    mostrar_salida,
+    pistas_de_push,
+    proyecto_enlazado,
     publicar,
+    resumen_de_pytest,
+    rojo,
+    url_de_produccion,
     verificar_produccion,
 )
 
 # Mismos subcomandos que el script trata como consultas de sólo lectura.
-SOLO_LECTURA = ("rev-parse", "status", "rev-list", "log", "diff", "ls")
+SOLO_LECTURA = SUBCOMANDOS_SOLO_LECTURA
 
 
 def solo_lectura(comando: list[str]) -> bool:
@@ -51,19 +68,28 @@ class EjecutorFalso:
         rama: str = "main",
         pendientes: str = "0",
         fallar: tuple[str, ...] = (),
+        salidas: dict | None = None,
+        remoto: str = "https://github.com/msappia-spec/odontologico.git",
+        salida_fallo: str = "un error cualquiera",
     ) -> None:
         self.comandos: list[list[str]] = []
         self.status = status
         self.rama = rama
         self.pendientes = pendientes
         self.fallar = tuple(fallar)
+        self.salidas = dict(salidas or {})
+        self.remoto = remoto
+        self.salida_fallo = salida_fallo
 
     def __call__(self, comando, *, capturar=True, cwd=None, tiempo_espera=None):
         partes = [str(parte) for parte in comando]
         self.comandos.append(partes)
         union = " ".join(partes)
+        for trozo, salida in self.salidas.items():
+            if trozo in union:
+                return Completado(0, salida)
         if any(trozo in union for trozo in self.fallar):
-            return Completado(1, "un error cualquiera")
+            return Completado(1, self.salida_fallo)
         if partes[0] == "git":
             if partes[1] == "rev-parse":
                 return Completado(0, self.rama)
@@ -71,6 +97,8 @@ class EjecutorFalso:
                 return Completado(0, self.status)
             if partes[1] == "rev-list":
                 return Completado(0, self.pendientes)
+            if partes[1] == "remote":
+                return Completado(0, self.remoto)
         return Completado(0, "")
 
     def secuencia(self) -> list[str]:
@@ -321,6 +349,23 @@ def test_verificar_produccion_sin_espera_hace_un_solo_intento():
 # --------------------------------------------------------------------------- #
 
 
+def test_el_log_de_los_comandos_es_una_sola_linea_legible():
+    legible = _comando_legible(
+        ["git", "commit", "-m", "asunto corto", "-m", "primera\nsegunda"]
+    )
+
+    assert legible == 'git commit -m "asunto corto" -m "primera segunda"'
+    assert _comando_legible(["git", "add", "-A"]) == "git add -A"
+
+
+def test_el_log_recorta_los_argumentos_larguisimos():
+    legible = _comando_legible(["git", "commit", "-m", "x" * 100])
+
+    assert legible.startswith("git commit -m ")
+    assert legible.endswith("…")
+    assert len(legible) < 130
+
+
 def test_nombres_del_status_interpreta_el_formato_porcelain():
     salida = (
         "?? nuevo.txt\n"
@@ -491,6 +536,360 @@ def test_main_con_opciones_contradictorias_devuelve_uno():
 
     assert codigo == 1
     assert any("se contradicen" in linea for linea in salidas)
+
+
+# --------------------------------------------------------------------------- #
+# Control de calidad (pytest): es el primer paso y frena todo
+# --------------------------------------------------------------------------- #
+
+
+def test_el_control_de_calidad_usa_el_mismo_interprete_y_aborta_en_rojo():
+    vistas: list[list[str]] = []
+    salidas: list[str] = []
+
+    def correr(comando, *, capturar=True, tiempo_espera=None):
+        vistas.append(list(comando))
+        return Completado(
+            1,
+            "FAILED tests/test_x.py::test_uno - AssertionError: 1 != 2\n"
+            "==================== 1 failed, 2 passed in 0.42s ====================",
+        )
+
+    with pytest.raises(ErrorPublicacion) as error:
+        control_de_calidad(correr, salida=salidas.append)
+
+    assert vistas == [[sys.executable, "-m", "pytest"]]
+    assert error.value.rojo is True  # el mensaje se imprime en rojo
+    assert "publicación abortada" in str(error.value)
+    assert "código 1" in str(error.value)
+    pistas = " ".join(error.value.pistas)
+    assert "tests/test_x.py::test_uno" in pistas  # nombra lo que falló
+    assert "No se publica código con errores" in pistas
+    assert any("FAILED tests/test_x.py::test_uno" in linea for linea in salidas)
+
+
+def test_el_control_de_calidad_no_imprime_nada_cuando_todo_pasa():
+    salidas: list[str] = []
+
+    def correr(comando, *, capturar=True, tiempo_espera=None):
+        return Completado(0, "456 passed, 1 skipped in 34.20s")
+
+    completado = control_de_calidad(correr, salida=salidas.append)
+
+    assert completado.ok
+    assert salidas == []
+    assert resumen_de_pytest(completado.salida) == "456 passed, 1 skipped in 34.20s"
+
+
+def test_las_pruebas_en_rojo_no_dejan_commits_ni_deploy():
+    ejecutor = EjecutorFalso(status=" M app/main.py", fallar=("-m pytest",))
+    with pytest.raises(ErrorPublicacion) as error:
+        publicar_con(ejecutor, mensaje="Módulo 3")
+
+    assert error.value.rojo is True
+    assert not any(
+        comando.startswith(("git add", "git commit", "git push", "vercel"))
+        for comando in ejecutor.secuencia()
+    )
+
+
+def test_main_enmarca_el_aborto_por_pruebas_cuando_no_hay_colores():
+    salidas: list[str] = []
+    codigo = main(
+        [],
+        correr=EjecutorFalso(status=" M app/main.py", fallar=("-m pytest",)),
+        consultar=ClienteFalso(),
+        buscar_programa=lambda nombre: nombre,
+        pausar=lambda segundos: None,
+        salida=salidas.append,
+    )
+
+    assert codigo == 1
+    assert salidas.count("=" * 68) == 2  # mensaje enmarcado: se ve igual sin color
+    assert any(
+        "no se publica código con errores" in linea.lower() for linea in salidas
+    )
+
+
+def test_main_imprime_en_rojo_el_aborto_por_pruebas(monkeypatch):
+    # Consola interactiva de mentira: así `_preparar_salida` habilita el color.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("scripts.publicar._COLORES", False)
+    monkeypatch.setattr("scripts.publicar._consola_utf8", lambda: True)
+    monkeypatch.setattr(
+        "scripts.publicar._consola_interactiva", lambda flujo=None: True
+    )
+    monkeypatch.setattr(
+        "scripts.publicar._habilitar_color_en_windows", lambda: True
+    )
+    salidas: list[str] = []
+    codigo = main(
+        [],
+        correr=EjecutorFalso(status=" M app/main.py", fallar=("-m pytest",)),
+        consultar=ClienteFalso(),
+        buscar_programa=lambda nombre: nombre,
+        pausar=lambda segundos: None,
+        salida=salidas.append,
+    )
+
+    assert codigo == 1
+    rojas = [linea for linea in salidas if linea.startswith(ROJO)]
+    assert rojas, "el aborto por pruebas tiene que salir en rojo"
+    assert "publicación abortada" in rojas[0]
+    assert "=" * 68 not in salidas  # con color no hace falta el marco
+
+
+def test_fallas_de_pytest_lee_el_resumen():
+    texto = (
+        "FAILED tests/test_x.py::test_uno - AssertionError\n"
+        "ERROR tests/test_y.py::test_dos - RuntimeError\n"
+        "1 failed, 1 error, 3 passed in 1.00s"
+    )
+
+    assert fallas_de_pytest(texto) == [
+        "tests/test_x.py::test_uno",
+        "tests/test_y.py::test_dos",
+    ]
+    assert fallas_de_pytest("3 passed in 0.10s") == []
+
+
+def test_mostrar_salida_recorta_por_arriba_y_deja_pasar_todo():
+    lineas = [f"linea {indice}" for indice in range(10)]
+    recortadas: list[str] = []
+    todas: list[str] = []
+
+    mostrar_salida(recortadas.append, "\n".join(lineas), maximo=3)
+    mostrar_salida(todas.append, "\n".join(lineas), maximo=None)
+
+    assert recortadas == ["  linea 7", "  linea 8", "  linea 9"]
+    assert len(todas) == 10
+
+
+# --------------------------------------------------------------------------- #
+# GitHub: remoto, mensajes de commit y pistas de error
+# --------------------------------------------------------------------------- #
+
+
+def test_el_asunto_automatico_respeta_el_formato_pedido():
+    momento = datetime(2026, 10, 15, 8, 30)
+
+    assert asunto_automatico(momento) == (
+        "Actualización automática - Módulos Unificados [2026-10-15]"
+    )
+    assert momento_legible(momento) == "15/10/2026 08:30"
+
+
+def test_el_cuerpo_del_commit_lleva_la_fecha_la_hora_y_los_archivos():
+    cuerpo = cuerpo_del_commit(["app/main.py"], datetime(2026, 10, 15, 8, 30))
+
+    assert "15/10/2026 08:30" in cuerpo
+    assert "Archivos incluidos (1)" in cuerpo
+    assert "- app/main.py" in cuerpo
+
+
+def test_el_mensaje_manual_tiene_prioridad_sobre_el_automatico():
+    ejecutor = EjecutorFalso(status=" M app/main.py")
+    publicar_con(ejecutor, mensaje="Módulo 3 listo")
+
+    commit = next(c for c in ejecutor.secuencia() if c.startswith("git commit"))
+    assert "Módulo 3 listo" in commit
+    assert "Actualización automática" not in commit
+
+
+def test_exigir_remoto_devuelve_la_url_de_origin():
+    ejecutor = EjecutorFalso()
+
+    assert exigir_remoto("main", ejecutor) == (
+        "https://github.com/msappia-spec/odontologico.git"
+    )
+
+
+def test_sin_remoto_origin_la_publicacion_aborta_sin_commitear():
+    ejecutor = EjecutorFalso(status=" M app/main.py", remoto="")
+    with pytest.raises(ErrorPublicacion) as error:
+        publicar_con(ejecutor)
+
+    assert "origin" in str(error.value)
+    assert "git remote add origin" in " ".join(error.value.pistas)
+    assert not any(
+        comando.startswith(("git add", "git commit", "git push", "vercel"))
+        for comando in ejecutor.secuencia()
+    )
+
+
+@pytest.mark.parametrize(
+    ("detalle", "esperado"),
+    [
+        ("! [rejected] main -> main (non-fast-forward)", "git pull --rebase"),
+        (
+            "fatal: Authentication failed for 'https://github.com/msappia/x'",
+            "gh auth login",
+        ),
+        ("remote: Repository not found.", "git remote -v"),
+        ("remote: error: GH006: Protected branch update failed", "protegida"),
+        ("fatal: unable to access", "volvé a correr el comando"),
+    ],
+)
+def test_las_pistas_del_push_explican_los_fallos_tipicos(detalle, esperado):
+    assert any(esperado in pista for pista in pistas_de_push(detalle))
+
+
+def test_un_push_rechazado_agrega_las_pistas_al_error():
+    ejecutor = EjecutorFalso(
+        status=" M app/main.py",
+        fallar=("git push",),
+        salida_fallo="! [rejected] main -> main (fetch first)",
+    )
+    with pytest.raises(ErrorPublicacion) as error:
+        publicar_con(ejecutor)
+
+    assert "git pull --rebase origin main" in " ".join(error.value.pistas)
+    assert "git add -A" in ejecutor.secuencia()  # el commit local no se pierde
+
+
+# --------------------------------------------------------------------------- #
+# Vercel: enlace del proyecto, salida del deploy y dominio de producción
+# --------------------------------------------------------------------------- #
+
+
+def test_url_de_produccion_toma_el_ultimo_dominio_que_imprime_la_cli():
+    muestra = (
+        "Vercel CLI 33.0.1\n"
+        "Inspect: https://vercel.com/marcozface-2235/odontologico/abc123 "
+        "(copied to clipboard)\n"
+        "Production: https://odontologico-abc123-marcozface-2235.vercel.app [2s]\n"
+        "https://odontologico-omega.vercel.app [aliased]\n"
+    )
+
+    assert url_de_produccion(muestra) == "https://odontologico-omega.vercel.app"
+    assert url_de_produccion("") == URL_POR_DEFECTO
+
+
+def test_el_deploy_captura_la_salida_y_verifica_ese_dominio():
+    salidas: list[str] = []
+    cliente = ClienteFalso()
+    ejecutor = EjecutorFalso(
+        status=" M app/main.py",
+        salidas={
+            "vercel --prod": (
+                "Production: https://odontologico-prueba.vercel.app [1s]\n"
+            )
+        },
+    )
+    resultado = publicar_con(ejecutor, cliente, salida=salidas.append)
+
+    assert resultado.desplegado is True
+    assert resultado.url == "https://odontologico-prueba.vercel.app"
+    assert cliente.pedidas and all(
+        url.startswith("https://odontologico-prueba.vercel.app")
+        for url in cliente.pedidas
+    )
+    assert any("Production: https://odontologico-prueba" in c for c in salidas)
+    assert any("deploy terminado" in linea for linea in salidas)
+
+
+def test_proyecto_enlazado_detecta_la_carpeta_y_las_variables(tmp_path):
+    assert proyecto_enlazado(tmp_path, entorno={}) is False
+
+    (tmp_path / ".vercel").mkdir()
+    (tmp_path / ".vercel" / "repo.json").write_text("{}", encoding="utf-8")
+
+    assert proyecto_enlazado(tmp_path, entorno={}) is True
+    assert (
+        proyecto_enlazado(
+            tmp_path / "vacio",
+            entorno={"VERCEL_PROJECT_ID": "prj_x", "VERCEL_ORG_ID": "team_x"},
+        )
+        is True
+    )
+
+
+def test_sin_enlace_a_vercel_da_las_instrucciones(tmp_path):
+    with pytest.raises(ErrorPublicacion) as error:
+        exigir_proyecto_enlazado(tmp_path)
+
+    assert any("vercel link" in pista for pista in error.value.pistas)
+
+
+def test_el_deploy_no_corre_sin_enlace_al_proyecto(monkeypatch):
+    monkeypatch.setattr("scripts.publicar.proyecto_enlazado", lambda *a, **k: False)
+    ejecutor = EjecutorFalso(status=" M app/main.py")
+    with pytest.raises(ErrorPublicacion) as error:
+        publicar_con(ejecutor)
+
+    assert "vercel --prod --yes" not in ejecutor.secuencia()
+    assert any("vercel link" in pista for pista in error.value.pistas)
+
+
+# --------------------------------------------------------------------------- #
+# Consola: colores ANSI y UTF-8
+# --------------------------------------------------------------------------- #
+
+
+def test_rojo_respeta_los_colores_activos(monkeypatch):
+    monkeypatch.setattr("scripts.publicar._COLORES", False)
+    assert rojo("cuidado") == "cuidado"
+
+    monkeypatch.setattr("scripts.publicar._COLORES", True)
+    assert rojo("cuidado") == f"{ROJO}cuidado{RESET}"
+
+
+def test_los_colores_se_activan_solo_en_una_consola_interactiva(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("scripts.publicar._COLORES", False)
+    monkeypatch.setattr("scripts.publicar._consola_utf8", lambda: True)
+    monkeypatch.setattr(
+        "scripts.publicar._habilitar_color_en_windows", lambda: True
+    )
+
+    monkeypatch.setattr(
+        "scripts.publicar._consola_interactiva", lambda flujo=None: False
+    )
+    _preparar_salida()
+    assert colores_activos() is False  # salida redirigida: nada de códigos ANSI
+
+    monkeypatch.setattr(
+        "scripts.publicar._consola_interactiva", lambda flujo=None: True
+    )
+    _preparar_salida()
+    assert colores_activos() is True
+
+
+def test_no_color_apaga_los_colores(monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr("scripts.publicar._COLORES", False)
+    monkeypatch.setattr(
+        "scripts.publicar._consola_interactiva", lambda flujo=None: True
+    )
+    _preparar_salida()
+
+    assert colores_activos() is False
+
+
+def test_la_opcion_sin_colores_apaga_los_codigos_ansi(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("scripts.publicar._COLORES", False)
+    monkeypatch.setattr("scripts.publicar._consola_utf8", lambda: True)
+    monkeypatch.setattr(
+        "scripts.publicar._consola_interactiva", lambda flujo=None: True
+    )
+    monkeypatch.setattr(
+        "scripts.publicar._habilitar_color_en_windows", lambda: True
+    )
+    salidas: list[str] = []
+    codigo = main(
+        ["--simulacro", "--sin-colores"],
+        correr=EjecutorFalso(status=" M app/main.py"),
+        consultar=ClienteFalso(),
+        buscar_programa=lambda nombre: nombre,
+        pausar=lambda segundos: None,
+        salida=salidas.append,
+    )
+
+    assert codigo == 0
+    assert colores_activos() is False
+    assert not any("\033[" in linea for linea in salidas)
+    assert any("Simulacro terminado" in linea for linea in salidas)
 
 
 def test_main_sin_tests_no_corre_pytest():

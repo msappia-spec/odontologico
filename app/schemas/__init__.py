@@ -1,5 +1,10 @@
 """Esquemas Pydantic para validación/serialización de la API."""
 
+from app.schemas.arancel import (
+    ArancelObraSocialCreate,
+    ArancelObraSocialRead,
+    ArancelObraSocialUpdate,
+)
 from app.schemas.disponibilidad import (
     BloqueDisponible,
     DisponibilidadCreate,
@@ -19,6 +24,24 @@ from app.schemas.doctor import (
     DoctorReplace,
     DoctorUpdate,
 )
+from app.schemas.facturacion import (
+    CobrarMovimientoRequest,
+    DebitarMovimientoRequest,
+    DetalleMovimientoCajaRead,
+    FacturacionTurnoRead,
+    FacturarTurnoRequest,
+    LiquidacionObraSocialRequest,
+    LiquidacionProfesionalDoctorRead,
+    LiquidacionProfesionalesRead,
+    MovimientoCajaRead,
+    PresentacionObraSocialRead,
+    PresupuestoCobroRead,
+    PrestacionDisponibleRead,
+    PrestacionesDisponiblesRead,
+    PrestacionFacturadaCalculadaRead,
+    PrestacionFacturadaCreate,
+    ResumenCajaRead,
+)
 from app.schemas.historia_clinica import (
     ArchivoAdjuntoCreate,
     ArchivoAdjuntoRead,
@@ -32,6 +55,11 @@ from app.schemas.obra_social import (
     ObraSocialUpdate,
 )
 from app.schemas.paciente import PacienteCreate, PacienteRead, PacienteUpdate
+from app.schemas.prestacion import (
+    PrestacionCreate,
+    PrestacionRead,
+    PrestacionUpdate,
+)
 from app.schemas.turno import TurnoCreate, TurnoRead, TurnoUpdate
 from app.schemas.whatsapp import (
     RecordatorioPendiente,
@@ -41,9 +69,15 @@ from app.schemas.whatsapp import (
 )
 
 __all__ = [
+    "ArancelObraSocialCreate",
+    "ArancelObraSocialRead",
+    "ArancelObraSocialUpdate",
     "ArchivoAdjuntoCreate",
     "ArchivoAdjuntoRead",
     "BloqueDisponible",
+    "CobrarMovimientoRequest",
+    "DebitarMovimientoRequest",
+    "DetalleMovimientoCajaRead",
     "DisponibilidadCreate",
     "DisponibilidadEspecificaCreate",
     "DisponibilidadEspecificaRead",
@@ -57,10 +91,26 @@ __all__ = [
     "EvolucionMedicaCreate",
     "EvolucionMedicaRead",
     "ExcepcionFechaBase",
+    "FacturacionTurnoRead",
+    "FacturarTurnoRequest",
     "HistoriaClinicaDetalle",
     "HorariosDisponiblesRead",
+    "LiquidacionObraSocialRequest",
+    "LiquidacionProfesionalDoctorRead",
+    "LiquidacionProfesionalesRead",
+    "MovimientoCajaRead",
     "OrigenDisponibilidad",
+    "PresentacionObraSocialRead",
+    "PresupuestoCobroRead",
+    "PrestacionCreate",
+    "PrestacionDisponibleRead",
+    "PrestacionesDisponiblesRead",
+    "PrestacionFacturadaCalculadaRead",
+    "PrestacionFacturadaCreate",
+    "PrestacionRead",
+    "PrestacionUpdate",
     "RangoEfectivoRead",
+    "ResumenCajaRead",
     "ObraSocialCreate",
     "ObraSocialRead",
     "ObraSocialUpdate",
@@ -75,4 +125,5 @@ __all__ = [
     "RecordatorioPendiente",
     "RecordatorioResultado",
 ]
+
 
