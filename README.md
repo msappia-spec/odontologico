@@ -1,8 +1,10 @@
-# Sistema Odontológico — Módulo 1
+# Sistema Odontológico — Módulos 1 y 2
 
-**Gestión de Turnos y Automatización de WhatsApp** — Backend en **FastAPI + SQLAlchemy 2.0**.
+**Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
+**Módulo 2: Historias Clínicas y Evoluciones Médicas** — Backend en
+**FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
 
-Este módulo implementa:
+El **Módulo 1** implementa:
 
 1. **Modelo de datos** (`Doctor`, `Paciente`, `Turno` y `DisponibilidadDoctor`)
    con estados de turno y de notificación por WhatsApp, y restricciones de
@@ -29,6 +31,42 @@ Este módulo implementa:
 
 ---
 
+## 🩺 Módulo 2 · Historias Clínicas y Evoluciones Médicas
+
+1. **Ficha clínica por paciente** (`HistoriaClinica`): se crea **sola** con la
+   primera evolución (relación 1 a 1 con `Paciente`, defendida por el índice
+   único `uq_historia_paciente`) y lleva el **número de ficha** visible
+   (`HC-000123`, derivado del paciente e indexado como único en
+   `uq_historia_numero_ficha`).
+2. **Evoluciones médicas** (`EvolucionMedica`): **motivo de consulta**,
+   **diagnóstico**, **tratamiento efectuado** y **observaciones**, con el
+   **odontólogo que atendió** y la **fecha de atención** (`utcnow` por defecto,
+   UTC naive como todo el proyecto).
+3. **Radiografías y estudios** (`ArchivoAdjunto`): cada evolución puede llevar
+   sus archivos (`url_archivo`, `tipo_archivo`, `fecha_subida`). Se guarda la
+   **URL** del archivo, no el binario.
+4. **Regla estricta de inmutabilidad** (normativa de salud): una evolución **no
+   se puede editar ni borrar**. La API sólo expone **`POST`** (crear) y **`GET`**
+   (leer) para el recurso: no hay `PUT`, `PATCH` ni `DELETE` y cualquier intento
+   responde **405 Method Not Allowed**. La regla se defiende en **tres capas**:
+   las rutas, el servicio (no tiene funciones de edición/baja) y los eventos del
+   ORM —`before_update`/`before_delete` disparan `RegistroInmutableError`
+   (**403**)—, de modo que ni un script ni una consola puedan alterar un registro.
+5. **Búsqueda de pacientes** (`GET /pacientes?buscar=`): por **nombre** (sin
+   distinguir mayúsculas ni acentos: `suarez` encuentra a *Suárez*) o por **DNI**
+   parcial (se ignoran puntos y guiones: `30.123.456` encuentra a `30123456`).
+6. **Celular del odontólogo** (`/medico`): el botón *Historia clínica* abre un
+   **buscador por nombre o DNI**; al elegir al paciente se abre su ficha con la
+   **línea de tiempo** de sus atenciones —de la más nueva a la más vieja, con el
+   doctor que atendió en cada una— y un **formulario táctil** (motivo,
+   diagnóstico, tratamiento, observaciones) para guardar la evolución del día.
+7. **Panel Principal de la secretaría**: la misma consulta en **modo sólo
+   lectura** (buscador + línea de tiempo, sin formulario de alta) y el botón
+   *Historia* de cada fila de la tabla de pacientes, que abre la ficha en el
+   panel.
+
+---
+
 ## 📁 Estructura del proyecto
 
 ```
@@ -52,23 +90,29 @@ Odontologico/
 │   │   ├── paciente.py             # Modelo Paciente (obra_social_id → catálogo)
 │   │   ├── obra_social.py          # Modelo ObraSocial (catálogo de coberturas)
 │   │   ├── disponibilidad.py       # Modelo DisponibilidadDoctor (agenda semanal)
-│   │   └── turno.py                # Modelo Turno (+ constraints)
+│   │   ├── turno.py                # Modelo Turno (+ constraints)
+│   │   ├── historia_clinica.py     # Módulo 2: ficha clínica del paciente (1 a 1)
+│   │   ├── evolucion_medica.py     # Módulo 2: atención inmutable (bloquea UPDATE/DELETE)
+│   │   └── archivo_adjunto.py      # Módulo 2: radiografías/estudios de la evolución
 │   ├── schemas/                    # Esquemas Pydantic v2 (I/O de la API)
 │   │   ├── doctor.py, paciente.py, turno.py, whatsapp.py
 │   │   ├── obra_social.py          # Catálogo de obras sociales
-│   │   └── disponibilidad.py       # Rangos semanales y bloques ofrecidos
+│   │   ├── disponibilidad.py       # Rangos semanales y bloques ofrecidos
+│   │   └── historia_clinica.py     # Módulo 2: alta de evolución y ficha (sólo lectura)
 │   ├── services/                   # Lógica de negocio
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
 │   │   ├── doctor_service.py       # Alta, edición (PUT/PATCH) y baja lógica
-│   │   ├── paciente_service.py     # Alta/edición y resolución de la cobertura
+│   │   ├── paciente_service.py     # Alta/edición, búsqueda y resolución de la cobertura
 │   │   ├── obra_social_service.py  # CRUD del catálogo (nombre único, baja lógica)
 │   │   ├── disponibilidad_service.py # CRUD de la agenda semanal por odontólogo
+│   │   ├── historia_clinica_service.py # Módulo 2: ficha + alta/consulta de evoluciones
 │   │   └── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
 │   └── api/v1/
 │       ├── router.py               # Router agregador
 │       └── endpoints/
 │           ├── doctores.py         # Doctor: CRUD + baja lógica (DELETE)
 │           ├── pacientes.py, turnos.py
+│           ├── historias_clinicas.py # Módulo 2: historia clínica (sólo GET y POST)
 │           ├── obras_sociales.py   # Catálogo de obras sociales: CRUD + baja lógica
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
@@ -77,14 +121,15 @@ Odontologico/
 │   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
 │   └── static/                     # Interfaz web (panel de la secretaría + móvil)
 │       ├── index.html              # Estructura + Tailwind (CDN)
-│       ├── styles.css              # Componentes y animaciones
-│       ├── app.js                  # Lógica: fetch contra /api/v1
-│       ├── medico.html             # Vista móvil del odontólogo (agenda del día)
-│       ├── medico.css              # Ajustes mobile-first (táctil, hojas, safe-area)
-│       └── medico.js               # Selección del profesional + agenda + acciones
+│       ├── styles.css              # Componentes, animaciones y línea de tiempo clínica
+│       ├── app.js                  # Lógica: fetch contra /api/v1 (+ ficha en sólo lectura)
+│       ├── medico.html             # Vista móvil del odontólogo (agenda + historia clínica)
+│       ├── medico.css              # Ajustes mobile-first (táctil, hojas, timeline clínico)
+│       └── medico.js               # Profesional + agenda + acciones + nueva evolución
 ├── scripts/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
 │   ├── publicar.py                      # Publicar en un paso: pruebas + commit + push + deploy
+│   ├── migrar_historias_clinicas.py      # Migración Módulo 2: ficha, evoluciones y adjuntos
 │   ├── migrar_turnos_unique_parcial.py  # Migración al índice único parcial de turnos
 │   ├── migrar_pacientes_datos.py        # Migración: DNI y cobertura del paciente
 │   └── migrar_obra_social.py            # Migración: obra_social (texto) → catálogo
@@ -93,6 +138,7 @@ Odontologico/
 │   ├── test_contrato_http_turnos.py # Contrato HTTP: PATCH de turnos y CORS
 │   ├── test_disponibilidad.py      # Agenda semanal y bloques ofrecidos
 │   ├── test_doctores.py            # Edición, baja lógica y reactivación del doctor
+│   ├── test_historias_clinicas.py  # Módulo 2: alta, cronología e inmutabilidad
 │   ├── test_obras_sociales.py      # Catálogo de coberturas y su vínculo con pacientes
 │   ├── test_pacientes.py
 │   ├── test_recordatorios_click_to_chat.py # Enlaces wa.me y recordatorios pendientes
@@ -613,6 +659,25 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > También es idempotente, guarda una copia de seguridad del `.db` y documenta el
 > equivalente en PostgreSQL para quien cambie de motor.
 >
+> **Migración de la historia clínica (Módulo 2).** Las bases creadas antes de la
+> historia clínica no reciben las tablas nuevas con `create_all` si la app no se
+> reinicia; para crearlas **explícitamente** (operación puramente aditiva, no toca
+> datos existentes), con la app detenida:
+>
+> ```bash
+> python -m scripts.migrar_historias_clinicas
+> ```
+>
+> Crea `historias_clinicas`, `evoluciones_medicas` y `archivos_adjuntos` con sus
+> índices (``uq_historia_paciente``, ``uq_historia_numero_ficha``, el compuesto
+> ``ix_evolucion_historia_fecha`` y ``ix_adjunto_evolucion``), completa los índices
+> que falten si el archivo venía de una corrida interrumpida, guarda una copia del
+> `.db` y verifica que `pacientes`, `doctores` y `turnos` conserven sus filas. Es
+> idempotente: si ya está todo creado informa *"nada que migrar"*.
+>
+> En PostgreSQL, `Base.metadata.create_all` (que corre al arrancar la app) también
+> crea las tres tablas; el encabezado del script incluye el DDL equivalente.
+>
 > **Migración de la cobertura al catálogo.** Las bases creadas con el campo de
 > texto `Paciente.obra_social` necesitan el paso a la clave foránea
 > `obra_social_id` (tabla `obras_sociales`, nombre único sin distinguir
@@ -657,9 +722,13 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `DELETE`| `/doctores/{id}/disponibilidad/{rango_id}` | Eliminar un rango (`404` si no existe o pertenece a otro odontólogo) |
 | `GET`  | `/doctores/{id}/horarios-disponibles` | **Bloques libres** de una fecha según la agenda configurada (`?fecha=AAAA-MM-DD&duracion_minutos=5..240`, 30 por defecto) |
 | `POST` | `/pacientes` | Crear paciente (DNI único → `409` si ya existe) |
-| `GET`  | `/pacientes` | Listar pacientes (`?telefono=...&dni=...`) |
+| `GET`  | `/pacientes` | Listar pacientes (`?telefono=...&dni=...`, exactos, y **`?buscar=`** por nombre sin acentos o DNI con puntos) |
 | `GET`  | `/pacientes/{id}` | Obtener paciente |
 | `PATCH`| `/pacientes/{id}` | Actualizar paciente (parcial: sólo los campos enviados) |
+| `POST` | `/pacientes/{id}/evoluciones` | **Módulo 2:** registrar una evolución médica (crea la ficha del paciente) |
+| `GET`  | `/pacientes/{id}/evoluciones` | **Módulo 2:** línea de tiempo del paciente (de la más nueva a la más vieja) |
+| `GET`  | `/pacientes/{id}/historia-clinica` | **Módulo 2:** ficha completa + línea de tiempo (sólo lectura) |
+| `GET`  | `/evoluciones/{id}` | **Módulo 2:** detalle de una evolución médica |
 | `POST` | `/obras-sociales` | Crear obra social (nombre único → `409`) |
 | `GET`  | `/obras-sociales` | Listar el catálogo (`?activas=true/false`, `?nombre=`) |
 | `GET`  | `/obras-sociales/{id}` | Obtener obra social |
@@ -681,6 +750,15 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 > En cambio, `/doctores/{id}` y `/obras-sociales/{id}` **sí** exponen `PUT`,
 > `PATCH` y `DELETE` (este último como baja lógica), y la agenda del odontólogo
 > (`/doctores/{id}/disponibilidad`) usa `PUT`/`DELETE` para sus rangos.
+>
+> **Inmutabilidad de la historia clínica (Módulo 2).** Las evoluciones médicas
+> son registros con valor legal: **sólo** se exponen `POST` (alta) y `GET`
+> (lectura). No hay `PUT`, `PATCH` ni `DELETE` para
+> `/pacientes/{id}/evoluciones`, `/pacientes/{id}/historia-clinica` ni
+> `/evoluciones/{id}`: cualquier intento responde **405**. La regla se controla en
+> tres capas (rutas, servicio y eventos del ORM → `403`
+> `RegistroInmutableError`) y
+> `tests/test_historias_clinicas.py` la vigila en cada corrida de las pruebas.
 >
 > **CORS.** `app/main.py` registra `CORSMiddleware` con
 > `allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]` (la lista
@@ -732,6 +810,39 @@ curl -X POST $API/pacientes -H "Content-Type: application/json" \
 # Actualizar los datos administrativos de un paciente (null quita la cobertura)
 curl -X PATCH $API/pacientes/1 -H "Content-Type: application/json" \
   -d '{"obra_social_id":2,"numero_afiliado":"SM-998877"}'
+
+# --- Módulo 2: historia clínica y evoluciones médicas -----------------------
+
+# Buscar al paciente por nombre (sin acentos) o por DNI (con o sin puntos)
+curl "$API/pacientes?buscar=suarez"
+curl "$API/pacientes?buscar=30.123.456"
+
+# Registrar una evolución: crea la ficha del paciente si todavía no la tenía
+# (la ficha se numera sola: HC-000123) y guarda la radiografía de la atención.
+curl -X POST $API/pacientes/1/evoluciones -H "Content-Type: application/json" -d '{
+  "doctor_id": 1,
+  "motivo_consulta": "Dolor en el molar inferior derecho",
+  "diagnostico": "Pulpitis irreversible",
+  "tratamiento_efectuado": "Endodoncia pieza 46",
+  "observaciones": "Indicado ibuprofeno 400 mg cada 8 h",
+  "archivos": [
+    {"url_archivo": "https://estudios.local/rx-1082.png", "tipo_archivo": "RADIOGRAFIA"}
+  ]}'
+
+# Línea de tiempo del paciente (de la atención más nueva a la más vieja)
+curl "$API/pacientes/1/evoluciones?limit=20"
+
+# Ficha completa (número de ficha + todas las atenciones): lo que muestra el
+# celular del odontólogo y el Panel Principal de la secretaría (sólo lectura)
+curl "$API/pacientes/1/historia-clinica"
+
+# Una evolución puntual
+curl "$API/evoluciones/1"
+
+# NO EXISTEN (responden 405 Method Not Allowed): los registros clínicos son
+# inmutables. No hay forma de editar ni de borrar una evolución por la API.
+curl -X PATCH $API/evoluciones/1 -H "Content-Type: application/json" -d '{"diagnostico":"Otro"}'
+curl -X DELETE $API/evoluciones/1
 
 # Agenda semanal del odontólogo 1: lunes con dos tramos (mañana y tarde)
 curl -X POST $API/doctores/1/disponibilidad -H "Content-Type: application/json" \

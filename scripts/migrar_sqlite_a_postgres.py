@@ -265,16 +265,22 @@ def migrar(
 
         for tabla in tablas:
             filas = _filas(sesion_origen, tabla)
-            if modo == "agregar" and filas:
-                existentes = _claves_existentes(sesion_destino, tabla)
-                columnas_pk = list(tabla.primary_key.columns)
-                completas = [
-                    fila
-                    for fila in filas
-                    if _clave(fila, columnas_pk) not in existentes
-                ]
-                resultado.salteadas[tabla.name] = len(filas) - len(completas)
-                filas = completas
+            if modo == "agregar":
+                # El contador se registra para **todas** las tablas —aunque el
+                # origen todavía no tenga filas (p. ej. la historia clínica en una
+                # base sin usar)— para que el informe sea comparable con
+                # ``origen_filas`` y no falten claves al comparar los dos mapas.
+                resultado.salteadas[tabla.name] = 0
+                if filas:
+                    existentes = _claves_existentes(sesion_destino, tabla)
+                    columnas_pk = list(tabla.primary_key.columns)
+                    completas = [
+                        fila
+                        for fila in filas
+                        if _clave(fila, columnas_pk) not in existentes
+                    ]
+                    resultado.salteadas[tabla.name] = len(filas) - len(completas)
+                    filas = completas
             if filas:
                 # INSERT de **Core** (``tabla.insert()``): el bulk del ORM
                 # reinterpreta las claves de los diccionarios y termina armando

@@ -16,9 +16,11 @@ Concentra las reglas de negocio del registro de pacientes, en línea con
 """
 
 import logging
+import re
+import unicodedata
 from typing import Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -28,6 +30,38 @@ from app.schemas.paciente import PacienteCreate, PacienteUpdate
 from app.services import obra_social_service
 
 logger = logging.getLogger("app.services.pacientes")
+
+# Acentos que se pliegan para buscar por nombre (mismo criterio que el buscador
+# del celular: "Suarez" encuentra a "Suárez").
+_ACENTOS = (
+    ("á", "a"),
+    ("é", "e"),
+    ("í", "i"),
+    ("ó", "o"),
+    ("ú", "u"),
+    ("ü", "u"),
+    ("ñ", "n"),
+)
+
+
+def _sin_acentos(expresion):
+    """Devuelve la expresión SQL en minúsculas y sin acentos (portable).
+
+    No todos los motores traen ``unaccent`` (SQLite no lo tiene), así que se
+    pliegan los acentos con ``replace`` —funciona igual en SQLite y PostgreSQL—.
+    """
+    expr = func.lower(expresion)
+    for con_acento, sin_acento in _ACENTOS:
+        expr = func.replace(expr, con_acento, sin_acento)
+    return expr
+
+
+def _normalizar_busqueda(texto: str) -> str:
+    """Normaliza el texto buscado: minúsculas y sin acentos."""
+    return (
+        unicodedata.normalize("NFD", texto).encode("ascii", "ignore").decode().lower()
+    )
+
 
 
 def obtener_paciente(db: Session, paciente_id: int) -> Paciente:
@@ -112,13 +146,36 @@ def listar_pacientes(
     db: Session,
     telefono: Optional[str] = None,
     dni: Optional[str] = None,
+    buscar: Optional[str] = None,
 ) -> Sequence[Paciente]:
-    """Devuelve pacientes ordenados por nombre, con filtros exactos opcionales."""
+    """Devuelve pacientes ordenados por nombre, con filtros opcionales.
+
+    Filtros:
+
+    * ``telefono`` y ``dni``: coincidencia **exacta** (los usa la integración con
+      WhatsApp y los clientes que ya conocen el dato).
+    * ``buscar``: búsqueda por **nombre o documento** para las pantallas de
+      consulta (historia clínica). El nombre se compara sin distinguir
+      mayúsculas ni acentos; el documento se compara parcialmente y sin los
+      separadores habituales, así que ``30.123.456`` encuentra a ``30123456``.
+    """
     stmt = select(Paciente).order_by(Paciente.nombre)
     if telefono is not None:
         stmt = stmt.where(Paciente.telefono == telefono)
     if dni is not None:
         stmt = stmt.where(Paciente.dni == dni)
+
+    if buscar and buscar.strip():
+        texto = buscar.strip()
+        buscado = _normalizar_busqueda(texto)
+        documento = re.sub(r"[\s.\-]", "", texto)
+        criterios = [_sin_acentos(Paciente.nombre).like(f"%{buscado}%")]
+        if documento:
+            criterios.append(
+                func.lower(Paciente.dni).like(f"%{documento.lower()}%")
+            )
+        stmt = stmt.where(or_(*criterios))
+
     return db.execute(stmt).scalars().all()
 
 

@@ -37,6 +37,9 @@
     agendaDoctor: "",
     turnoEditId: null,
     pacienteEditId: null,
+    // Módulo 2: paciente cuya historia clínica se consulta en el Panel Principal
+    // (sólo lectura; el alta de evoluciones vive en la vista móvil del odontólogo).
+    histPaciente: null,
     // Agenda semanal de los odontólogos (GET /doctores/{id}/disponibilidad):
     // `disponibilidad` es la lista plana de rangos y `dispPorDoctor` el mapa por
     // profesional que consume calendar.js para armar los bloques del día.
@@ -637,12 +640,169 @@
           `<td>${p.email ? esc(p.email) : guion}</td>` +
           `<td><span class="badge badge-brand">${n}</span></td>` +
           `<td class="text-right">` +
+          `<div class="flex items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-ghost btn-sm" data-historia="${p.id}" ` +
+          `title="Ver la historia clínica de ${esc(p.nombre)}">Historia</button>` +
           `<button type="button" class="btn btn-ghost btn-sm" data-editar-paciente="${p.id}" ` +
           `title="Editar los datos de ${esc(p.nombre)}">Editar</button>` +
-          `</td></tr>`
+          `</div></td></tr>`
         );
       })
       .join("");
+  }
+
+  /* ================== Módulo 2 · Historia clínica (sólo lectura) =========== */
+  /* La secretaría consulta el historial de un paciente: busca por nombre o DNI
+     (la búsqueda la resuelve el backend, sin acentos y con el DNI sin puntos) y
+     arma la línea de tiempo de atenciones con ``GET
+     /pacientes/{id}/historia-clinica``.
+
+     Este panel **no escribe** evoluciones médicas: no hay ninguna llamada al
+     endpoint de alta. Las evoluciones las carga el odontólogo desde su celular y
+     son inmutables (la API no expone ``PUT``/``PATCH``/``DELETE``). */
+  let histTimer = null;
+
+  function fichaHistoriaHTML(p, activo) {
+    return (
+      `<button type="button" class="hist-ficha${activo ? " hist-ficha-activa" : ""}" ` +
+      `data-hist-paciente="${p.id}">` +
+      `<div class="min-w-0 flex-1">` +
+      `<span class="hist-ficha-nombre">${esc(p.nombre)}</span>` +
+      `<span class="hist-ficha-detalle">${esc(p.dni ? `DNI ${p.dni}` : p.telefono)}</span>` +
+      `</div>` +
+      `<svg class="w-4 h-4 flex-none text-slate-400" viewBox="0 0 24 24" fill="none" ` +
+      `stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">` +
+      `<path d="m9 18 6-6-6-6"/></svg>` +
+      `</button>`
+    );
+  }
+
+  /* Resultados del buscador: hasta 20 fichas, con la elegida marcada. */
+  function renderResultadosHistoria(pacientes, consulta) {
+    const cont = document.getElementById("hist-panel-resultados");
+    if (!cont) return;
+    if (!consulta) {
+      cont.innerHTML =
+        `<p class="hist-nota">Escribí al menos dos letras del nombre, o el DNI, y elegí el paciente.</p>`;
+      return;
+    }
+    if (!pacientes.length) {
+      cont.innerHTML = `<p class="hist-nota">Sin resultados para “${esc(consulta)}”.</p>`;
+      return;
+    }
+    cont.innerHTML = pacientes
+      .slice(0, 20)
+      .map((p) => fichaHistoriaHTML(p, String(p.id) === String(state.histPaciente)))
+      .join("");
+  }
+
+  function programarBusquedaHistoria(texto) {
+    if (histTimer) clearTimeout(histTimer);
+    histTimer = setTimeout(() => buscarHistoriaPanel(texto), 220);
+  }
+
+  async function buscarHistoriaPanel(texto) {
+    const cont = document.getElementById("hist-panel-resultados");
+    if (!cont) return;
+    const consulta = String(texto || "").trim();
+    if (consulta.length < 2) { renderResultadosHistoria([], ""); return; }
+    cont.innerHTML = `<p class="hist-nota">Buscando…</p>`;
+    try {
+      const pacientes = await api(`/pacientes?buscar=${encodeURIComponent(consulta)}`);
+      renderResultadosHistoria(Array.isArray(pacientes) ? pacientes : [], consulta);
+    } catch (err) {
+      cont.innerHTML = `<p class="hist-nota">${esc(err.message)}</p>`;
+    }
+  }
+
+  function vacioHistoria(titulo, sub) {
+    return (
+      `<div class="hist-vacio">` +
+      `<p class="font-semibold text-slate-600">${esc(titulo)}</p>` +
+      (sub ? `<p class="mt-1">${esc(sub)}</p>` : "") +
+      `</div>`
+    );
+  }
+
+  /* Una atención de la línea de tiempo: fecha, odontólogo y campos clínicos. */
+  function evolucionHistoriaHTML(ev) {
+    const campos = [
+      ["Motivo de consulta", ev.motivo_consulta],
+      ["Diagnóstico", ev.diagnostico],
+      ["Tratamiento efectuado", ev.tratamiento_efectuado],
+      ["Observaciones", ev.observaciones],
+    ].filter((campo) => campo[1]);
+    const archivos = Array.isArray(ev.archivos) ? ev.archivos : [];
+    const hora = parteHora(ev.fecha_atencion);
+    return (
+      `<article class="hist-item"><div class="hist-cuerpo">` +
+      `<p class="hist-fecha">${esc(fechaLarga(parteFecha(ev.fecha_atencion)))}` +
+      (hora !== "00:00" ? ` · ${esc(hora)} hs` : "") +
+      `</p>` +
+      `<span class="hist-doctor">${esc(ev.doctor_nombre || `Odontólogo #${ev.doctor_id}`)}` +
+      (ev.doctor_especialidad ? ` · ${esc(ev.doctor_especialidad)}` : "") +
+      `</span>` +
+      `<div class="hist-campos">` +
+      campos
+        .map(
+          (campo) =>
+            `<div><p class="hist-campo-titulo">${esc(campo[0])}</p>` +
+            `<p class="hist-campo-texto">${esc(campo[1])}</p></div>`
+        )
+        .join("") +
+      `</div>` +
+      (archivos.length
+        ? `<div class="hist-archivos">` +
+          archivos
+            .map(
+              (a) =>
+                `<a class="hist-archivo" href="${esc(a.url_archivo)}" target="_blank" ` +
+                `rel="noopener">${esc(a.tipo_archivo)}</a>`
+            )
+            .join("") +
+          `</div>`
+        : "") +
+      `</div></article>`
+    );
+  }
+
+  /* Abre la ficha de un paciente en el Panel Principal (sólo lectura). Se usa
+     desde el buscador y desde el botón "Historia" de la tabla de pacientes. */
+  async function abrirHistoriaPanel(pacienteId) {
+    const cont = document.getElementById("hist-panel-timeline");
+    if (!cont) return;
+    const paciente =
+      state.pacientes.find((p) => String(p.id) === String(pacienteId)) || null;
+    state.histPaciente = Number(pacienteId);
+    document.getElementById("hist-panel-paciente").textContent = paciente
+      ? paciente.nombre
+      : `Paciente #${pacienteId}`;
+    document.getElementById("hist-panel-total").textContent = "";
+    document.getElementById("hist-panel-ficha").textContent = "Cargando…";
+    // La ficha elegida queda fija como único resultado del buscador.
+    renderResultadosHistoria(paciente ? [paciente] : [], paciente ? paciente.nombre : String(pacienteId));
+    cont.innerHTML = `<p class="hist-nota">Cargando la historia clínica…</p>`;
+    try {
+      const detalle = await api(`/pacientes/${pacienteId}/historia-clinica`);
+      document.getElementById("hist-panel-paciente").textContent =
+        detalle.paciente_nombre +
+        (detalle.paciente_dni ? ` · DNI ${detalle.paciente_dni}` : "");
+      document.getElementById("hist-panel-total").textContent =
+        detalle.total_evoluciones === 1
+          ? "1 atención registrada"
+          : `${detalle.total_evoluciones} atenciones registradas`;
+      document.getElementById("hist-panel-ficha").textContent = `Ficha ${detalle.numero_ficha}`;
+      const evoluciones = Array.isArray(detalle.evoluciones) ? detalle.evoluciones : [];
+      cont.innerHTML = evoluciones.length
+        ? evoluciones.map(evolucionHistoriaHTML).join("")
+        : vacioHistoria(
+            "Sin atenciones registradas",
+            "Cuando el odontólogo cargue la primera evolución, va a aparecer acá."
+          );
+    } catch (err) {
+      document.getElementById("hist-panel-ficha").textContent = "Sin ficha abierta";
+      cont.innerHTML = `<p class="hist-nota">${esc(err.message)}</p>`;
+    }
   }
 
   /* Odontólogos que pueden recibir turnos: los que están activos. Las consultas
@@ -652,7 +812,6 @@
   function doctoresActivos() {
     return state.doctores.filter((d) => d.activo);
   }
-
   /* Desplegable de obras sociales del formulario de pacientes: sólo activas, más
      la opción "sin cobertura". Se preserva la selección actual. */
   function cargarObrasSocialesSelect() {
@@ -2274,6 +2433,29 @@
 
     document.querySelectorAll("[data-goto]").forEach((b) =>
       b.addEventListener("click", () => cambiarVista(b.dataset.goto)));
+
+    /* Módulo 2 · Historia clínica: buscador del Panel Principal y delegación de
+       clics (las fichas de resultado y el botón "Historia" de la tabla de
+       pacientes se redibujan en cada carga). Sólo lectura: no hay alta acá. */
+    const buscadorHistoria = document.getElementById("hist-panel-buscar");
+    if (buscadorHistoria) {
+      buscadorHistoria.addEventListener("input", function () {
+        programarBusquedaHistoria(this.value);
+      });
+    }
+    document.addEventListener("click", function (e) {
+      const ficha = e.target.closest("[data-hist-paciente]");
+      if (ficha) {
+        abrirHistoriaPanel(ficha.dataset.histPaciente);
+        return;
+      }
+      const boton = e.target.closest("[data-historia]");
+      if (boton) {
+        // Desde la tabla de pacientes: se abre el Panel Principal con la ficha.
+        cambiarVista("dashboard");
+        abrirHistoriaPanel(boton.dataset.historia);
+      }
+    });
 
     document.getElementById("btn-menu").addEventListener("click", () =>
       document.getElementById("sidebar").classList.toggle("open"));

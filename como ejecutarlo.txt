@@ -47,8 +47,23 @@ El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistem
 6. Tocás el **tilde verde** ✔️ de un turno **pendiente** → *Confirmar la asistencia*: el turno queda **CONFIRMADO** (verde) de un solo toque, para el paciente que avisó por teléfono o ya llegó al consultorio. No hace falta que responda el WhatsApp.
 7. Tocás el **cesto** 🗑️ de un turno → confirmar → pasa a **CANCELADO** (gris, tachado) y el horario vuelve a ofrecerse como disponible.
 8. Todo lo que agendás, reprogramás, confirmás o cancelás acá aparece al instante en el **Panel Principal** de la secretaría (y a la inversa). En el panel la misma acción es el botón **Confirmar asistencia** de la tarjeta del turno.
+9. Tocás el botón de **historia clínica** (segundo ícono del encabezado, 📋) → **buscás al paciente por nombre o DNI** → elegís la ficha y se abre su **Historia Clínica**: la **línea de tiempo** con todas sus atenciones (de la más nueva a la más vieja, con el odontólogo que atendió en cada una) y, arriba, el **formulario para cargar la evolución** de la consulta (Motivo, Diagnóstico, Tratamiento y Observaciones). Al guardar, la atención queda registrada y aparece también en el panel de la secretaría.
 
 > ⚙️ Si tocás el código **del backend** (archivos `.py`), hay que **reiniciar** uvicorn para que tome los cambios. El **HTML/CSS/JS** de la vista móvil se recarga solo con F5 (los sirve desde disco).
+
+## 🩺 Módulo 2 · Historia clínica y evoluciones
+
+- **Dónde se carga:** sólo desde el **celular del odontólogo** (`/medico`), con el botón de la ficha del encabezado. La **secretaría consulta** el historial en modo **sólo lectura** desde el Panel Principal: la tarjeta *Historias clínicas* y el botón *Historia* de cada fila de la tabla de pacientes.
+- **Ficha automática:** el paciente no necesita tener nada cargado: con la **primera evolución** se crea su ficha y se numera sola (`HC-000123`).
+- **⚠️ Las evoluciones NO se pueden editar ni borrar** (normativa de salud): no hay botón de edición, no existe endpoint `PUT`/`PATCH`/`DELETE` y el ORM bloquea cualquier intento. Si un texto salió mal se corrige con una **evolución nueva** que lo aclare: el historial queda completo y auditable.
+- **Radiografías:** se guardan como **enlace** al archivo (`url_archivo`) con su tipo (`RADIOGRAFIA`, `FOTO`, `ESTUDIO`…), así la base no se llena de imágenes.
+- **Bases ya creadas:** para que aparezcan las tablas nuevas sin borrar nada (una sola vez, con el servidor detenido):
+  ```powershell
+  .\.venv\Scripts\python.exe -m scripts.migrar_historias_clinicas
+  ```
+  Es idempotente (si ya están, avisa *"nada que migrar"*), deja copia del `.db` y no toca pacientes, odontólogos ni turnos.
+- **Pruebas:** `tests/test_historias_clinicas.py` (25 pruebas: alta, ficha, cronología, búsqueda e inmutabilidad).
+- **Buscar sin acentos:** `suarez` encuentra a *Suárez* y `30.123.456` encuentra a `30123456` (el buscador normaliza el nombre y limpia el documento).
 
 ## ☁️ Ya está subido a internet (Vercel)
 
@@ -61,6 +76,9 @@ https://odontologico-omega.vercel.app/medico
 Panel de la secretaría: `https://odontologico-omega.vercel.app/`
 Documentación de la API: `https://odontologico-omega.vercel.app/docs`
 Salud del servicio: `https://odontologico-omega.vercel.app/health` → `{"status":"ok",...}`
+.\publicar.bat
+
+
 
 El proyecto en Vercel es **`marcozface-2235/odontologico`** (deploy hecho por CLI
 el 13/10/2026, *Ready in 35s*).

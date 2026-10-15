@@ -883,3 +883,97 @@ select.field {
 }
 #agenda-origen:empty { margin-top: 0; }
 
+/* ==========================================================================
+   Módulo 2 · Historia clínica (consulta de sólo lectura en el panel)
+   --------------------------------------------------------------------------
+   La tarjeta "Historias clínicas" del Panel Principal: buscador de pacientes a
+   la izquierda y línea de tiempo de las atenciones a la derecha. Misma estética
+   que el timeline del calendario (punto de color sobre la línea vertical).
+   ========================================================================== */
+.hist-resultados {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  margin-top: .5rem;
+  max-height: 21rem;
+  overflow-y: auto;
+}
+.hist-ficha {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .5rem .6rem;
+  text-align: left;
+  background: #f8fafc;
+  border: 1px solid transparent;
+  border-radius: .7rem;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.hist-ficha:hover { background: var(--brand-50); border-color: var(--brand-200); }
+.hist-ficha-activa { background: var(--brand-50); border-color: var(--brand-400); }
+.hist-ficha-nombre { display: block; font-size: .85rem; font-weight: 700; color: #0f1c24; }
+.hist-ficha-detalle { display: block; font-size: .72rem; color: #64748b; }
+.hist-nota { padding: .5rem .2rem; font-size: .78rem; color: #94a3b8; }
+
+/* Línea de tiempo: una tarjeta por atención, con el punto sobre la línea. */
+.hist-timeline {
+  position: relative;
+  padding-left: 1rem;
+  border-left: 2px solid #e2e8f0;
+}
+.hist-timeline:empty { border-left: 0; padding-left: 0; }
+.hist-item { position: relative; }
+.hist-item + .hist-item { margin-top: .7rem; }
+.hist-item::before {
+  content: "";
+  position: absolute;
+  left: -1.36rem;
+  top: 1rem;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2.5px solid var(--brand-500);
+}
+.hist-cuerpo {
+  padding: .75rem .85rem;
+  background: #fff;
+  border: 1px solid #e6ecf1;
+  border-radius: .75rem;
+}
+.hist-fecha { font-size: .78rem; font-weight: 800; color: #0f1c24; text-transform: capitalize; }
+.hist-doctor { display: block; margin-top: .1rem; font-size: .74rem; font-weight: 700; color: var(--brand-700); }
+.hist-campos { display: flex; flex-direction: column; gap: .45rem; margin-top: .55rem; }
+.hist-campo-titulo {
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.hist-campo-texto { font-size: .82rem; line-height: 1.45; color: #33454f; white-space: pre-wrap; }
+.hist-archivos { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .55rem; }
+.hist-archivo {
+  display: inline-flex;
+  align-items: center;
+  padding: .2rem .55rem;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-200);
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--brand-700);
+  text-decoration: none;
+}
+.hist-vacio {
+  padding: 1.2rem;
+  text-align: center;
+  font-size: .82rem;
+  color: #94a3b8;
+  background: #fff;
+  border: 1px dashed #d8e0e8;
+  border-radius: .75rem;
+}
+

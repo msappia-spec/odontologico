@@ -53,6 +53,9 @@
       <button type="button" id="btn-refrescar-agenda" class="m-icon-btn" aria-label="Actualizar la agenda" title="Actualizar">
         <svg id="ico-refrescar" class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M21 3v6h-6"/></svg>
       </button>
+      <button type="button" id="btn-historia-clinica" class="m-icon-btn" aria-label="Historia clínica del paciente" title="Historia clínica">
+        <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><path d="M9 4V3h6v1M12 10v6M9 13h6"/></svg>
+      </button>
       <button type="button" id="btn-cambiar-medico" class="m-icon-btn" aria-label="Cambiar de odontólogo" title="Cambiar de odontólogo">
         <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3.1a4 4 0 0 1 0 7.8"/><path d="M21 21v-2a4 4 0 0 0-3-3.9"/><path d="M8 21v-2a4 4 0 0 1 4-4h1"/><circle cx="9" cy="7" r="4"/><path d="M17 17l4 4M21 17l-4 4"/></svg>
       </button>
@@ -121,6 +124,60 @@
       </section>
 
       <p id="agenda-ayuda" class="m-nota">Tocá un <strong>horario libre</strong> para agendar, el <strong>lápiz</strong> para editar un turno y el <strong>cesto</strong> para cancelarlo.</p>
+    </section>
+
+    <!-- ============ PANTALLA 3 · HISTORIA CLÍNICA (Módulo 2) ============ -->
+    <!-- Se abre con el botón de la ficha del encabezado: se busca el paciente
+         (nombre o DNI), se muestra su línea de tiempo —de la atención más nueva
+         a la más vieja— y se carga la evolución de la consulta actual. -->
+    <section id="pantalla-historia" class="m-pantalla hide">
+      <div class="m-hist-cabecera">
+        <button type="button" id="btn-historia-volver" class="m-icon-btn" aria-label="Volver a la agenda" title="Volver a la agenda">
+          <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="m-hist-datos">
+          <p id="hist-paciente" class="m-hist-nombre">Paciente</p>
+          <p id="hist-ficha" class="m-hist-sub">—</p>
+        </div>
+        <span id="hist-total" class="badge badge-brand">0</span>
+      </div>
+
+      <!-- Único formulario de escritura del módulo: la evolución sólo se crea. -->
+      <form id="form-evolucion" class="m-form m-hist-form" novalidate>
+        <input type="hidden" id="evo-doctor-id" />
+        <p class="m-hist-form-titulo">Nueva evolución</p>
+        <p class="m-hist-nota">Una evolución es un registro legal: se guarda y no se puede editar ni eliminar. Revisá los textos antes de confirmar.</p>
+        <div class="m-campo">
+          <label class="m-label" for="evo-fecha">Fecha de la atención</label>
+          <input class="m-input" id="evo-fecha" type="date" />
+        </div>
+        <div class="m-campo">
+          <label class="m-label" for="evo-motivo">Motivo de consulta</label>
+          <textarea class="m-input m-textarea" id="evo-motivo" rows="2" required
+                    placeholder="Ej.: dolor en el molar inferior derecho"></textarea>
+        </div>
+        <div class="m-campo">
+          <label class="m-label" for="evo-diagnostico">Diagnóstico</label>
+          <textarea class="m-input m-textarea" id="evo-diagnostico" rows="2" required
+                    placeholder="Ej.: pulpitis irreversible"></textarea>
+        </div>
+        <div class="m-campo">
+          <label class="m-label" for="evo-tratamiento">Tratamiento efectuado</label>
+          <textarea class="m-input m-textarea" id="evo-tratamiento" rows="2" required
+                    placeholder="Ej.: endodoncia pieza 46"></textarea>
+        </div>
+        <div class="m-campo">
+          <label class="m-label" for="evo-observaciones">Observaciones <span class="m-label-hint">(opcional)</span></label>
+          <textarea class="m-input m-textarea" id="evo-observaciones" rows="2"
+                    placeholder="Indicaciones, próxima cita…"></textarea>
+        </div>
+        <p id="evo-error" class="m-error hide" role="alert"></p>
+        <button type="submit" id="btn-guardar-evolucion" class="m-btn m-btn-primary">Guardar evolución</button>
+      </form>
+
+      <!-- Línea de tiempo: de la atención más nueva a la más vieja. -->
+      <h2 class="m-seccion-titulo">Evoluciones</h2>
+      <div id="hist-timeline" class="m-timeline m-hist-timeline"></div>
     </section>
   </main>
   <!-- ========= HOJA DESLIZANTE · AGENDAR / EDITAR PACIENTE Y HORARIO ========= -->
@@ -248,6 +305,26 @@
         <button type="button" class="m-btn m-btn-ghost" data-cerrar-hoja>Volver</button>
         <button type="button" id="btn-confirmar-cancelar" class="m-btn m-btn-danger">Sí, cancelar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ====== HOJA DESLIZANTE · BUSCAR PACIENTE PARA SU HISTORIA CLÍNICA ====== -->
+  <div id="hoja-historia" class="m-sheet hide" role="dialog" aria-modal="true" aria-labelledby="hist-titulo">
+    <div class="m-sheet-backdrop" data-cerrar-hoja></div>
+    <div class="m-sheet-panel">
+      <div class="m-sheet-handle"></div>
+      <div class="m-sheet-cabecera">
+        <div class="m-sheet-cabecera-texto">
+          <h2 id="hist-titulo" class="m-sheet-titulo">Historia clínica</h2>
+          <p class="m-sheet-sub">Buscá el paciente por nombre o DNI para abrir su ficha.</p>
+        </div>
+        <button type="button" class="m-icon-btn" data-cerrar-hoja aria-label="Cerrar la búsqueda">
+          <svg class="m-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <input class="m-input" id="hist-buscar" type="search" autocomplete="off"
+             enterkeyhint="search" placeholder="Nombre o DNI del paciente" />
+      <div id="hist-resultados" class="m-lista-pacientes" role="listbox" aria-label="Pacientes encontrados"></div>
     </div>
   </div>
 </body>

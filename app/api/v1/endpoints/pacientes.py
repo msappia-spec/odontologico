@@ -32,9 +32,22 @@ def crear_paciente(payload: PacienteCreate, db: Session = Depends(get_db)) -> Pa
 def listar_pacientes(
     telefono: Optional[str] = Query(default=None, description="Filtra por teléfono exacto"),
     dni: Optional[str] = Query(default=None, description="Filtra por DNI exacto"),
+    buscar: Optional[str] = Query(
+        default=None,
+        max_length=120,
+        description=(
+            "Búsqueda por **nombre o DNI**: trae las fichas cuyo nombre contenga el "
+            "texto (sin distinguir mayúsculas ni acentos) o cuyo documento coincida "
+            "parcialmente (se ignoran puntos y guiones)."
+        ),
+    ),
     db: Session = Depends(get_db),
 ) -> List[Paciente]:
-    return list(paciente_service.listar_pacientes(db, telefono=telefono, dni=dni))
+    return list(
+        paciente_service.listar_pacientes(
+            db, telefono=telefono, dni=dni, buscar=buscar
+        )
+    )
 
 
 @router.get(

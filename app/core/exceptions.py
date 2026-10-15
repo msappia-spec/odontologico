@@ -80,3 +80,19 @@ class WhatsAppEnvioError(AppError):
 
     status_code = 502
     default_detail = "No se pudo enviar el mensaje de WhatsApp."
+
+
+class RegistroInmutableError(AppError):
+    """Se intentó modificar o borrar un registro clínico inmutable.
+
+    Los registros de la historia clínica (las **evoluciones médicas**) tienen
+    valor legal: sólo se pueden crear y leer. La API no expone ``PUT``/``PATCH``
+    /``DELETE`` para ellos; esta excepción es la red de seguridad de la capa ORM
+    (``before_update``/``before_delete`` de ``EvolucionMedica``) por si alguna
+    otra vía —un script, una consola de base de datos, un test— intenta tocar una
+    fila ya guardada. Se responde **403** (la operación está prohibida por
+    normativa, no por un conflicto de datos).
+    """
+
+    status_code = 403
+    default_detail = "Los registros clínicos son inmutables: no se pueden modificar ni eliminar."

@@ -19,6 +19,13 @@ from app.schemas.doctor import (
     DoctorReplace,
     DoctorUpdate,
 )
+from app.schemas.historia_clinica import (
+    ArchivoAdjuntoCreate,
+    ArchivoAdjuntoRead,
+    EvolucionMedicaCreate,
+    EvolucionMedicaRead,
+    HistoriaClinicaDetalle,
+)
 from app.schemas.obra_social import (
     ObraSocialCreate,
     ObraSocialRead,
@@ -34,6 +41,8 @@ from app.schemas.whatsapp import (
 )
 
 __all__ = [
+    "ArchivoAdjuntoCreate",
+    "ArchivoAdjuntoRead",
     "BloqueDisponible",
     "DisponibilidadCreate",
     "DisponibilidadEspecificaCreate",
@@ -45,7 +54,10 @@ __all__ = [
     "DoctorRead",
     "DoctorReplace",
     "DoctorUpdate",
+    "EvolucionMedicaCreate",
+    "EvolucionMedicaRead",
     "ExcepcionFechaBase",
+    "HistoriaClinicaDetalle",
     "HorariosDisponiblesRead",
     "OrigenDisponibilidad",
     "RangoEfectivoRead",

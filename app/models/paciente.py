@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
+    from app.models.historia_clinica import HistoriaClinica
     from app.models.obra_social import ObraSocial
     from app.models.turno import Turno
 
@@ -61,6 +62,15 @@ class Paciente(Base):
     obra_social: Mapped[Optional["ObraSocial"]] = relationship(
         back_populates="pacientes",
         lazy="joined",
+    )
+    # Ficha clínica del paciente (Módulo 2): una sola por paciente. Se crea sola
+    # cuando el odontólogo carga la primera evolución (ver
+    # app.services.historia_clinica_service) y cuelga de acá su línea de tiempo.
+    historia_clinica: Mapped[Optional["HistoriaClinica"]] = relationship(
+        back_populates="paciente",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:  # pragma: no cover - representación de depuración

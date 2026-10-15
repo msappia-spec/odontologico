@@ -10,6 +10,7 @@ from app.db.base_class import Base
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.disponibilidad import DisponibilidadDoctor
     from app.models.disponibilidad_especifica import DisponibilidadEspecifica
+    from app.models.evolucion_medica import EvolucionMedica
     from app.models.turno import Turno
 
 
@@ -45,6 +46,13 @@ class Doctor(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="DisponibilidadEspecifica.fecha, DisponibilidadEspecifica.hora_inicio",
+    )
+    # Evoluciones médicas que firmó el profesional (Módulo 2). Sin ``cascade``:
+    # una evolución es un registro clínico inmutable y no se borra en cascada con
+    # el odontólogo (la baja del profesional es lógica, ``activo = false``).
+    evoluciones: Mapped[List["EvolucionMedica"]] = relationship(
+        back_populates="doctor",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:  # pragma: no cover - representación de depuración

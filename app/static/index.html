@@ -237,6 +237,37 @@
               </div>
             </div>
           </div>
+
+          <!-- Módulo 2 · Historia clínica: la secretaría consulta el historial de
+               un paciente (nombre o DNI) en modo SÓLO LECTURA. La línea de tiempo
+               la arma app.js con el mismo endpoint que usa el celular del
+               odontólogo. Para escribir sólo está la pantalla del profesional. -->
+          <div class="card p-5">
+            <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <div class="min-w-0">
+                <h2 class="font-bold text-slate-900">Historias clínicas</h2>
+                <p class="text-xs text-slate-500">
+                  Busc&aacute; al paciente por nombre o DNI y consult&aacute; sus atenciones, de la m&aacute;s
+                  nueva a la m&aacute;s vieja. Vista de <span class="font-semibold text-slate-600">s&oacute;lo lectura</span>:
+                  las evoluciones las carga el odont&oacute;logo desde su celular (no se editan ni se borran).
+                </p>
+              </div>
+              <span id="hist-panel-ficha" class="badge badge-slate">Sin ficha abierta</span>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)] gap-5">
+              <div>
+                <label class="field-label" for="hist-panel-buscar">Paciente</label>
+                <input id="hist-panel-buscar" class="field" type="search" autocomplete="off"
+                       placeholder="Nombre o DNI (ej.: Su&aacute;rez o 30.123.456)" />
+                <div id="hist-panel-resultados" class="hist-resultados"></div>
+              </div>
+              <div>
+                <p id="hist-panel-paciente" class="text-sm font-bold text-slate-800">&mdash;</p>
+                <p id="hist-panel-total" class="text-xs text-slate-500"></p>
+                <div id="hist-panel-timeline" class="hist-timeline mt-3"></div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- ===================== VISTA: CALENDARIO ===================== -->
