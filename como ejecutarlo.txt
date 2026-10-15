@@ -140,6 +140,10 @@ python -m scripts.publicar --simulacro            # muestra qué haría, sin esc
   proyecto): usa el Python del `.venv` y deja la ventana abierta para leer el
   resultado.
 - Si **alguna prueba falla**, no se sube nada.
+- Antes de tocar git comprueba que la **CLI de Vercel** esté instalada y que la
+  carpeta esté **enlazada al proyecto**: si falta algo corta ahí, así no queda la
+  publicación a medias (GitHub al día y Vercel con código viejo). En
+  `--simulacro` sólo lo informa.
 - Si **no hay cambios** ni commits pendientes, no commitea ni despliega: lo avisa
   y termina (nada de "doble clic de más").
 - Opciones útiles: `--sin-tests`, `--sin-deploy` (sólo GitHub), `--solo-deploy`
@@ -149,6 +153,11 @@ python -m scripts.publicar --simulacro            # muestra qué haría, sin esc
 - Al terminar consulta `/health`, el panel y `/medico` de la URL publicada: si
   responde **401/403** es la *Deployment Protection* de Vercel (es un aviso, no
   un error de la app).
+- Códigos de salida (los usa `publicar.bat` para escribir su mensaje final):
+  **0** salió todo bien, **1** se abortó sin publicar nada y **2** se publicó
+  pero el chequeo final de la app quedó en rojo. Con **2** el código **sí** está
+  en GitHub y en Vercel: se reintenta el deploy y su verificación con
+  `python -m scripts.publicar --solo-deploy`.
 - Controles: `tests/test_publicar.py` (no ejecutan git, ni vercel, ni tocan la red).
 
 Deploy manual (por si hay que repetirlo a mano):

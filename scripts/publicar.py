@@ -21,7 +21,12 @@ Qué hace (siempre en este orden)
    equivalente a ``git add .`` desde la raíz e incluye borrados), *commitea*
    (con el mensaje de ``-m`` o uno automático con la fecha) y empuja la rama
    (``git push origin <rama>``) para respaldar el código en GitHub.
-3. **Despliegue**: corre la CLI de Vercel (``vercel --prod --yes``) **capturando
+3. **Prerrequisitos del deploy**: antes de tocar git se comprueba que la CLI de
+   Vercel esté instalada y que la carpeta esté enlazada al proyecto. Un problema
+   de Vercel no puede dejar la publicación **a medias** (GitHub al día y Vercel
+   con código viejo), así que se corta antes de *commitear*. En ``--simulacro``
+   sólo se informa.
+4. **Despliegue**: corre la CLI de Vercel (``vercel --prod --yes``) **capturando
    su salida**, la muestra al terminar, extrae el dominio de producción que
    informa la propia CLI y lo usa para verificar la app publicada (``/health``,
    el panel y ``/medico``). Un ``401``/``403`` se informa como *aviso* (es la
@@ -30,6 +35,15 @@ Qué hace (siempre en este orden)
 Si no hay cambios ni *commits* pendientes, no se *commitea* (git lo rechazaría)
 ni se despliega: en ese caso se informa y termina. ``--forzar`` sirve para
 desplegar igual (por ejemplo después de cambiar una variable de entorno).
+
+Códigos de salida
+-----------------
+``0`` salió todo bien, ``1`` se abortó (no se publicó nada) y ``2`` se publicó
+pero el chequeo final de la app marcó fallas. ``publicar.bat`` escribe su mensaje
+final según ese código, por eso la diferencia importa: con ``2`` el código **sí**
+quedó en GitHub y en Vercel. Para reintentar sólo el deploy y la verificación::
+
+    python -m scripts.publicar --solo-deploy
 
 La consola de Windows se prepara sola (página de códigos UTF-8 y secuencias ANSI)
 para que los acentos, los ✓ y los mensajes en rojo se vean limpios; con
@@ -127,6 +141,11 @@ TIEMPO_ESPERA_HTTP = 60
 # La propagación del deploy puede tardar unos segundos: se reintenta.
 REINTENTOS_PRODUCCION = 6
 PAUSA_PRODUCCION = 10.0
+
+# Códigos de salida de `main` (publicar.bat escribe el mensaje final según esto).
+SALIDA_OK = 0
+SALIDA_ABORTADA = 1
+SALIDA_CON_FALLAS = 2
 
 # Máximo de archivos que se listan en el cuerpo del commit.
 ARCHIVOS_EN_EL_COMMIT = 20
@@ -639,6 +658,32 @@ def exigir_proyecto_enlazado(raiz: Path = RAIZ) -> None:
     )
 
 
+def exigir_prerrequisitos_del_deploy(
+    buscar: Callable[[str], Optional[str]] = shutil.which,
+) -> None:
+    """Comprueba, **sin escribir nada**, que el deploy tenga con qué correr.
+
+    Se llama antes de la parte de git: si la CLI de Vercel no está instalada (o
+    la carpeta no está enlazada al proyecto) la publicación se corta **antes**
+    de *commitear* y empujar. Si no, quedaría a medias: GitHub con el código
+    nuevo y Vercel mostrando el viejo, que es la peor forma de fallar.
+    """
+
+    try:
+        _exigir_programa("vercel", buscar)
+        exigir_proyecto_enlazado()
+    except ErrorPublicacion as error:
+        raise ErrorPublicacion(
+            str(error),
+            pistas=tuple(error.pistas)
+            + (
+                "Se revisó antes de tocar git: no se commiteó ni se empujó nada.",
+                "Si querés subir sólo a GitHub: "
+                "python -m scripts.publicar --sin-deploy",
+            ),
+        ) from error
+
+
 def exigir_remoto(
     rama: str,
     correr: Callable[..., Completado] = _correr,
@@ -839,6 +884,10 @@ def publicar(
     va_a_publicar = (
         bool(resultado.archivos) or pendientes > 0 or forzar or not hacer_git
     )
+    # El deploy se hace cuando hay algo nuevo que publicar, cuando se fuerza
+    # (por ejemplo tras cambiar una variable de entorno) o cuando sólo se
+    # despliega (--solo-deploy, sin git).
+    va_a_desplegar = hacer_deploy and va_a_publicar
     if hacer_tests and va_a_publicar:
         anunciar("▸ Control de calidad (python -m pytest)")
         if simulacro:
@@ -849,6 +898,23 @@ def publicar(
             )
             resultado.pruebas = resumen_de_pytest(completado.salida)
             anunciar(f"  ✓ pruebas en verde ({resultado.pruebas})")
+
+    # --- Paso 1.5: prerrequisitos del deploy -------------------------------- #
+    # Se comprueban *antes* de escribir en git: así un problema de Vercel no
+    # deja la publicación a medias (GitHub al día y Vercel con código viejo).
+    # En simulacro no se corta: se informa qué faltaría.
+    if va_a_desplegar:
+        anunciar("▸ Prerrequisitos del deploy (CLI de Vercel y proyecto enlazado)")
+        try:
+            exigir_prerrequisitos_del_deploy(buscar_programa)
+        except ErrorPublicacion as error:
+            if not simulacro:
+                raise
+            anunciar(f"  {amarillo('⚠')} {error}")
+            for pista in error.pistas:
+                anunciar(f"  {pista}")
+        else:
+            anunciar("  ✓ la CLI de Vercel está disponible y el proyecto enlazado")
 
     # --- Paso 2: control de versiones (git) --------------------------------- #
     if hacer_git:
@@ -880,17 +946,13 @@ def publicar(
             if not simulacro:
                 anunciar(f"  ✓ empujado a {REMOTO}/{resultado.rama}")
 
-    hay_novedad = bool(resultado.commit or pendientes)
-
     # --- Paso 3: despliegue en la nube (Vercel) ----------------------------- #
     if hacer_deploy:
-        if hay_novedad or forzar or not hacer_git or simulacro:
+        if va_a_desplegar or simulacro:
             anunciar("▸ Deploy en producción (vercel --prod --yes)")
             if simulacro:
                 anunciar("  [simulacro] vercel --prod --yes")
             else:
-                _exigir_programa("vercel", buscar_programa)
-                exigir_proyecto_enlazado()
                 anunciar("  (la salida de la CLI se muestra al terminar)")
                 completado = ejecutar(
                     ["vercel", "--prod", "--yes"],
@@ -948,11 +1010,12 @@ def _preparar_salida() -> None:
 
 def _imprimir(resultado: Resultado, salida: Callable[[str], None] = print) -> None:
     """Reporta el resumen de la publicación."""
-    titulo = (
-        amarillo("Simulacro terminado (no se escribió nada).")
-        if resultado.simulacro
-        else verde("Publicación terminada.")
-    )
+    if resultado.simulacro:
+        titulo = amarillo("Simulacro terminado (no se escribió nada).")
+    elif resultado.fallas:
+        titulo = amarillo("Publicación terminada con fallas en la verificación.")
+    else:
+        titulo = verde("Publicación terminada.")
     salida("")
     salida(titulo)
     if resultado.rama:
@@ -973,6 +1036,15 @@ def _imprimir(resultado: Resultado, salida: Callable[[str], None] = print) -> No
         salida(f"  {amarillo('⚠')} {aviso}")
     for falla in resultado.fallas:
         salida(f"  {rojo('✗')} {falla}")
+    if resultado.fallas:
+        salida(
+            "  El código ya quedó en GitHub y en Vercel: lo que falló es el "
+            "chequeo final de la app."
+        )
+        salida(
+            "  Reintentá el deploy y la verificación con: python -m "
+            "scripts.publicar --solo-deploy"
+        )
     if resultado.simulacro:
         salida("  Repetí el comando sin --simulacro para publicar de verdad.")
 
@@ -1046,7 +1118,13 @@ def main(
             "Vercel informa otro dominio, se usa ese)."
         ),
     )
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as salida_de_argparse:
+        # `argparse` sale con 2 cuando una opción está mal escrita, pero ese
+        # código acá significa «se publicó con fallas»: se traduce a «se abortó»
+        # (no se publicó nada) para que publicar.bat no mienta.
+        return SALIDA_ABORTADA if salida_de_argparse.code else SALIDA_OK
     if args.sin_colores:
         apagar_colores()
 
@@ -1079,10 +1157,10 @@ def main(
             salida(f"  {pista}")
         if enmarcar:
             salida(separador)
-        return 1
+        return SALIDA_ABORTADA
 
     _imprimir(resultado, salida)
-    return 1 if resultado.fallas else 0
+    return SALIDA_CON_FALLAS if resultado.fallas else SALIDA_OK
 
 
 if __name__ == "__main__":  # pragma: no cover - ejecución manual

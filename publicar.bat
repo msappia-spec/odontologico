@@ -4,13 +4,18 @@ REM  Publica los cambios del proyecto en un solo paso:
 REM    control de calidad (pytest) -> commit -> push a GitHub -> deploy Vercel
 REM
 REM  El orden lo garantiza scripts/publicar.py: si una prueba falla, no se sube
-REM  ni se despliega nada.
+REM  ni se despliega nada, y antes de tocar git comprueba que la CLI de Vercel
+REM  este instalada y que la carpeta este enlazada al proyecto.
+REM
+REM  Codigos de salida: 0 todo bien, 1 se aborto (no se subio nada) y 2 se
+REM  publico pero el chequeo final de la app marco fallas.
 REM
 REM  Uso:
 REM    Doble clic sobre este archivo, o desde la consola:
 REM      publicar.bat
 REM      publicar.bat -m "Arregla el panel de turnos"
 REM      publicar.bat --simulacro
+REM      publicar.bat --solo-deploy          (reintenta el deploy y su chequeo)
 REM      publicar.bat --sin-tests --sin-verificar
 REM
 REM  Documentacion:  python -m scripts.publicar --help
@@ -55,13 +60,24 @@ echo.
 set "CODIGO=%ERRORLEVEL%"
 
 echo.
-if "%CODIGO%"=="0" (
-    echo Listo: mira arriba el resumen con la rama, el commit y la URL.
-) else (
-    echo La publicacion se detuvo sin subir nada ^(codigo %CODIGO%^).
-    echo Revisa el detalle de arriba; la ayuda esta en:
-    echo     "%PY%" -m scripts.publicar --help
-)
+if "%CODIGO%"=="0" goto todo_listo
+if "%CODIGO%"=="2" goto publicado_con_fallas
+echo La publicacion se detuvo sin subir nada ^(codigo %CODIGO%^).
+echo Revisa el detalle de arriba; la ayuda esta en:
+echo     "%PY%" -m scripts.publicar --help
+goto fin
+
+:todo_listo
+echo Listo: mira arriba el resumen con la rama, el commit y la URL.
+goto fin
+
+:publicado_con_fallas
+echo Ojo: el codigo si quedo en GitHub y en Vercel, pero el chequeo final
+echo de la app marco fallas ^(las lineas con la "x" en el resumen^).
+echo Para reintentar solo el deploy y la verificacion:
+echo     "%PY%" -m scripts.publicar --solo-deploy
+
+:fin
 echo.
 pause
 exit /b %CODIGO%

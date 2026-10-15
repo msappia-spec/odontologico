@@ -31,6 +31,7 @@ from scripts.publicar import (
     commits_pendientes,
     control_de_calidad,
     cuerpo_del_commit,
+    exigir_prerrequisitos_del_deploy,
     exigir_proyecto_enlazado,
     exigir_remoto,
     fallas_de_pytest,
@@ -288,6 +289,59 @@ def test_si_falta_la_cli_de_vercel_da_las_instrucciones():
     assert "vercel --prod --yes" not in ejecutor.secuencia()
 
 
+def test_si_falta_algo_del_deploy_se_corta_antes_de_tocar_git():
+    """El chequeo previo evita publicar a medias (GitHub al día, Vercel viejo)."""
+    ejecutor = EjecutorFalso(status=" M app/main.py")
+    with pytest.raises(ErrorPublicacion) as error:
+        publicar_con(ejecutor, buscar_programa=lambda nombre: None)
+
+    assert any(
+        "no se commiteó ni se empujó nada" in pista for pista in error.value.pistas
+    )
+    assert not any(
+        comando.startswith(("git add", "git commit", "git push", "vercel"))
+        for comando in ejecutor.secuencia()
+    )
+
+
+def test_exigir_prerrequisitos_del_deploy_revisa_la_cli_y_el_enlace(monkeypatch):
+    monkeypatch.setattr("scripts.publicar.proyecto_enlazado", lambda *a, **k: True)
+    assert exigir_prerrequisitos_del_deploy(lambda nombre: "C:/falso/vercel") is None
+
+    monkeypatch.setattr("scripts.publicar.proyecto_enlazado", lambda *a, **k: False)
+    with pytest.raises(ErrorPublicacion) as error:
+        exigir_prerrequisitos_del_deploy(lambda nombre: "C:/falso/vercel")
+
+    assert any("vercel link" in pista for pista in error.value.pistas)
+    assert any("--sin-deploy" in pista for pista in error.value.pistas)
+
+
+def test_el_simulacro_informa_los_prerrequisitos_del_deploy(monkeypatch):
+    monkeypatch.setattr("scripts.publicar.proyecto_enlazado", lambda *a, **k: True)
+    ejecutor = EjecutorFalso(status=" M app/main.py")
+    salidas: list[str] = []
+    publicar_con(ejecutor, simulacro=True, salida=salidas.append)
+
+    assert any("Prerrequisitos del deploy" in linea for linea in salidas)
+    assert any("la CLI de Vercel está disponible" in linea for linea in salidas)
+
+
+def test_el_simulacro_avisa_si_falta_algo_del_deploy_sin_cortar():
+    """En simulacro no hay nada que romper: el faltante se informa y se sigue."""
+    ejecutor = EjecutorFalso(status=" M app/main.py")
+    salidas: list[str] = []
+    resultado = publicar_con(
+        ejecutor,
+        simulacro=True,
+        buscar_programa=lambda nombre: None,
+        salida=salidas.append,
+    )
+
+    assert resultado.simulacro is True
+    assert any("npm install -g vercel" in linea for linea in salidas)
+    assert ejecutor.escrituras() == []
+
+
 # --------------------------------------------------------------------------- #
 # Verificación en producción
 # --------------------------------------------------------------------------- #
@@ -493,7 +547,12 @@ def test_main_publica_y_devuelve_cero():
     assert any("Publicación terminada" in linea for linea in salidas)
 
 
-def test_main_devuelve_uno_cuando_produccion_no_responde():
+def test_main_devuelve_dos_cuando_produccion_no_responde():
+    """Con el deploy hecho y el chequeo final en rojo, el código de salida es 2.
+
+    ``publicar.bat`` lo usa para no decir «no se subió nada» cuando en realidad
+    el código **sí** quedó en GitHub y en Vercel.
+    """
     salidas: list[str] = []
     codigo = main(
         [],
@@ -504,8 +563,10 @@ def test_main_devuelve_uno_cuando_produccion_no_responde():
         salida=salidas.append,
     )
 
-    assert codigo == 1
+    assert codigo == 2
     assert any("✗" in linea for linea in salidas)
+    assert any("ya quedó en GitHub y en Vercel" in linea for linea in salidas)
+    assert any("--solo-deploy" in linea for linea in salidas)
 
 
 def test_main_simulacro_no_ejecuta_escrituras():
@@ -523,6 +584,20 @@ def test_main_simulacro_no_ejecuta_escrituras():
     assert codigo == 0
     assert ejecutor.escrituras() == []
     assert any("Simulacro terminado" in linea for linea in salidas)
+
+
+def test_main_con_una_opcion_inexistente_aborta_sin_publicar():
+    """``argparse`` sale con 2; aquí ese código significa «se publicó con fallas»."""
+    ejecutor = EjecutorFalso(status=" M app/main.py")
+    codigo = main(
+        ["--no-existe"],
+        correr=ejecutor,
+        consultar=ClienteFalso(),
+        salida=lambda texto: None,
+    )
+
+    assert codigo == 1
+    assert ejecutor.secuencia() == []
 
 
 def test_main_con_opciones_contradictorias_devuelve_uno():
