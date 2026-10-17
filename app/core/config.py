@@ -7,7 +7,7 @@ import logging
 import os
 from typing import List, Optional
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("app.core.config")
@@ -16,6 +16,11 @@ logger = logging.getLogger("app.core.config")
 # el único directorio escribible es ``/tmp``, por eso el SQLite por defecto se
 # redirige ahí cuando no hay una base PostgreSQL configurada.
 SQLITE_SERVERLESS_URL = "sqlite:////tmp/odontologico.db"
+
+#: Base de la Graph API de Meta (WhatsApp Cloud API). Se usa cuando no se define
+#: ``WHATSAPP_API_URL``: así, con sólo el token y el id del número, el envío real
+#: queda habilitado sin tener que pegar la URL de la API a mano.
+URL_WHATSAPP_POR_DEFECTO = "https://graph.facebook.com/v21.0"
 
 
 class Settings(BaseSettings):
@@ -30,6 +35,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # Un valor vacío en el ``.env`` (p. ej. ``WHATSAPP_TOKEN=""``) significa
+        # "sin configurar": se ignora y queda el valor por defecto del atributo.
+        # Sin esto, un ``WHATSAPP_TOKEN`` vacío taparía un
+        # ``WHATSAPP_ACCESS_TOKEN`` real (ver ``whatsapp_access_token``).
+        env_ignore_empty=True,
     )
 
     # --- Aplicación ---
@@ -109,9 +119,28 @@ class Settings(BaseSettings):
         return self
 
     # --- WhatsApp Cloud API (opcional) ---
-    whatsapp_api_url: Optional[str] = None
+    # Base de la Graph API de Meta; se puede sobreescribir desde el ``.env``.
+    whatsapp_api_url: Optional[str] = URL_WHATSAPP_POR_DEFECTO
     whatsapp_phone_number_id: Optional[str] = None
-    whatsapp_access_token: Optional[str] = None
+    # El token se acepta con los dos nombres que se ven en la documentación de
+    # Meta: ``WHATSAPP_ACCESS_TOKEN`` (el histórico del proyecto) y
+    # ``WHATSAPP_TOKEN`` (el corto). Gana el primero que esté definido.
+    whatsapp_access_token: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_TOKEN"),
+    )
+
+    # --- Chatbot de respuestas automáticas (FAQ Bot) ---
+    # Código del nomenclador con el que se responde la tarifa de consulta
+    # (Capítulo I del Nomenclador de Córdoba: consulta, examen y fichado).
+    whatsapp_consulta_codigo: str = "10100"
+    # Datos que el bot devuelve con la opción 3 (Ubicación y horarios). Son
+    # configurables para que cada consultorio publique los suyos sin tocar el
+    # código: basta definirlos en el ``.env``.
+    whatsapp_consultorio_direccion: str = "Av. Colón 1234, Córdoba Capital"
+    whatsapp_consultorio_horarios: str = (
+        "Lunes a viernes de 9:00 a 13:00 y de 15:00 a 19:00"
+    )
 
     # --- Recordatorios ---
     recordatorio_dias: int = 3
@@ -124,16 +153,13 @@ class Settings(BaseSettings):
     def whatsapp_envio_real(self) -> bool:
         """Indica si hay credenciales completas para enviar mensajes reales.
 
-        Si es ``False`` el envío se SIMULA (se registra en logs y se genera un
-        identificador de mensaje ficticio).
+        Alcanza con el token (``WHATSAPP_TOKEN`` o ``WHATSAPP_ACCESS_TOKEN``) y
+        el id del número: la URL de la API tiene un valor por defecto
+        (``URL_WHATSAPP_POR_DEFECTO``), así que no hace falta definirla. Si falta
+        alguna de esas dos credenciales el envío se SIMULA (se registra en logs y
+        se genera un identificador de mensaje ficticio).
         """
-        return all(
-            (
-                self.whatsapp_api_url,
-                self.whatsapp_phone_number_id,
-                self.whatsapp_access_token,
-            )
-        )
+        return bool(self.whatsapp_phone_number_id and self.whatsapp_access_token)
 
 
 # Instancia única reutilizable en toda la aplicación.

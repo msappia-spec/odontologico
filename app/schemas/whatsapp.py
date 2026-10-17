@@ -1,7 +1,7 @@
 """Esquemas Pydantic para el flujo de WhatsApp (webhook y recordatorios)."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,6 +10,17 @@ from app.models.enums import EstadoTurno, EstadoWhatsApp
 # ---------------------------------------------------------------------------
 # Payload entrante del webhook (estructura simplificada de WhatsApp Cloud API)
 # ---------------------------------------------------------------------------
+
+
+class WhatsAppText(BaseModel):
+    """Cuerpo de un mensaje de **texto** entrante (``type`` = ``text``)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    body: Optional[str] = Field(
+        default=None, description="Texto que escribió el paciente"
+    )
+    preview_url: Optional[bool] = None
 
 
 class WhatsAppButtonReply(BaseModel):
@@ -51,6 +62,7 @@ class WhatsAppInboundMessage(BaseModel):
     type: Optional[str] = None
     context: Optional[WhatsAppContext] = None
     interactive: Optional[WhatsAppInteractive] = None
+    text: Optional[WhatsAppText] = None
 
 
 class WhatsAppChangeValue(BaseModel):
@@ -89,15 +101,72 @@ class WhatsAppWebhookPayload(BaseModel):
 
 
 class WebhookProcesadoResponse(BaseModel):
-    """Resultado del procesamiento de un webhook de respuesta de botón."""
+    """Resultado del procesamiento de un webhook entrante de WhatsApp.
+
+    El mismo endpoint atiende dos tipos de mensaje y el campo ``tipo`` dice cuál
+    se procesó:
+
+    * ``BOTON`` — respuesta a un recordatorio (**Confirmar** / **Cancelar**): se
+      devuelve el turno actualizado (``turno_id``, ``estado_turno``,
+      ``estado_whatsapp``, ``boton``).
+    * ``BOT`` — mensaje de **texto libre** del paciente: lo contesta el FAQ Bot
+      (``app.services.whatsapp_bot_service``) y se devuelve la ``opcion``
+      detectada, el ``respuesta`` enviado y el ``mensaje_id_saliente`` de Meta.
+      ``atencion_manual`` queda en ``True`` cuando el texto no es una opción del
+      menú: no hay respuesta automática y lo tiene que atender una secretaria.
+
+    Los campos de cada rama son opcionales para poder tipar las dos respuestas
+    con un único modelo (retrocompatible con el contrato anterior del webhook).
+    """
 
     status: str = "ok"
-    turno_id: int
+    tipo: Literal["BOTON", "BOT"] = Field(
+        default="BOTON", description="Tipo de mensaje procesado: 'BOTON' o 'BOT'"
+    )
+
+    # --- Rama 1: respuesta de botón de un recordatorio ---
+    turno_id: Optional[int] = None
+    mensaje_id_contextual: Optional[str] = None
+    boton: Optional[str] = None
+    estado_turno: Optional[EstadoTurno] = None
+    estado_whatsapp: Optional[EstadoWhatsApp] = None
+
+    # --- Rama 2: diálogo del FAQ Bot ---
+    telefono: Optional[str] = None
+    opcion: Optional[str] = None
+    respuesta: Optional[str] = None
+    mensaje_id_saliente: Optional[str] = None
+    atencion_manual: bool = Field(
+        default=False,
+        description="True cuando el mensaje necesita atención humana (opción 4 o texto libre)",
+    )
+
+    # --- Común a las dos ramas ---
     mensaje_id_entrante: Optional[str] = None
-    mensaje_id_contextual: str
-    boton: str
-    estado_turno: EstadoTurno
-    estado_whatsapp: EstadoWhatsApp
+
+
+class RespuestaBot(BaseModel):
+    """Resultado del FAQ Bot para un mensaje entrante de texto.
+
+    Lo devuelve ``whatsapp_bot_service.responder_mensaje`` y sirve tanto para el
+    webhook como para invocar el bot a mano (pruebas, consola, scripts).
+    """
+
+    telefono: str
+    texto_entrante: str
+    tipo: Literal["MENU", "PRECIO", "OBRAS_SOCIALES", "UBICACION", "MANUAL"]
+    opcion: Optional[str] = Field(
+        default=None, description="Opción del menú detectada ('1'..'4'), si hubo"
+    )
+    respuesta: Optional[str] = Field(
+        default=None, description="Texto enviado al paciente; None si requiere atención manual"
+    )
+    mensaje_id_saliente: Optional[str] = Field(
+        default=None, description="wamid devuelto por Meta (o 'wamid.SIMULADO...')"
+    )
+    atencion_manual: bool = Field(
+        default=False, description="True cuando no hubo respuesta automática"
+    )
 
 
 class RecordatorioEnviado(BaseModel):

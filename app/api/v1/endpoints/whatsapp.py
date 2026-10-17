@@ -1,4 +1,16 @@
-"""Endpoints de WhatsApp: webhook de entrada y recordatorios por enlace (wa.me)."""
+"""Endpoints de WhatsApp: webhook de entrada (botones y FAQ Bot) y recordatorios.
+
+El ``POST /whatsapp/webhook`` es el punto de entrada de la Cloud API de Meta y
+atiende los dos tipos de mensaje que puede mandar un paciente:
+
+* ``interactive.button_reply`` — la respuesta a un recordatorio (**Confirmar** /
+  **Cancelar**), que actualiza el estado del turno.
+* ``text`` — un mensaje escrito a mano ("hola", "1", "¿atienden OSDE?"), que
+  contesta el **FAQ Bot** (``whatsapp_bot_service``).
+
+El panel también ofrece el enlace *Click-to-Chat* de los recordatorios
+pendientes, que no pasa por la API: lo envía la secretaría desde su WhatsApp.
+"""
 
 import logging
 from typing import List, Optional
@@ -7,13 +19,15 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import RespuestaWebhookInvalidaError
 from app.db.session import get_db
 from app.schemas.whatsapp import (
     RecordatorioPendiente,
     WebhookProcesadoResponse,
+    WhatsAppInboundMessage,
     WhatsAppWebhookPayload,
 )
-from app.services import whatsapp_service
+from app.services import whatsapp_bot_service, whatsapp_service
 
 logger = logging.getLogger("app.api.whatsapp")
 
@@ -40,25 +54,71 @@ def verificar_webhook(
     return {"status": "verificación no válida"}
 
 
+def _procesar_texto_del_bot(
+    db: Session, mensaje: WhatsAppInboundMessage
+) -> WebhookProcesadoResponse:
+    """Deriva el texto del paciente al FAQ Bot y arma la respuesta del webhook.
+
+    Extrae el número del remitente (``from``) y el texto (``text.body``) y llama
+    a ``whatsapp_bot_service.responder_mensaje``, que decide y **envía** la
+    respuesta (real o simulada). Un mensaje de texto sin remitente o sin cuerpo
+    no se puede contestar: se responde ``400`` como cualquier payload inválido.
+    """
+    telefono = (mensaje.from_ or "").strip()
+    texto = (mensaje.text.body or "").strip() if mensaje.text else ""
+    if not telefono or not texto:
+        raise RespuestaWebhookInvalidaError(
+            "El mensaje de texto no trae 'from' y 'text.body'; no se puede responder."
+        )
+
+    resultado = whatsapp_bot_service.responder_mensaje(db, telefono, texto)
+
+    return WebhookProcesadoResponse(
+        tipo="BOT",
+        mensaje_id_entrante=mensaje.id,
+        telefono=resultado.telefono,
+        opcion=resultado.opcion,
+        respuesta=resultado.respuesta,
+        mensaje_id_saliente=resultado.mensaje_id_saliente,
+        atencion_manual=resultado.atencion_manual,
+    )
+
+
 @router.post(
     "/webhook",
     response_model=WebhookProcesadoResponse,
     status_code=status.HTTP_200_OK,
     summary="Webhook de entrada de WhatsApp",
     description=(
-        "Procesa la respuesta interactiva (botón Confirmar/Cancelar) enviada "
-        "por el paciente. Extrae el id del mensaje contextual, localiza el "
-        "turno por 'whatsapp_mensaje_id' y actualiza su estado a CONFIRMADO o "
-        "CANCELADO, marcando el estado de WhatsApp como RESPONDIDO."
+        "Procesa los mensajes entrantes del paciente según su tipo:\n\n"
+        "* **text** (el paciente escribe): lo contesta el *FAQ Bot* con el menú de "
+        "opciones —1 precio de la consulta, 2 obras sociales, 3 ubicación y "
+        "horarios, 4 hablar con una secretaria— y devuelve 'tipo': 'BOT' con la "
+        "'opcion' detectada y el texto enviado. Cuando el mensaje no es del menú "
+        "no se responde: queda el log **'Atención Manual Requerida'** y "
+        "'atencion_manual': true.\n"
+        "* **interactive.button_reply** (botones Confirmar/Cancelar del "
+        "recordatorio): extrae el id del mensaje contextual, localiza el turno por "
+        "'whatsapp_mensaje_id' y lo pasa a CONFIRMADO o CANCELADO, marcando el "
+        "estado de WhatsApp como RESPONDIDO ('tipo': 'BOTON').\n\n"
+        "En los dos casos responde 200 con el resultado del procesamiento; un "
+        "payload que no encaja en ninguno es 400 y un turno inexistente, 404."
     ),
 )
 def recibir_webhook(
     payload: WhatsAppWebhookPayload,
     db: Session = Depends(get_db),
 ) -> WebhookProcesadoResponse:
+    # Un mensaje escrito por el paciente lo contesta el FAQ Bot…
+    mensaje_texto = whatsapp_service.mensaje_de_texto(payload)
+    if mensaje_texto is not None:
+        return _procesar_texto_del_bot(db, mensaje_texto)
+
+    # …y una respuesta de botón actualiza el turno del recordatorio.
     turno, mensaje, boton_id = whatsapp_service.procesar_respuesta_boton(db, payload)
 
     return WebhookProcesadoResponse(
+        tipo="BOTON",
         turno_id=turno.id,
         mensaje_id_entrante=mensaje.id,
         mensaje_id_contextual=turno.whatsapp_mensaje_id or "",

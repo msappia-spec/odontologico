@@ -10,11 +10,27 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.db.base import Base  # registra todos los modelos en los metadatos
 from app.db.session import get_db
 from app.main import app
 from app.models.doctor import Doctor
 from app.models.paciente import Paciente
+
+
+@pytest.fixture(autouse=True)
+def whatsapp_sin_credenciales(monkeypatch):
+    """Aísla del entorno: en las pruebas los envíos de WhatsApp se **simulan**.
+
+    ``settings`` se instancia una sola vez al importar la app, así que si la
+    máquina (o el ``.env``) tiene cargado un token real, los tests que esperan un
+    envío simulado empezarían a hacer ``POST`` de verdad a la Graph API. Acá se
+    vacían las credenciales para todos los tests; el que necesite el camino real
+    (por ejemplo para comprobar el ``payload`` que se manda) las vuelve a poner
+    con su propio ``monkeypatch``.
+    """
+    monkeypatch.setattr(settings, "whatsapp_phone_number_id", None)
+    monkeypatch.setattr(settings, "whatsapp_access_token", None)
 
 
 @pytest.fixture()

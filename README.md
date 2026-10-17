@@ -15,7 +15,10 @@ El **Módulo 1** implementa:
    (simulado o real).
 3. **Webhook de entrada de WhatsApp** (`POST /api/v1/whatsapp/webhook`) que
    procesa la respuesta de botón del paciente (**Confirmar** / **Cancelar**),
-   localiza el turno por el id del mensaje contextual y actualiza sus estados.
+   localiza el turno por el id del mensaje contextual y actualiza sus estados, y
+   contesta los **mensajes de texto libre** con el *FAQ Bot* (precio de la
+   consulta, obras sociales con convenio, ubicación y horarios; lo que no es del
+   menú queda como *Atención Manual Requerida*).
 4. **Recordatorios por enlace *Click-to-Chat*** (`GET
    /api/v1/whatsapp/recordatorios-pendientes`): la pestaña *Recordatorios
    Pendientes* del panel lista los turnos próximos, arma el enlace `wa.me` con
@@ -195,7 +198,8 @@ Odontologico/
 │   │   ├── facturacion_service.py  # Módulo 3: cierre de visita, caja y liquidación OS
 │   │   ├── liquidacion_service.py  # Módulo 3: producción y honorarios por profesional
 │   │   ├── reporte_pdf_service.py  # Módulo 3: los dos cierres de mes en PDF
-│   │   └── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
+│   │   ├── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
+│   │   └── whatsapp_bot_service.py # FAQ Bot: árbol de decisión de las respuestas
 │   └── api/v1/
 │       ├── router.py               # Router agregador
 │       └── endpoints/
@@ -208,7 +212,7 @@ Odontologico/
 │           ├── facturacion.py      # Módulo 3: facturar, caja y liquidaciones
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
-│           └── whatsapp.py         # Webhook + recordatorios Click-to-Chat
+│           └── whatsapp.py         # Webhook (bot + botones) + recordatorios
 │   ├── web/
 │   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
 │   └── static/                     # Interfaz web (panel de la secretaría + móvil)
@@ -384,7 +388,9 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
    | `CORS_ORIGINS` | `["https://TU-PROYECTO.vercel.app"]` | No (por defecto `["*"]`) |
    | `RECORDATORIO_DIAS` | `3` | No |
    | `WHATSAPP_CODIGO_PAIS` | `549` | No |
-   | `WHATSAPP_API_URL` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | credenciales de Meta | Sólo para envíos reales |
+   | `WHATSAPP_API_URL` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | credenciales de Meta (`WHATSAPP_TOKEN` es sinónimo del último) | Sólo para envíos reales |
+   | `WHATSAPP_CONSULTA_CODIGO` | `10100` | No (código del nomenclador de la consulta) |
+   | `WHATSAPP_CONSULTORIO_DIRECCION` / `WHATSAPP_CONSULTORIO_HORARIOS` | texto | No (los publica el FAQ Bot con la opción 3) |
 
 4. **Deploy**.
 
@@ -572,6 +578,10 @@ El panel principal consume los mismos endpoints del backend:
   (`PATCH` con `{"estado_turno":"CONFIRMADO"}`) y con el tilde verde de la agenda
   móvil: son acciones de un toque pensadas para el paciente que avisa por teléfono
   o llega al consultorio.
+- `POST /api/v1/whatsapp/webhook` con un mensaje de **texto** (`type: "text"`) →
+  el **FAQ Bot** contesta solo con el menú de opciones; probándolo desde Swagger
+  se puede ver la respuesta (`opcion`, `respuesta`, `atencion_manual`) sin
+  conectar un teléfono.
 
 > **Método HTTP de la actualización de turnos.** *Editar* y *Cancelar* comparten
 > el mismo endpoint: **`PATCH /api/v1/turnos/{id}`** (el `fetch` del panel
@@ -915,7 +925,7 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `POST` | `/tareas/enviar-recordatorios` | **Tarea programada** de recordatorios WhatsApp |
 | `GET`  | `/whatsapp/recordatorios-pendientes` | **Recordatorios pendientes** con enlace Click-to-Chat (`?dias=1..30`, por defecto 3) |
 | `GET`  | `/whatsapp/webhook` | Verificación del webhook (Meta) |
-| `POST` | `/whatsapp/webhook` | **Webhook de entrada** de WhatsApp |
+| `POST` | `/whatsapp/webhook` | **Webhook de entrada**: texto libre → FAQ Bot; botón del recordatorio → confirmar/cancelar el turno |
 | `POST` | `/prestaciones` | **Módulo 3:** crear prestación (código de nomenclador único → `409`) |
 | `GET`  | `/prestaciones` | Listar el catálogo de prácticas (`?activas=true/false`, `?buscar=`) |
 | `GET`  | `/prestaciones/{id}` | Obtener prestación |
@@ -1186,6 +1196,24 @@ curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
 
 # Recordatorios pendientes con su enlace Click-to-Chat (ventana de 7 días)
 curl "$API/whatsapp/recordatorios-pendientes?dias=7"
+
+# Webhook con un mensaje de TEXTO del paciente (lo contesta el FAQ Bot)
+curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
+  "object":"whatsapp_business_account",
+  "entry":[{"id":"WABA","changes":[{"field":"messages","value":{
+    "messages":[{
+      "from":"5491122334455","id":"wamid.IN","type":"text",
+      "text":{"body":"hola"}
+    }]}}]}]}'
+
+# La misma consulta eligiendo una opción del menú (1 = precio de la consulta)
+curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
+  "object":"whatsapp_business_account",
+  "entry":[{"id":"WABA","changes":[{"field":"messages","value":{
+    "messages":[{
+      "from":"5491122334455","id":"wamid.IN","type":"text",
+      "text":{"body":"1"}
+    }]}}]}]}'
 ```
 
 ---
@@ -1200,8 +1228,8 @@ curl "$API/whatsapp/recordatorios-pendientes?dias=7"
   `estado_turno == PENDIENTE` **y** `estado_whatsapp == PENDIENTE_ENVIO`.
 - Por cada turno:
   - Registra el log: **`Enviando WhatsApp a <telefono>`**.
-  - Dispara el envío: si hay credenciales (`WHATSAPP_API_URL`,
-    `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`) realiza un `POST`
+  - Dispara el envío: si están las credenciales (`WHATSAPP_PHONE_NUMBER_ID` y
+    `WHATSAPP_ACCESS_TOKEN` o su sinónimo `WHATSAPP_TOKEN`) realiza un `POST`
     **real** con `httpx`; si no, **simula** el `POST` HTTP y genera un `wamid`
     ficticio (`wamid.SIMULADO...`).
   - Actualiza el turno: `estado_whatsapp = ENVIADO` y guarda
@@ -1211,14 +1239,60 @@ curl "$API/whatsapp/recordatorios-pendientes?dias=7"
 > puede invocar mediante un *cron*, el Task Scheduler de Windows o `APScheduler`,
 > por ejemplo `POST /api/v1/tareas/enviar-recordatorios` una vez al día.
 
+### FAQ Bot: respuestas automáticas (`whatsapp_bot_service`)
+
+El paciente escribe al número del consultorio y el bot contesta solo, sin
+intervención humana, con un **árbol de decisión**:
+
+| Entrada | Respuesta |
+|---|---|
+| `hola`, `buenas`, `info`, `turnos`, `precios`, … | menú de opciones |
+| `1` | tarifa de la consulta (`Prestacion` activa con el código `WHATSAPP_CONSULTA_CODIGO`, por defecto `10100`) |
+| `2` | obras sociales con convenio (`ObraSocial.activa = True`), en un solo mensaje |
+| `3` | dirección y horarios del consultorio (`WHATSAPP_CONSULTORIO_*`) |
+| `4` | **Atención Manual Requerida** (no responde: queda para una secretaria) |
+| cualquier otro texto | **Atención Manual Requerida** |
+
+- **Normalización del texto.** `normalizar_texto` pasa a minúsculas, saca
+  acentos y emojis con `unicodedata` (NFKD), así que `"Holá"`, `"1️⃣"` (el
+  teclado de WhatsApp) y `"OPCIÓN: 3"` se entienden igual.
+- **Detección de la opción.** `detectar_opcion` acepta `1`, `1.`, `(1)`, `n°1`,
+  `opcion 1`… pero **un sólo dígito**: `23` no es una opción del menú y cae en
+  atención manual. Un número fuera del menú (`7`) también queda registrado.
+- **Precio.** Se formatea con los separadores argentinos (`$18.000,00`) y, si la
+  prestación no está cargada, se avisa que no se pudo consultar el valor (el
+  `logger.warning` queda en los logs).
+- **Atención manual.** No se manda ningún mensaje: se registra el log
+  **`Atención Manual Requerida`** (nivel `WARNING`, logger
+  `app.services.whatsapp_bot`) con el motivo y el texto original, para que la
+  secretaría siga la conversación desde su WhatsApp.
+- **Transporte.** El bot sólo decide *qué* contestar; el envío lo hace
+  `whatsapp_service.enviar_mensaje_texto` (`POST` **real** a la Graph API con
+  credenciales, **simulado** sin ellas), igual que los recordatorios. Como el
+  paciente escribió primero, la respuesta entra en la **ventana de 24 h** de
+  atención al cliente y no necesita plantilla aprobada.
+- **Consultas a la base.** `obtener_prestacion_consulta` y
+  `listar_obras_sociales_activas` se pueden usar sueltas (son funciones puras
+  respecto del bot) y el árbol completo se prueba en
+  `tests/test_whatsapp_bot.py`.
+
 ### Webhook de entrada (`POST /api/v1/whatsapp/webhook`)
 
-1. Parsea el JSON con esquemas Pydantic (tolerante a campos extra).
-2. Extrae el mensaje con `interactive.button_reply`.
-3. Toma `context.id` → id (`wamid`) del mensaje saliente original.
-4. Busca el `Turno` por `whatsapp_mensaje_id`.
-5. Mapea el botón: `confirmar_turno` → `CONFIRMADO`, `cancelar_turno` → `CANCELADO`.
-6. Actualiza `estado_turno` y marca `estado_whatsapp = RESPONDIDO`.
+Atiende los dos tipos de mensaje que puede mandar un paciente:
+
+**`text` (escribe a mano)** → lo contesta el FAQ Bot. Responde `200` con
+`"tipo": "BOT"`, la `opcion` detectada (`null` si no es del menú), el
+`respuesta` enviado (texto) y `atencion_manual: true` cuando derivó a una
+persona. Si el mensaje no trae `from` ni `text.body`, es `400`.
+
+**`interactive.button_reply` (botones del recordatorio)** → extrae el mensaje con
+`interactive.button_reply`, toma `context.id` (el `wamid` del mensaje saliente
+original), busca el `Turno` por `whatsapp_mensaje_id` y mapea el botón —
+`confirmar_turno` → `CONFIRMADO`, `cancelar_turno` → `CANCELADO`—, actualizando
+`estado_turno` y dejando `estado_whatsapp = RESPONDIDO` (`"tipo": "BOTON"`).
+
+En los dos casos el JSON se parsea primero con esquemas Pydantic tolerantes a
+campos extra.
 
 **Códigos de error:** `400` payload inválido / botón desconocido / sin
 `context.id`; `404` no existe turno con ese `wamid`.

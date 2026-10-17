@@ -1,10 +1,13 @@
-"""Servicio de WhatsApp: envío de recordatorios y procesamiento del webhook.
+"""Servicio de WhatsApp: envío saliente (recordatorios y respuestas del bot) y
+procesamiento del webhook.
 
-Contiene dos responsabilidades claramente separadas:
+Contiene tres responsabilidades claramente separadas:
 
 1. **Envío saliente** de recordatorios (tarea programada), que se puede
    *simular* o *ejecutar* contra la WhatsApp Cloud API según configuración.
-2. **Procesamiento entrante** del webhook con la respuesta de botón del
+2. **Envío saliente de texto libre** (``enviar_mensaje_texto``), que reutiliza el
+   FAQ Bot (``whatsapp_bot_service``) para contestar los mensajes del paciente.
+3. **Procesamiento entrante** del webhook con la respuesta de botón del
    paciente, que actualiza el estado del turno.
 """
 
@@ -18,7 +21,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.config import settings
+from app.core.config import URL_WHATSAPP_POR_DEFECTO, settings
 from app.core.datetime_utils import rango_del_dia, to_naive_utc, utcnow
 from app.core.exceptions import (
     RespuestaWebhookInvalidaError,
@@ -90,7 +93,7 @@ def construir_payload_recordatorio(turno: Turno) -> dict:
 def _enviar_http_whatsapp(payload: dict) -> str:
     """Envía el mensaje a la WhatsApp Cloud API y devuelve el ``wamid``."""
     url = (
-        f"{settings.whatsapp_api_url.rstrip('/')}/"
+        f"{(settings.whatsapp_api_url or URL_WHATSAPP_POR_DEFECTO).rstrip('/')}/"
         f"{settings.whatsapp_phone_number_id}/messages"
     )
     headers = {
@@ -124,6 +127,40 @@ def enviar_mensaje_recordatorio(turno: Turno) -> str:
     logger.info("Enviando WhatsApp a %s", telefono)
 
     payload = construir_payload_recordatorio(turno)
+    if settings.whatsapp_envio_real:
+        return _enviar_http_whatsapp(payload)
+    return _simular_http_whatsapp(payload)
+
+
+def construir_payload_texto(telefono: str, texto: str) -> dict:
+    """Arma el cuerpo JSON de un mensaje de **texto** saliente (``type`` = text).
+
+    Es la forma más barata de contestarle al paciente: las respuestas del FAQ Bot
+    salen dentro de la *ventana de 24 horas* que abre su propio mensaje, así que
+    no requieren plantilla aprobada por Meta. ``preview_url`` queda en ``False``
+    para que WhatsApp no convierta en enlace la dirección del consultorio.
+    """
+    return {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": telefono,
+        "type": "text",
+        "text": {"preview_url": False, "body": texto},
+    }
+
+
+def enviar_mensaje_texto(telefono: str, texto: str) -> str:
+    """Envía (o simula) un mensaje de texto al paciente y devuelve el ``wamid``.
+
+    Usa el envío **real** con ``httpx`` (``POST`` a la Graph API de Meta) cuando
+    están las credenciales (``WHATSAPP_TOKEN``/``WHATSAPP_ACCESS_TOKEN`` y
+    ``WHATSAPP_PHONE_NUMBER_ID``); si no, **simula** el ``POST`` y devuelve un
+    ``wamid`` ficticio, igual que los recordatorios. Es la función que usa el
+    FAQ Bot (``whatsapp_bot_service``) para entregar sus respuestas.
+    """
+    logger.info("Enviando WhatsApp (texto) a %s", telefono or "SIN_TELEFONO")
+
+    payload = construir_payload_texto(telefono, texto)
     if settings.whatsapp_envio_real:
         return _enviar_http_whatsapp(payload)
     return _simular_http_whatsapp(payload)
@@ -225,13 +262,39 @@ def enviar_recordatorios(
 # ===========================================================================
 
 
-def _primer_mensaje_con_boton(payload: WhatsAppWebhookPayload) -> WhatsAppInboundMessage:
-    """Extrae el primer mensaje que contenga una respuesta de botón."""
+def iterar_mensajes(payload: WhatsAppWebhookPayload):
+    """Recorre, en orden, los mensajes entrantes que trae el webhook."""
     for entry in payload.entry:
         for change in entry.changes:
             for mensaje in change.value.messages or []:
-                if mensaje.interactive and mensaje.interactive.button_reply:
-                    return mensaje
+                yield mensaje
+
+
+def primer_mensaje(payload: WhatsAppWebhookPayload) -> Optional[WhatsAppInboundMessage]:
+    """Devuelve el primer mensaje entrante del payload (o ``None`` si no hay)."""
+    return next(iterar_mensajes(payload), None)
+
+
+def mensaje_de_texto(
+    payload: WhatsAppWebhookPayload,
+) -> Optional[WhatsAppInboundMessage]:
+    """Devuelve el primer mensaje de **texto** con cuerpo no vacío.
+
+    Es el disparador del FAQ Bot: un ``type: "text"`` con ``text.body`` es el
+    paciente escribiendo ("hola", "1", "¿atienden OSDE?"), mientras que un
+    ``type: "interactive"`` viene de los botones Confirmar/Cancelar.
+    """
+    for mensaje in iterar_mensajes(payload):
+        if mensaje.text and (mensaje.text.body or "").strip():
+            return mensaje
+    return None
+
+
+def _primer_mensaje_con_boton(payload: WhatsAppWebhookPayload) -> WhatsAppInboundMessage:
+    """Extrae el primer mensaje que contenga una respuesta de botón."""
+    for mensaje in iterar_mensajes(payload):
+        if mensaje.interactive and mensaje.interactive.button_reply:
+            return mensaje
     raise RespuestaWebhookInvalidaError(
         "El payload no contiene ninguna respuesta de botón (interactive.button_reply)."
     )
