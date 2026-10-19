@@ -15,7 +15,10 @@ dist/
 .env
 *.db
 *.sqlite3
-# Copias de seguridad generadas por scripts/migrar_turnos_unique_parcial.py
+# Archivos sueltos con credenciales (ej. el token que se copia desde Meta).
+tocken.txt
+tokens.txt
+token.txt
 *.db.bak-*
 
 # --- Testing / cachés ---

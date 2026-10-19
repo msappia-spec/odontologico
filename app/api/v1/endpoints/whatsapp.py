@@ -12,10 +12,12 @@ El panel también ofrece el enlace *Click-to-Chat* de los recordatorios
 pendientes, que no pasa por la API: lo envía la secretaría desde su WhatsApp.
 """
 
+import hmac
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -36,22 +38,49 @@ router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 
 @router.get(
     "/webhook",
+    response_class=PlainTextResponse,
     status_code=status.HTTP_200_OK,
     summary="Verificación del webhook (Meta/WhatsApp)",
     description=(
-        "Endpoint de verificación exigido por la WhatsApp Cloud API. Devuelve "
-        "el 'hub.challenge' cuando el token de verificación coincide."
+        "Endpoint de verificación exigido por la WhatsApp Cloud API. Meta hace "
+        "un GET con 'hub.mode=subscribe', el 'hub.verify_token' cargado en el "
+        "panel y un 'hub.challenge'; si el token coincide se devuelve el "
+        "'hub.challenge' como texto plano (200). Cualquier otro caso es 403."
     ),
 )
 def verificar_webhook(
     hub_mode: Optional[str] = Query(None, alias="hub.mode"),
     hub_challenge: Optional[str] = Query(None, alias="hub.challenge"),
     hub_verify_token: Optional[str] = Query(None, alias="hub.verify_token"),
-):
-    # Se compara contra el access token configurado a modo de ejemplo.
-    if hub_verify_token and hub_verify_token == settings.whatsapp_access_token:
-        return {"hub.challenge": hub_challenge}
-    return {"status": "verificación no válida"}
+) -> Response:
+    """Valida el *verify token* del webhook y devuelve el challenge de Meta.
+
+    Meta exige que la respuesta sea el valor de ``hub.challenge`` **tal cual**
+    (texto plano, ``200``), no un JSON: si se envuelve en un objeto, la
+    verificación del panel falla. El token se compara contra
+    ``WHATSAPP_VERIFY_TOKEN`` (nunca contra el access token de la API) y en
+    tiempo constante con ``hmac.compare_digest``.
+    """
+    esperado = (settings.whatsapp_verify_token or "").encode("utf-8")
+    recibido = (hub_verify_token or "").encode("utf-8")
+
+    if (
+        hub_mode == "subscribe"
+        and esperado
+        and hub_challenge
+        and hmac.compare_digest(recibido, esperado)
+    ):
+        logger.info("Webhook de WhatsApp verificado por Meta.")
+        return PlainTextResponse(hub_challenge, status_code=status.HTTP_200_OK)
+
+    logger.warning(
+        "Verificación del webhook rechazada (mode=%r, verify_token=%s).",
+        hub_mode,
+        "configurado pero distinto" if esperado else "sin configurar",
+    )
+    return PlainTextResponse(
+        "Verificación no válida", status_code=status.HTTP_403_FORBIDDEN
+    )
 
 
 def _procesar_texto_del_bot(

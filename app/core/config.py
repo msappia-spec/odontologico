@@ -118,6 +118,32 @@ class Settings(BaseSettings):
                 break
         return self
 
+    @model_validator(mode="after")
+    def _avisar_credenciales_whatsapp_dudosas(self) -> "Settings":
+        """Deja en el log un aviso si las credenciales de WhatsApp no encajan.
+
+        La Cloud API espera el **Phone Number ID** de Meta: un número largo, sólo
+        dígitos (p. ej. ``123456789012345``). El teléfono del consultorio
+        (``+5493516432863``) **no** sirve en ese lugar: el ``POST`` a
+        ``/<id>/messages`` responde 400/404 y el recordatorio queda ``FALLIDO``.
+        No se aborta el arranque —el valor se usa igual—, pero el aviso evita
+        diagnosticar a ciegas cuando el envío real falla.
+        """
+        telefono_o_id = (self.whatsapp_phone_number_id or "").strip()
+        if telefono_o_id and not telefono_o_id.isdigit():
+            logger.warning(
+                "WHATSAPP_PHONE_NUMBER_ID=%r no parece el 'Phone Number ID' de "
+                "Meta (debe ser un número largo, sin '+', espacios ni guiones). "
+                "Si Meta responde 400/404, copiá el ID de WhatsApp -> API Setup.",
+                telefono_o_id,
+            )
+        if self.whatsapp_access_token and not self.whatsapp_verify_token:
+            logger.warning(
+                "WHATSAPP_VERIFY_TOKEN sin configurar: Meta no podrá verificar "
+                "el webhook GET /api/v1/whatsapp/webhook."
+            )
+        return self
+
     # --- WhatsApp Cloud API (opcional) ---
     # Base de la Graph API de Meta; se puede sobreescribir desde el ``.env``.
     whatsapp_api_url: Optional[str] = URL_WHATSAPP_POR_DEFECTO
@@ -129,6 +155,11 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_TOKEN"),
     )
+    # Secreto del webhook: el valor que se carga en Meta (Webhook -> Verify token)
+    # y que Meta reenvía como ``hub.verify_token`` en el ``GET`` de verificación.
+    # Es independiente del access token (nunca debe usarse el token de la API
+    # como verify token).
+    whatsapp_verify_token: Optional[str] = None
 
     # --- Chatbot de respuestas automáticas (FAQ Bot) ---
     # Código del nomenclador con el que se responde la tarifa de consulta

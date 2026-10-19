@@ -644,3 +644,96 @@ def test_el_envio_real_solo_necesita_el_token_y_el_numero(
         monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", token)
 
     assert Settings(_env_file=None).whatsapp_envio_real is esperado
+
+
+# ---------------------------------------------------------------------------
+# Verificación del webhook (GET) que exige Meta para aprobar el webhook
+# ---------------------------------------------------------------------------
+
+VERIFY_TOKEN = "odontologia_secreto_2026"
+
+
+def test_el_webhook_devuelve_el_challenge_como_texto_plano(client, monkeypatch):
+    """Meta exige el ``hub.challenge`` tal cual (200, ``text/plain``), no un JSON."""
+    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
+
+    r = client.get(
+        f"{API}/whatsapp/webhook",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": VERIFY_TOKEN,
+            "hub.challenge": "1158201444",
+        },
+    )
+
+    assert r.status_code == 200
+    assert r.text == "1158201444"
+    assert r.headers["content-type"].startswith("text/plain")
+
+
+def test_el_webhook_rechaza_un_verify_token_distinto(client, monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
+
+    r = client.get(
+        f"{API}/whatsapp/webhook",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "otro-secreto",
+            "hub.challenge": "1158201444",
+        },
+    )
+
+    assert r.status_code == 403
+    assert r.text == "Verificación no válida"
+
+
+def test_el_webhook_no_acepta_el_access_token_como_verify_token(client, monkeypatch):
+    """El token de la API no es el verify token: no debe servir para verificar."""
+    monkeypatch.setattr(settings, "whatsapp_access_token", "EAA-token-de-la-api")
+    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
+
+    r = client.get(
+        f"{API}/whatsapp/webhook",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "EAA-token-de-la-api",
+            "hub.challenge": "1158201444",
+        },
+    )
+
+    assert r.status_code == 403
+
+
+def test_el_webhook_sin_verify_token_configurado_rechaza(client, monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_verify_token", None)
+
+    r = client.get(
+        f"{API}/whatsapp/webhook",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "",
+            "hub.challenge": "1158201444",
+        },
+    )
+
+    assert r.status_code == 403
+
+
+def test_el_webhook_exige_el_modo_subscribe(client, monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
+
+    r = client.get(
+        f"{API}/whatsapp/webhook",
+        params={
+            "hub.mode": "unsubscribe",
+            "hub.verify_token": VERIFY_TOKEN,
+            "hub.challenge": "1158201444",
+        },
+    )
+
+    assert r.status_code == 403
+
+
+def test_el_verify_token_se_lee_de_la_variable_de_entorno(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", VERIFY_TOKEN)
+    assert Settings(_env_file=None).whatsapp_verify_token == VERIFY_TOKEN

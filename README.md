@@ -389,6 +389,7 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
    | `RECORDATORIO_DIAS` | `3` | No |
    | `WHATSAPP_CODIGO_PAIS` | `549` | No |
    | `WHATSAPP_API_URL` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | credenciales de Meta (`WHATSAPP_TOKEN` es sinónimo del último) | Sólo para envíos reales |
+   | `WHATSAPP_VERIFY_TOKEN` | secreto elegido, p. ej. `odontologia_secreto_2026` | Sí, para conectar el webhook en Meta |
    | `WHATSAPP_CONSULTA_CODIGO` | `10100` | No (código del nomenclador de la consulta) |
    | `WHATSAPP_CONSULTORIO_DIRECCION` / `WHATSAPP_CONSULTORIO_HORARIOS` | texto | No (los publica el FAQ Bot con la opción 3) |
 
@@ -1275,6 +1276,26 @@ intervención humana, con un **árbol de decisión**:
   `listar_obras_sociales_activas` se pueden usar sueltas (son funciones puras
   respecto del bot) y el árbol completo se prueba en
   `tests/test_whatsapp_bot.py`.
+
+### Verificación del webhook (`GET /api/v1/whatsapp/webhook`)
+
+Antes de entregar mensajes, Meta valida la URL con un `GET` que trae
+`hub.mode=subscribe`, el `hub.verify_token` cargado en el panel y un
+`hub.challenge`. El endpoint:
+
+- compara el token contra `WHATSAPP_VERIFY_TOKEN` (con `hmac.compare_digest` y
+  **nunca** contra el access token de la API);
+- si coincide, devuelve el `hub.challenge` **tal cual**, en texto plano y con
+  `200` (Meta rechaza un JSON que lo envuelva);
+- si el token no coincide, falta `hub.mode=subscribe` o no viene el challenge,
+  responde `403`.
+
+Configuración en Meta (*WhatsApp → Configuration → Webhook → Edit*):
+
+- **Callback URL**: `https://odontologico-omega.vercel.app/api/v1/whatsapp/webhook`
+- **Verify token**: el mismo valor de `WHATSAPP_VERIFY_TOKEN`
+  (`odontologia_secreto_2026`)
+- En *Webhook fields*, suscribir **`messages`**.
 
 ### Webhook de entrada (`POST /api/v1/whatsapp/webhook`)
 
