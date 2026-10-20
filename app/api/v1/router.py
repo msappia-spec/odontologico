@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     tareas,
     turnos,
     whatsapp,
+    whatsapp_menu,
 )
 
 api_router = APIRouter()
@@ -31,3 +32,5 @@ api_router.include_router(aranceles.router)
 api_router.include_router(facturacion.router)
 api_router.include_router(tareas.router)
 api_router.include_router(whatsapp.router)
+# Menú configurable del FAQ Bot (panel «Bot WhatsApp»).
+api_router.include_router(whatsapp_menu.router)

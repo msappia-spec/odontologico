@@ -6,7 +6,8 @@ atiende los dos tipos de mensaje que puede mandar un paciente:
 * ``interactive.button_reply`` — la respuesta a un recordatorio (**Confirmar** /
   **Cancelar**), que actualiza el estado del turno.
 * ``text`` — un mensaje escrito a mano ("hola", "1", "¿atienden OSDE?"), que
-  contesta el **FAQ Bot** (``whatsapp_bot_service``).
+  contesta el **FAQ Bot** (``whatsapp_bot_service``) con el menú configurable
+  desde la vista *Bot WhatsApp* (``/whatsapp/menu``).
 
 El panel también ofrece el enlace *Click-to-Chat* de los recordatorios
 pendientes, que no pasa por la API: lo envía la secretaría desde su WhatsApp.
@@ -120,12 +121,13 @@ def _procesar_texto_del_bot(
     summary="Webhook de entrada de WhatsApp",
     description=(
         "Procesa los mensajes entrantes del paciente según su tipo:\n\n"
-        "* **text** (el paciente escribe): lo contesta el *FAQ Bot* con el menú de "
-        "opciones —1 precio de la consulta, 2 obras sociales, 3 ubicación y "
-        "horarios, 4 hablar con una secretaria— y devuelve 'tipo': 'BOT' con la "
-        "'opcion' detectada y el texto enviado. Cuando el mensaje no es del menú "
-        "no se responde: queda el log **'Atención Manual Requerida'** y "
-        "'atencion_manual': true.\n"
+        "* **text** (el paciente escribe): lo contesta el *FAQ Bot* con el menú "
+        "configurado en el panel *Bot WhatsApp* y devuelve 'tipo': 'BOT' con la "
+        "'opcion' detectada y el texto enviado. Cada tecla ejecuta el tipo de su "
+        "opción (texto libre, precio, obras sociales, ubicación o derivar a una "
+        "secretaria). Cuando la tecla no existe, no hay opciones activas o el "
+        "mensaje no es del menú no se responde: queda el log **'Atención Manual "
+        "Requerida'** y 'atencion_manual': true.\n"
         "* **interactive.button_reply** (botones Confirmar/Cancelar del "
         "recordatorio): extrae el id del mensaje contextual, localiza el turno por "
         "'whatsapp_mensaje_id' y lo pasa a CONFIRMADO o CANCELADO, marcando el "

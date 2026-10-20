@@ -20,6 +20,23 @@ class EstadoWhatsApp(str, enum.Enum):
     RESPONDIDO = "RESPONDIDO"
 
 
+class TipoOpcionMenu(str, enum.Enum):
+    """Comportamiento de una opción del menú del FAQ Bot de WhatsApp.
+
+    * ``TEXTO``: responde el texto libre que cargó la secretaría en ``respuesta``.
+    * ``PRECIO``: arma la tarifa con la prestación de consulta vigente.
+    * ``OBRAS_SOCIALES``: lista las coberturas con convenio activas.
+    * ``UBICACION``: dirección y horarios configurados en el ``.env``.
+    * ``SECRETARIA``: no responde; deja el log «Atención Manual Requerida».
+    """
+
+    TEXTO = "TEXTO"
+    PRECIO = "PRECIO"
+    OBRAS_SOCIALES = "OBRAS_SOCIALES"
+    UBICACION = "UBICACION"
+    SECRETARIA = "SECRETARIA"
+
+
 class TipoPagoDoctor(str, enum.Enum):
     """Modalidad con la que se le paga al odontólogo su producción (Módulo 3).
 

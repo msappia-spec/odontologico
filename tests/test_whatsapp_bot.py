@@ -1,7 +1,8 @@
 """Pruebas del Chatbot de Respuestas Automáticas (FAQ Bot) de WhatsApp.
 
 Simulan los mensajes entrantes de un paciente (``type: text``) contra el webhook
-``POST /api/v1/whatsapp/webhook`` y validan el árbol de respuestas completo:
+``POST /api/v1/whatsapp/webhook`` y validan el árbol de respuestas con el **menú
+histórico por defecto** (la tabla arranca vacía en las pruebas):
 
 * saludo o palabra clave ("hola", "buenas", "info", "turnos") → menú de opciones;
 * ``1`` → tarifa de la consulta tomada de ``Prestacion`` (código ``10100``);
@@ -10,7 +11,8 @@ Simulan los mensajes entrantes de un paciente (``type: text``) contra el webhook
 * ``4`` o cualquier texto que no sea del menú → **no** responde y registra
   ``'Atención Manual Requerida'`` para la secretaría.
 
-Los envíos salientes se interceptan con un *doble* de
+El menú editable (números, títulos y tipos a elección de la secretaría) se prueba
+en ``test_menu_whatsapp.py``. Los envíos salientes se interceptan con un *doble* de
 ``whatsapp_bot_service.enviar_mensaje_texto``: sin credenciales configuradas el
 servicio ya simula el ``POST`` a Meta, pero así también se comprueba **a quién**
 y **qué texto** se le manda, sin depender del ``.env`` de la máquina. El fixture

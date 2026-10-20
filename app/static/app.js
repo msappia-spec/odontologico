@@ -16,6 +16,27 @@
     return id ? `${OBRAS_SOCIALES}/${id}` : OBRAS_SOCIALES;
   }
 
+  /* Menú configurable del FAQ Bot (panel «Bot WhatsApp»). */
+  const MENU_WHATSAPP = "/whatsapp/menu";
+  function rutaOpcionMenu(id) {
+    return id ? `${MENU_WHATSAPP}/${id}` : MENU_WHATSAPP;
+  }
+  // Etiquetas del tipo de respuesta y el detalle que se muestra en la tabla
+  // para los tipos que arma el bot con datos del sistema.
+  const TIPOS_MENU_WA = {
+    TEXTO: "Texto libre",
+    PRECIO: "Precio de la consulta",
+    OBRAS_SOCIALES: "Obras sociales",
+    UBICACION: "Ubicación y horarios",
+    SECRETARIA: "Deriva a secretaría",
+  };
+  const TIPOS_MENU_WA_DETALLE = {
+    PRECIO: "Se arma con el precio vigente del nomenclador.",
+    OBRAS_SOCIALES: "Lista las coberturas activas del catálogo.",
+    UBICACION: "Envía la dirección y los horarios del consultorio.",
+    SECRETARIA: "Avisa que una secretaria responde a la brevedad.",
+  };
+
   /* ------------------------------- Estado ------------------------------- */
   const state = {
     doctores: [],
@@ -26,6 +47,11 @@
     obrasSociales: [],
     osMostrarInactivas: false,
     obraSocialEditId: null,
+    // Menú configurable del FAQ Bot (GET /whatsapp/menu): alimenta la vista
+    // «Bot WhatsApp». ``menuMostrarInactivas`` filtra localmente la tabla.
+    menuWhatsApp: [],
+    menuMostrarInactivas: false,
+    opcionMenuEditId: null,
     doctorEditId: null,
     // Recordatorios pendientes (GET /whatsapp/recordatorios-pendientes):
     // la lista y la ventana de días que muestra la pestaña "Recordatorios".
@@ -678,6 +704,124 @@
       .join("");
   }
 
+  /* ------------------ Menú configurable del Bot WhatsApp ----------------- */
+  function opcionesMenuWaActivas() {
+    return state.menuWhatsApp.filter((o) => o.activa);
+  }
+
+  function opcionMenuPorId(id) {
+    return state.menuWhatsApp.find((o) => String(o.id) === String(id)) || null;
+  }
+
+  /* Texto corto para la columna «Respuesta»: el mensaje cargado a mano o la
+     explicación de lo que arma el bot con los datos del sistema. */
+  function resumenRespuestaMenu(opcion) {
+    if (opcion.tipo === "TEXTO") {
+      const texto = String(opcion.respuesta || "").trim();
+      if (!texto) return '<span class="text-rose-600">Sin texto configurado</span>';
+      return esc(texto.length > 90 ? `${texto.slice(0, 90)}…` : texto);
+    }
+    return `<span class="text-slate-500">${esc(TIPOS_MENU_WA_DETALLE[opcion.tipo] || "—")}</span>`;
+  }
+
+  function renderMenuWhatsApp() {
+    const activas = opcionesMenuWaActivas();
+    const total = state.menuWhatsApp.length;
+
+    const contador = document.getElementById("count-menu-whatsapp");
+    if (contador) {
+      contador.textContent = `${activas.length} activa${activas.length === 1 ? "" : "s"}`;
+    }
+
+    // Insignia del menú lateral con la cantidad de opciones que ve el paciente.
+    const navBadge = document.getElementById("nav-menu-wa-activas");
+    if (navBadge) {
+      navBadge.textContent = String(activas.length);
+      navBadge.classList.toggle("hide", activas.length === 0);
+    }
+
+    const sub = document.getElementById("menu-wa-subtitulo");
+    if (sub) {
+      sub.textContent =
+        `${activas.length} de ${total} opción${total === 1 ? "" : "es"} activa` +
+        `${activas.length === 1 ? "" : "s"} en el menú que recibe el paciente al escribir «hola».`;
+    }
+
+    const tbody = document.getElementById("lista-menu-whatsapp");
+    if (!tbody) return;
+
+    const visibles = state.menuMostrarInactivas
+      ? state.menuWhatsApp
+      : opcionesMenuWaActivas();
+
+    if (!visibles.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="6">` +
+        vacio(
+          total ? "No hay opciones activas" : "El bot todavía no tiene un menú configurado",
+          total
+            ? "Activá el interruptor «Mostrar las dadas de baja» o creá una opción nueva."
+            : "Usá «Nueva opción» para agregar la primera, o «Restaurar menú histórico» para volver a las cuatro de siempre."
+        ) +
+        `</td></tr>`;
+      actualizarNumerosDisponiblesMenu();
+      return;
+    }
+
+    tbody.innerHTML = visibles
+      .map((o) => {
+        const estado = o.activa
+          ? `<span class="badge badge-green">${ICON.check}Activa</span>`
+          : `<span class="badge badge-slate">Dada de baja</span>`;
+        // DELETE /whatsapp/menu/{id} es baja lógica; PATCH {activa:true} reactiva.
+        const alterno = o.activa
+          ? `<button type="button" class="btn btn-danger-soft btn-sm" data-baja-menu="${o.id}" ` +
+            `title="Dejar de mostrar «${esc(o.titulo)}» en el menú">Desactivar</button>`
+          : `<button type="button" class="btn btn-soft btn-sm" data-reactivar-menu="${o.id}" ` +
+            `title="Volver a mostrar «${esc(o.titulo)}» en el menú">Reactivar</button>`;
+        return (
+          `<tr${o.activa ? "" : ' class="opacity-70"'}>` +
+          `<td><span class="w-8 h-8 rounded-lg bg-brand-50 text-brand-700 flex items-center justify-center font-extrabold flex-none">` +
+          `${esc(o.numero)}</span></td>` +
+          `<td><p class="font-semibold text-slate-800">${esc(o.titulo)}</p>` +
+          `<p class="text-[11px] text-slate-400">Orden ${esc(o.orden)}</p></td>` +
+          `<td><span class="badge badge-slate">${esc(TIPOS_MENU_WA[o.tipo] || o.tipo)}</span></td>` +
+          `<td class="text-xs max-w-[240px]">${resumenRespuestaMenu(o)}</td>` +
+          `<td>${estado}</td>` +
+          `<td><div class="flex items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-ghost btn-sm" data-editar-menu="${o.id}" ` +
+          `title="Editar «${esc(o.titulo)}»">Editar</button>${alterno}</div></td></tr>`
+        );
+      })
+      .join("");
+
+    // Si el modal está abierto, refresca qué teclas quedan libres.
+    actualizarNumerosDisponiblesMenu();
+  }
+
+  /* GET /whatsapp/menu: trae todas las opciones (activas y dadas de baja). */
+  async function cargarMenuWhatsApp() {
+    try {
+      state.menuWhatsApp = (await api(MENU_WHATSAPP)) || [];
+      renderMenuWhatsApp();
+    } catch (err) {
+      toast("error", "No se pudo cargar el menú del bot", err.message);
+    }
+  }
+
+  /* GET /whatsapp/menu/vista-previa: el texto exacto que manda el webhook,
+     armado por el backend con las mismas funciones que el bot. */
+  async function cargarVistaPreviaMenu() {
+    const salida = document.getElementById("menu-wa-preview");
+    if (!salida) return;
+    try {
+      const previa = await api(`${MENU_WHATSAPP}/vista-previa`);
+      salida.textContent = previa.texto || "(El menú no tiene opciones activas.)";
+    } catch (err) {
+      salida.textContent = `No se pudo cargar la vista previa: ${err.message}`;
+    }
+  }
+
   function renderPacientes() {
     document.getElementById("count-pacientes").textContent = state.pacientes.length;
     const tbody = document.getElementById("lista-pacientes");
@@ -974,6 +1118,8 @@
       cargarRecordatorios();
       // La agenda semanal de cada odontólogo también llega en su propia petición.
       cargarDisponibilidad();
+      // El menú del bot se pide aparte para no frenar el panel si la consulta falla.
+      cargarMenuWhatsApp();
     } catch (err) {
       estadoApi(false);
       toast("error", "No se pudo conectar con el servidor", err.message);
@@ -3556,6 +3702,10 @@
       "Obras Sociales",
       "Catálogo de coberturas que se ofrecen al registrar un paciente",
     ],
+    "bot-whatsapp": [
+      "Bot WhatsApp",
+      "Menú de opciones que el bot le ofrece a los pacientes por WhatsApp",
+    ],
     facturacion: [
       "Facturación y Caja",
       "Cierre de visitas, coseguros del mostrador y liquidación de obras sociales y profesionales",
@@ -3601,6 +3751,12 @@
       // Al entrar se refresca la caja del día y la pestaña que estaba activa
       // (cada una pide al servidor lo que muestra).
       cargarFacturacion();
+    }
+    if (v === "bot-whatsapp") {
+      // La tabla se dibuja con lo que ya está en memoria y la vista previa se
+      // pide al backend: es el texto exacto que recibe el paciente.
+      renderMenuWhatsApp();
+      cargarVistaPreviaMenu();
     }
   }
 
@@ -3961,7 +4117,175 @@
     }
   }
 
+  /* ------------------ Menú del Bot WhatsApp (alta y edición) --------------- */
+  /* El modal sirve para las dos operaciones: ``state.opcionMenuEditId`` guarda
+     el id en edición (``null`` = opción nueva). Las teclas ya usadas por otra
+     opción se deshabilitan para evitar el 409 del backend. */
+  function tipoMenuEsTexto() {
+    const sel = document.getElementById("menu-tipo");
+    return sel ? sel.value === "TEXTO" : true;
+  }
+
+  /* El texto libre es el único tipo que necesita la respuesta escrita a mano;
+     los demás la arman con datos del sistema, así que se oculta el campo. */
+  function sincronizarTipoMenu() {
+    const esTexto = tipoMenuEsTexto();
+    const wrap = document.getElementById("menu-respuesta-wrap");
+    const campo = document.getElementById("menu-respuesta");
+    const hint = document.getElementById("menu-respuesta-hint");
+    if (wrap) wrap.classList.toggle("hide", !esTexto);
+    if (campo) campo.required = esTexto;
+    if (hint) {
+      hint.textContent = esTexto
+        ? "Obligatoria: es el mensaje que recibe el paciente."
+        : "Este tipo no usa texto libre: el bot arma la respuesta con los datos del sistema.";
+    }
+  }
+
+  function actualizarNumerosDisponiblesMenu() {
+    const sel = document.getElementById("menu-numero");
+    if (!sel) return;
+    const usados = new Set(
+      state.menuWhatsApp
+        .filter((o) => String(o.id) !== String(state.opcionMenuEditId))
+        .map((o) => String(o.numero))
+    );
+    Array.prototype.forEach.call(sel.options, (op) => {
+      op.disabled = usados.has(op.value);
+    });
+  }
+
+  function primerNumeroLibreMenu() {
+    const usados = new Set(state.menuWhatsApp.map((o) => String(o.numero)));
+    const orden = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+    return orden.find((n) => !usados.has(n)) || orden[0];
+  }
+
+  function abrirModalOpcionMenu(id) {
+    const opcion = id ? opcionMenuPorId(id) : null;
+    state.opcionMenuEditId = opcion ? opcion.id : null;
+
+    const titulo = document.getElementById("modal-menu-titulo");
+    if (titulo) titulo.textContent = opcion ? `Editar «${opcion.titulo}»` : "Nueva opción del menú";
+    document.getElementById("menu-numero").value = opcion
+      ? String(opcion.numero)
+      : primerNumeroLibreMenu();
+    document.getElementById("menu-titulo").value = opcion ? opcion.titulo : "";
+    document.getElementById("menu-tipo").value = opcion ? opcion.tipo : "TEXTO";
+    document.getElementById("menu-respuesta").value =
+      opcion && opcion.respuesta ? opcion.respuesta : "";
+    document.getElementById("menu-orden").value = opcion ? opcion.orden : state.menuWhatsApp.length;
+    document.getElementById("menu-activa").checked = opcion ? Boolean(opcion.activa) : true;
+
+    actualizarNumerosDisponiblesMenu();
+    sincronizarTipoMenu();
+    ocultarAviso("menu-error");
+    mostrarModal("modal-opcion-menu");
+  }
+
+  function cerrarModalOpcionMenu() {
+    state.opcionMenuEditId = null;
+    const form = document.getElementById("form-opcion-menu");
+    if (form) form.reset();
+    ocultarModal("modal-opcion-menu");
+  }
+
+
+  /* POST /whatsapp/menu (alta) o PUT /{id} (reemplazo). El backend valida la
+     tecla única (409) y que TEXTO tenga respuesta (422); el mensaje se muestra
+     dentro del modal sin perder lo cargado. */
+  async function guardarOpcionMenu(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById("modal-menu-save");
+    const editando = Boolean(state.opcionMenuEditId);
+    const tipo = document.getElementById("menu-tipo").value;
+    const payload = {
+      numero: document.getElementById("menu-numero").value,
+      titulo: document.getElementById("menu-titulo").value.trim(),
+      tipo,
+      respuesta: tipo === "TEXTO"
+        ? document.getElementById("menu-respuesta").value.trim()
+        : null,
+      activa: document.getElementById("menu-activa").checked,
+      orden: Number(document.getElementById("menu-orden").value) || 0,
+    };
+    try {
+      bloquear(btn, true);
+      const opcion = await api(rutaOpcionMenu(state.opcionMenuEditId), {
+        method: editando ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      });
+      cerrarModalOpcionMenu();
+      toast(
+        "exito",
+        editando ? "Opción actualizada" : "Opción agregada al menú",
+        `${opcion.numero} · ${opcion.titulo}`
+      );
+      await cargarMenuWhatsApp();
+      await cargarVistaPreviaMenu();
+    } catch (err) {
+      mostrarAviso("menu-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* DELETE /whatsapp/menu/{id} da de baja la opción y PATCH {activa:true} la
+     reactiva: la fila nunca se borra. */
+  async function cambiarEstadoOpcionMenu(id, activa) {
+    const opcion = opcionMenuPorId(id);
+    if (!opcion) return;
+    try {
+      if (activa) {
+        await api(rutaOpcionMenu(opcion.id), {
+          method: "PATCH",
+          body: JSON.stringify({ activa: true }),
+        });
+      } else {
+        await api(rutaOpcionMenu(opcion.id), { method: "DELETE" });
+      }
+      toast(
+        "exito",
+        `Opción ${activa ? "reactivada" : "desactivada"}`,
+        `${opcion.numero} · ${opcion.titulo}`
+      );
+      await cargarMenuWhatsApp();
+      await cargarVistaPreviaMenu();
+    } catch (err) {
+      toast(
+        "error",
+        `No se pudo ${activa ? "reactivar" : "desactivar"} la opción`,
+        err.message
+      );
+    }
+  }
+
+  /* POST /whatsapp/menu/restaurar: vuelve a las cuatro opciones históricas. */
+  async function restaurarMenuWhatsApp() {
+    if (
+      !window.confirm(
+        "Se borra la configuración actual y vuelven las cuatro opciones históricas " +
+          "(precio, obras sociales, ubicación y secretaría). ¿Continuar?"
+      )
+    ) {
+      return;
+    }
+    const btn = document.getElementById("btn-restaurar-menu");
+    try {
+      bloquear(btn, true);
+      await api(`${MENU_WHATSAPP}/restaurar`, { method: "POST" });
+      toast("exito", "Menú restaurado", "El bot vuelve a las cuatro opciones históricas.");
+      await cargarMenuWhatsApp();
+      await cargarVistaPreviaMenu();
+    } catch (err) {
+      toast("error", "No se pudo restaurar el menú", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
   /* ------------------- Formulario de pacientes (alta/edición) ------------- */
+
   /* Un único formulario cumple las dos funciones: `state.pacienteEditId` guarda
      el id del paciente en edición (``null`` = alta). */
   /* Si la cobertura del paciente fue dada de baja ya no está en el desplegable:
@@ -4512,6 +4836,7 @@
       cerrarModalPrestacion();
       cerrarModalArancel();
       cerrarDebito();
+      cerrarModalOpcionMenu();
     });
 
     document.getElementById("form-doctor").addEventListener("submit", crearDoctor);
@@ -4549,6 +4874,44 @@
         renderObrasSociales();
       });
     }
+
+    // Menú del Bot WhatsApp: alta/edición en modal, baja lógica, restauración
+    // del menú histórico y vista previa del mensaje que recibe el paciente.
+    document.getElementById("btn-nueva-opcion-menu").addEventListener("click", function () {
+      abrirModalOpcionMenu(null);
+    });
+    document.getElementById("form-opcion-menu").addEventListener("submit", guardarOpcionMenu);
+    document.getElementById("menu-tipo").addEventListener("change", sincronizarTipoMenu);
+    document.getElementById("modal-menu-close").addEventListener("click", cerrarModalOpcionMenu);
+    document.getElementById("modal-menu-cancel").addEventListener("click", cerrarModalOpcionMenu);
+    document.getElementById("modal-opcion-menu").addEventListener("click", function (e) {
+      if (e.target.id === "modal-opcion-menu") cerrarModalOpcionMenu();
+    });
+    document.getElementById("btn-restaurar-menu").addEventListener("click", restaurarMenuWhatsApp);
+    document.getElementById("btn-vista-previa-menu").addEventListener("click", cargarVistaPreviaMenu);
+    const chkMenuInactivas = document.getElementById("menu-wa-inactivas");
+    if (chkMenuInactivas) {
+      chkMenuInactivas.checked = state.menuMostrarInactivas;
+      chkMenuInactivas.addEventListener("change", function (e) {
+        state.menuMostrarInactivas = e.target.checked;
+        renderMenuWhatsApp();
+      });
+    }
+    // Delegación: los botones de cada fila se redibujan en cada carga.
+    document.addEventListener("click", function (e) {
+      const editar = e.target.closest("[data-editar-menu]");
+      if (editar) {
+        abrirModalOpcionMenu(editar.dataset.editarMenu);
+        return;
+      }
+      const baja = e.target.closest("[data-baja-menu]");
+      if (baja) {
+        cambiarEstadoOpcionMenu(baja.dataset.bajaMenu, false);
+        return;
+      }
+      const reactivar = e.target.closest("[data-reactivar-menu]");
+      if (reactivar) cambiarEstadoOpcionMenu(reactivar.dataset.reactivarMenu, true);
+    });
 
     document.getElementById("form-paciente").addEventListener("submit", crearPaciente);
     document.getElementById("pac-cancelar-edicion").addEventListener("click", cancelarEdicionPaciente);
@@ -5111,6 +5474,10 @@
     nombreObraSocial,
     renderObrasSociales,
     cargarObrasSocialesSelect,
+    // Bot WhatsApp (menú configurable del FAQ Bot)
+    renderMenuWhatsApp,
+    cargarMenuWhatsApp,
+    cargarVistaPreviaMenu,
     // Disponibilidad (agenda semanal por odontólogo)
     cargarDisponibilidad,
     renderDisponibilidad,

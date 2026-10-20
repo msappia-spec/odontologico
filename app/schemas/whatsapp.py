@@ -154,7 +154,9 @@ class RespuestaBot(BaseModel):
 
     telefono: str
     texto_entrante: str
-    tipo: Literal["MENU", "PRECIO", "OBRAS_SOCIALES", "UBICACION", "MANUAL"]
+    tipo: Literal[
+        "MENU", "PRECIO", "OBRAS_SOCIALES", "UBICACION", "TEXTO", "MANUAL"
+    ]
     opcion: Optional[str] = Field(
         default=None, description="Opción del menú detectada ('1'..'4'), si hubo"
     )

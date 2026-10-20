@@ -16,9 +16,10 @@ El **Módulo 1** implementa:
 3. **Webhook de entrada de WhatsApp** (`POST /api/v1/whatsapp/webhook`) que
    procesa la respuesta de botón del paciente (**Confirmar** / **Cancelar**),
    localiza el turno por el id del mensaje contextual y actualiza sus estados, y
-   contesta los **mensajes de texto libre** con el *FAQ Bot* (precio de la
-   consulta, obras sociales con convenio, ubicación y horarios; lo que no es del
-   menú queda como *Atención Manual Requerida*).
+   contesta los **mensajes de texto libre** con el *FAQ Bot* y el **menú
+   configurable** en la vista *Bot WhatsApp* (texto libre, precio de la consulta,
+   obras sociales, ubicación o derivar a una secretaria; lo que no es del menú
+   queda como *Atención Manual Requerida*).
 4. **Recordatorios por enlace *Click-to-Chat*** (`GET
    /api/v1/whatsapp/recordatorios-pendientes`): la pestaña *Recordatorios
    Pendientes* del panel lista los turnos próximos, arma el enlace `wa.me` con
@@ -179,12 +180,14 @@ Odontologico/
 │   │   ├── archivo_adjunto.py      # Módulo 2: radiografías/estudios de la evolución
 │   │   ├── prestacion.py           # Módulo 3: catálogo de prácticas facturables
 │   │   ├── arancel_obra_social.py  # Módulo 3: cobertura y coseguro por práctica
-│   │   └── movimiento_caja.py      # Módulo 3: cierre de la visita + detalle congelado
+│   │   ├── movimiento_caja.py      # Módulo 3: cierre de la visita + detalle congelado
+│   │   └── opcion_menu_whatsapp.py # FAQ Bot: menú configurable desde el panel
 │   ├── schemas/                    # Esquemas Pydantic v2 (I/O de la API)
 │   │   ├── doctor.py, paciente.py, turno.py, whatsapp.py
 │   │   ├── obra_social.py          # Catálogo de obras sociales
 │   │   ├── disponibilidad.py       # Rangos semanales y bloques ofrecidos
 │   │   ├── historia_clinica.py     # Módulo 2: alta de evolución y ficha (sólo lectura)
+│   │   ├── opcion_menu_whatsapp.py # FAQ Bot: alta/edición/baja y vista previa del menú
 │   │   └── prestacion.py, arancel.py, facturacion.py # Módulo 3: precios, caja y liquidaciones
 │   ├── services/                   # Lógica de negocio
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
@@ -199,6 +202,7 @@ Odontologico/
 │   │   ├── liquidacion_service.py  # Módulo 3: producción y honorarios por profesional
 │   │   ├── reporte_pdf_service.py  # Módulo 3: los dos cierres de mes en PDF
 │   │   ├── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
+│   │   ├── whatsapp_menu_service.py # FAQ Bot: CRUD, defaults y restauración del menú
 │   │   └── whatsapp_bot_service.py # FAQ Bot: árbol de decisión de las respuestas
 │   └── api/v1/
 │       ├── router.py               # Router agregador
@@ -212,7 +216,8 @@ Odontologico/
 │           ├── facturacion.py      # Módulo 3: facturar, caja y liquidaciones
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
-│           └── whatsapp.py         # Webhook (bot + botones) + recordatorios
+│           ├── whatsapp.py         # Webhook (bot + botones) + recordatorios
+│           └── whatsapp_menu.py    # FAQ Bot: CRUD del menú que ve el paciente
 │   ├── web/
 │   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
 │   └── static/                     # Interfaz web (panel de la secretaría + móvil)
@@ -237,6 +242,7 @@ Odontologico/
 │   ├── test_disponibilidad.py      # Agenda semanal y bloques ofrecidos
 │   ├── test_doctores.py            # Edición, baja lógica y reactivación del doctor
 │   ├── test_historias_clinicas.py  # Módulo 2: alta, cronología e inmutabilidad
+│   ├── test_menu_whatsapp.py       # FAQ Bot: CRUD del menú, vista previa y tipos de respuesta
 │   ├── test_facturacion.py         # Módulo 3: precios, cierre de caja y liquidaciones
 │   ├── test_convenios.py           # Módulo 3: convenios por obra social e importador de precios
 │   ├── test_reportes_pdf.py        # Módulo 3: reportes en PDF (estructura y datos)
@@ -391,7 +397,7 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
    | `WHATSAPP_API_URL` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | credenciales de Meta (`WHATSAPP_TOKEN` es sinónimo del último) | Sólo para envíos reales |
    | `WHATSAPP_VERIFY_TOKEN` | secreto elegido, p. ej. `odontologia_secreto_2026` | Sí, para conectar el webhook en Meta |
    | `WHATSAPP_CONSULTA_CODIGO` | `10100` | No (código del nomenclador de la consulta) |
-   | `WHATSAPP_CONSULTORIO_DIRECCION` / `WHATSAPP_CONSULTORIO_HORARIOS` | texto | No (los publica el FAQ Bot con la opción 3) |
+   | `WHATSAPP_CONSULTORIO_DIRECCION` / `WHATSAPP_CONSULTORIO_HORARIOS` | texto | No (los publica el FAQ Bot con una opción de tipo `UBICACION`) |
 
 4. **Deploy**.
 
@@ -485,6 +491,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**— y Nº de afiliado) + tabla de pacientes con acción *Editar*. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. |
+| **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
 | **Facturación y Caja** | **Módulo 3.** Cinco pestañas: *Caja del día* (KPIs de efectivo y saldo de obras sociales + movimientos del día con acciones *Cobrar* / *Debitar*), *Liquidación de obras sociales* (cobertura + mes, totales del período, botón **Generar presentación del período**, tildado de órdenes pagadas o debitadas, cierre en lote y **exportación a CSV** o **PDF para la cobertura**), *Liquidación de médicos* (elegís el profesional y el mes: **tabla de subtotales** con la producción, el efectivo, lo presentado a las obras sociales, los honorarios por profesional y los totales del consultorio al pie —según la forma de pago configurada en *Doctores*— más exportación a CSV o **PDF de la liquidación**, que respeta el profesional elegido), *Prestaciones y aranceles* (catálogo de prácticas y tabla de aranceles por cobertura) y *Convenios* (**todo el nomenclador de Córdoba** para la cobertura elegida, con el campo **Monto que cubre la OS**, el **coseguro sugerido** calculado en vivo, los totales de la grilla, guardado en lote y el **importador masivo**: *Descargar Plantilla Excel de Ejemplo* —dos columnas: `codigo` y `precio_cobertura`, en `.csv` o `.xlsx`— + recuadro de **arrastrar y soltar** con vista previa por fila y confirmación). El **formulario de cobro** —que se abre con el botón *Cobrar una visita* o desde la tarjeta de un turno— tiene un **buscador rápido** por código del nomenclador o nombre, muestra por cada práctica su **arancel**, lo que **cubre la obra social** y el **coseguro**, avisa que el saldo queda **PENDIENTE para la liquidación de la cobertura** y calcula el cartel **«Cobrar Coseguro en mostrador: $X.XXX»** con el total de las prácticas; se confirma con **Confirmar y cerrar atención**, que registra el movimiento de caja y finaliza el turno. |
 
 ### Colores por estado del turno
@@ -927,6 +934,14 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `GET`  | `/whatsapp/recordatorios-pendientes` | **Recordatorios pendientes** con enlace Click-to-Chat (`?dias=1..30`, por defecto 3) |
 | `GET`  | `/whatsapp/webhook` | Verificación del webhook (Meta) |
 | `POST` | `/whatsapp/webhook` | **Webhook de entrada**: texto libre → FAQ Bot; botón del recordatorio → confirmar/cancelar el turno |
+| `GET`  | `/whatsapp/menu` | **Bot WhatsApp:** opciones del menú (`?activas=true/false`; sin filtro, todas) |
+| `POST` | `/whatsapp/menu` | Crear opción del menú (tecla única → `409`; `TEXTO` sin `respuesta` → `422`) |
+| `GET`  | `/whatsapp/menu/vista-previa` | Texto del menú activo (o aviso de menú vacío) al escribir «hola» |
+| `POST` | `/whatsapp/menu/restaurar` | Restaurar las cuatro opciones históricas (borra la configuración actual) |
+| `GET`  | `/whatsapp/menu/{id}` | Obtener una opción |
+| `PUT`  | `/whatsapp/menu/{id}` | Reemplazar una opción (payload completo) |
+| `PATCH`| `/whatsapp/menu/{id}` | Modificar una opción (parcial; `{"activa": true}` la reactiva) |
+| `DELETE`| `/whatsapp/menu/{id}` | **Baja lógica** de la opción (`activa = false`) |
 | `POST` | `/prestaciones` | **Módulo 3:** crear prestación (código de nomenclador único → `409`) |
 | `GET`  | `/prestaciones` | Listar el catálogo de prácticas (`?activas=true/false`, `?buscar=`) |
 | `GET`  | `/prestaciones/{id}` | Obtener prestación |
@@ -1207,7 +1222,7 @@ curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
       "text":{"body":"hola"}
     }]}}]}]}'
 
-# La misma consulta eligiendo una opción del menú (1 = precio de la consulta)
+# La misma consulta eligiendo una tecla (con el menú histórico, 1 = precio)
 curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
   "object":"whatsapp_business_account",
   "entry":[{"id":"WABA","changes":[{"field":"messages","value":{
@@ -1243,23 +1258,44 @@ curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
 ### FAQ Bot: respuestas automáticas (`whatsapp_bot_service`)
 
 El paciente escribe al número del consultorio y el bot contesta solo, sin
-intervención humana, con un **árbol de decisión**:
+intervención humana, con el **menú configurable** en la sección *Bot WhatsApp* del
+panel (tabla `opciones_menu_whatsapp`). Cada opción tiene una tecla, un título, un
+tipo de respuesta y un estado; las cuatro históricas se siembran solas la primera
+vez que arranca la aplicación.
 
 | Entrada | Respuesta |
 |---|---|
-| `hola`, `buenas`, `info`, `turnos`, `precios`, … | menú de opciones |
-| `1` | tarifa de la consulta (`Prestacion` activa con el código `WHATSAPP_CONSULTA_CODIGO`, por defecto `10100`) |
-| `2` | obras sociales con convenio (`ObraSocial.activa = True`), en un solo mensaje |
-| `3` | dirección y horarios del consultorio (`WHATSAPP_CONSULTORIO_*`) |
-| `4` | **Atención Manual Requerida** (no responde: queda para una secretaria) |
-| cualquier otro texto | **Atención Manual Requerida** |
+| `hola`, `buenas`, `info`, `turnos`, `precios`, … | menú con las opciones activas, en el orden configurado |
+| tecla de una opción `PRECIO` | tarifa de la consulta (`Prestacion` activa con el código `WHATSAPP_CONSULTA_CODIGO`, por defecto `10100`) |
+| tecla de una opción `OBRAS_SOCIALES` | obras sociales con convenio (`ObraSocial.activa = True`), en un solo mensaje |
+| tecla de una opción `UBICACION` | dirección y horarios del consultorio (`WHATSAPP_CONSULTORIO_*`) |
+| tecla de una opción `TEXTO` | el mensaje escrito por la secretaría en el panel |
+| tecla de una opción `SECRETARIA` | **Atención Manual Requerida** (no responde: queda para una secretaria) |
+| tecla que no existe o cualquier otro texto | **Atención Manual Requerida** |
 
+#### Menú configurable desde el panel
+
+- **Administración.** La vista **Bot WhatsApp** permite crear opciones (tecla
+  `0`..`9` única, título y tipo), editarlas, darlas de baja y reactivarlas. El
+  borrado es **lógico** (`activa = false`): la fila se conserva para poder
+  reactivarla.
+- **Sin configuración.** Si la tabla está vacía, el bot usa las cuatro opciones
+  históricas (`whatsapp_menu_service.opciones_por_defecto`). Si hay filas pero
+  **todas** están dadas de baja, el bot no responde y deriva a atención manual.
+- **Vista previa.** `GET /api/v1/whatsapp/menu/vista-previa` devuelve el texto
+  del menú con las opciones activas, armado con la misma función que usa el
+  webhook (`whatsapp_bot_service.mensaje_menu`), para comprobar el resultado
+  antes de probarlo desde un teléfono. Si no hay ninguna opción activa muestra
+  el aviso de menú vacío: el bot no envía nada y deriva a atención manual.
+- **Restaurar.** `POST /api/v1/whatsapp/menu/restaurar` borra la configuración
+  actual y vuelve a las cuatro opciones históricas.
 - **Normalización del texto.** `normalizar_texto` pasa a minúsculas, saca
   acentos y emojis con `unicodedata` (NFKD), así que `"Holá"`, `"1️⃣"` (el
   teclado de WhatsApp) y `"OPCIÓN: 3"` se entienden igual.
 - **Detección de la opción.** `detectar_opcion` acepta `1`, `1.`, `(1)`, `n°1`,
   `opcion 1`… pero **un sólo dígito**: `23` no es una opción del menú y cae en
-  atención manual. Un número fuera del menú (`7`) también queda registrado.
+  atención manual. Un número fuera del menú configurado (`7`) también queda
+  registrado.
 - **Precio.** Se formatea con los separadores argentinos (`$18.000,00`) y, si la
   prestación no está cargada, se avisa que no se pudo consultar el valor (el
   `logger.warning` queda en los logs).
@@ -1274,7 +1310,8 @@ intervención humana, con un **árbol de decisión**:
   atención al cliente y no necesita plantilla aprobada.
 - **Consultas a la base.** `obtener_prestacion_consulta` y
   `listar_obras_sociales_activas` se pueden usar sueltas (son funciones puras
-  respecto del bot) y el árbol completo se prueba en
+  respecto del bot). El CRUD del menú y los tipos de respuesta se prueban en
+  `tests/test_menu_whatsapp.py`; el árbol de decisión histórico, en
   `tests/test_whatsapp_bot.py`.
 
 ### Verificación del webhook (`GET /api/v1/whatsapp/webhook`)

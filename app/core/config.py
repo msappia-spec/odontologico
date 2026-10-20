@@ -165,9 +165,10 @@ class Settings(BaseSettings):
     # Código del nomenclador con el que se responde la tarifa de consulta
     # (Capítulo I del Nomenclador de Córdoba: consulta, examen y fichado).
     whatsapp_consulta_codigo: str = "10100"
-    # Datos que el bot devuelve con la opción 3 (Ubicación y horarios). Son
-    # configurables para que cada consultorio publique los suyos sin tocar el
-    # código: basta definirlos en el ``.env``.
+    # Datos que el bot devuelve con una opción de tipo UBICACION (el número lo
+    # define el menú configurado en el panel). Son configurables para que cada
+    # consultorio publique los suyos sin tocar el código: basta definirlos en el
+    # ``.env``.
     whatsapp_consultorio_direccion: str = "Av. Colón 1234, Córdoba Capital"
     whatsapp_consultorio_horarios: str = (
         "Lunes a viernes de 9:00 a 13:00 y de 15:00 a 19:00"

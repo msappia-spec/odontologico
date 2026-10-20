@@ -1,14 +1,24 @@
 """Servicio del Chatbot de Respuestas Automáticas (FAQ Bot) de WhatsApp.
 
 Atiende los mensajes de **texto libre** que el paciente le escribe al número del
-consultorio y los contesta sin intervención humana con un árbol de decisión:
+consultorio y los contesta sin intervención humana con un menú configurable:
 
-    "hola" / "buenas" / "info" / "turnos"   ->  menú de opciones
-    1  ->  tarifa de la consulta (Prestacion con el código '10100' vigente)
-    2  ->  obras sociales con convenio (ObraSocial.activa = True)
-    3  ->  dirección y horarios del consultorio
-    4  ->  *Atención Manual Requerida* (no responde: lo ve una secretaria)
+    "hola" / "buenas" / "info" / "turnos"   ->  menú configurado (activas)
+    1  ->  tarifa de la consulta (opción de tipo PRECIO)
+    2  ->  obras sociales con convenio (opción de tipo OBRAS_SOCIALES)
+    3  ->  dirección y horarios del consultorio (opción de tipo UBICACION)
+    4  ->  *Atención Manual Requerida* (opción de tipo SECRETARIA)
     cualquier otro texto  ->  *Atención Manual Requerida*
+
+Los números del ejemplo son los del menú histórico por defecto: la secretaría
+puede renumerarlos, cambiar los títulos o reemplazar la acción de cada tecla.
+
+Las opciones ya no están fijas en el código: se leen de la tabla
+``opciones_menu_whatsapp``, que la secretaría administra desde el panel
+(*Bot WhatsApp*). Cada opción tiene un dígito, un título y un tipo (texto libre,
+precio, obras sociales, ubicación o derivar a una secretaria). Si la tabla está
+vacía se usa el menú histórico de cuatro opciones como respaldo
+(``whatsapp_menu_service.opciones_por_defecto``).
 
 El envío hacia Meta no se duplica acá: lo hace
 ``whatsapp_service.enviar_mensaje_texto`` (``POST`` **real** con ``httpx``
@@ -28,9 +38,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.money import redondear_monto
+from app.models.enums import TipoOpcionMenu
 from app.models.obra_social import ObraSocial
+from app.models.opcion_menu_whatsapp import OpcionMenuWhatsApp
 from app.models.prestacion import Prestacion
 from app.schemas.whatsapp import RespuestaBot
+from app.services import whatsapp_menu_service
 from app.services.whatsapp_service import enviar_mensaje_texto
 
 logger = logging.getLogger("app.services.whatsapp_bot")
@@ -38,7 +51,7 @@ logger = logging.getLogger("app.services.whatsapp_bot")
 #: Texto exacto del registro que busca la secretaría en los logs.
 MENSAJE_ATENCION_MANUAL = "Atención Manual Requerida"
 
-# --- Etiquetas del árbol de decisión -----------------------------------------
+# --- Números históricos del menú (respaldo si la tabla está vacía) -----------
 OPCION_PRECIO_CONSULTA = "1"
 OPCION_OBRAS_SOCIALES = "2"
 OPCION_UBICACION = "3"
@@ -80,11 +93,14 @@ PATRON_OPCION = re.compile(
 #: Puntuación que se descarta de los bordes antes de buscar una opción ("(1)").
 PUNTUACION_BORDES = " ¿¡!.,;:()[]{}-—–"
 
-#: Menú que recibe el paciente cuando saluda o pide información.
-MENU_PRINCIPAL = (
+#: Menú histórico que recibe el paciente si la tabla de opciones está vacía.
+ENCABEZADO_MENU = (
     "¡Hola! 👋 Soy el asistente virtual del consultorio odontológico.\n\n"
     "Elegí una opción respondiendo con el número:\n\n"
-    "1️⃣ Precio de la consulta\n"
+)
+MENU_PRINCIPAL = (
+    ENCABEZADO_MENU
+    + "1️⃣ Precio de la consulta\n"
     "2️⃣ Obras sociales con convenio\n"
     "3️⃣ Ubicación y horarios\n"
     "4️⃣ Hablar con una secretaria"
@@ -124,12 +140,12 @@ def limpiar_palabra(palabra: str) -> str:
 
 
 def detectar_opcion(texto_normalizado: str) -> Optional[str]:
-    """Devuelve el dígito elegido del menú (``"1"``..``"4"``) o ``None``.
+    """Devuelve el dígito elegido del menú (``"0"``..``"9"``) o ``None``.
 
     Reconoce las formas en que la gente contesta de verdad: el número solo, con
     paréntesis o punto, con la palabra "opción" adelante o con el emoji del
-    teclado. Devuelve también los dígitos fuera del menú (``"7"``) para que el
-    llamador pueda registrarlos en el log de atención manual.
+    teclado. Devuelve también un dígito que no esté en el menú para que el
+    llamador pueda registrarlo en el log de atención manual.
     """
     candidato = texto_normalizado.strip(PUNTUACION_BORDES)
     coincidencia = PATRON_OPCION.fullmatch(candidato)
@@ -194,51 +210,127 @@ def listar_obras_sociales_activas(db: Session) -> Sequence[ObraSocial]:
 # ===========================================================================
 
 
-def mensaje_menu() -> str:
-    """Texto del menú principal (opciones 1 a 4)."""
-    return MENU_PRINCIPAL
+def _emoji_numero(numero: str) -> str:
+    """Devuelve el dígito con el emoji de tecla que usa WhatsApp (``1️⃣``)."""
+    return f"{numero}\ufe0f\u20e3" if numero.isdigit() else numero
 
 
-def mensaje_precio_consulta(prestacion: Prestacion) -> str:
-    """Tarifa de la consulta, con la descripción y el valor actuales."""
-    return (
+def _numero_de_tipo(
+    opciones: Sequence[OpcionMenuWhatsApp],
+    tipo: TipoOpcionMenu,
+    por_defecto: Optional[str] = None,
+) -> Optional[str]:
+    """Número de la primera opción activa del ``tipo`` (``None`` si no hay)."""
+    for opcion in opciones:
+        if opcion.tipo == tipo:
+            return opcion.numero
+    return por_defecto
+
+
+def mensaje_menu(
+    opciones: Optional[Sequence[OpcionMenuWhatsApp]] = None,
+) -> str:
+    """Texto del menú.
+
+    Sin argumentos devuelve el menú histórico (``MENU_PRINCIPAL``); con la lista
+    configurada arma un renglón por opción, en el mismo formato que ya conocen los
+    pacientes (``1️⃣ Título``). El orden lo define el servicio del menú.
+    """
+    if opciones is None:
+        return MENU_PRINCIPAL
+    if not opciones:
+        return ENCABEZADO_MENU + "(No hay opciones activas en este momento)"
+    renglones = "\n".join(
+        f"{_emoji_numero(opcion.numero)} {opcion.titulo}" for opcion in opciones
+    )
+    return ENCABEZADO_MENU + renglones
+
+
+def mensaje_precio_consulta(
+    prestacion: Prestacion,
+    *,
+    numero_obras_sociales: Optional[str] = OPCION_OBRAS_SOCIALES,
+    numero_secretaria: Optional[str] = OPCION_SECRETARIA,
+) -> str:
+    """Tarifa de la consulta, con la descripción y el valor actuales.
+
+    Los números de las opciones se toman del menú configurado: si la secretaría
+    renumeró «Obras sociales» o «Hablar con una secretaria», el texto las
+    referencia con el dígito correcto (y las omite si no existen).
+    """
+    mensaje = (
         "🦷 *Consulta odontológica*\n\n"
         f"{prestacion.descripcion}\n"
         f"Valor: *{formatear_importe(prestacion.valor_base)}*\n\n"
         "Es el arancel de referencia del Nomenclador de la Provincia de Córdoba: "
-        "incluye el examen, el diagnóstico y el fichado del paciente.\n\n"
-        "Si tenés obra social el valor puede estar cubierto: escribí *2* para ver "
-        "las coberturas con convenio o *4* para hablar con una secretaria."
+        "incluye el examen, el diagnóstico y el fichado del paciente."
     )
 
+    referencias = []
+    if numero_obras_sociales:
+        referencias.append(
+            f"escribí *{numero_obras_sociales}* para ver las coberturas con convenio"
+        )
+    if numero_secretaria:
+        referencias.append(f"*{numero_secretaria}* para hablar con una secretaria")
+    if referencias:
+        mensaje += (
+            "\n\nSi tenés obra social el valor puede estar cubierto: "
+            + " o ".join(referencias)
+            + "."
+        )
+    return mensaje
 
-def mensaje_obras_sociales(obras: Sequence[ObraSocial]) -> str:
+
+def mensaje_obras_sociales(
+    obras: Sequence[ObraSocial],
+    *,
+    numero_secretaria: Optional[str] = OPCION_SECRETARIA,
+) -> str:
     """Listado (en un **solo** mensaje) de las coberturas con convenio."""
     if not obras:
-        return (
+        mensaje = (
             "🏥 *Obras sociales*\n\n"
-            "Por el momento no tenemos obras sociales con convenio cargadas.\n\n"
-            "Escribí *4* y una secretaria te cuenta las opciones de pago."
+            "Por el momento no tenemos obras sociales con convenio cargadas."
         )
+        if numero_secretaria:
+            mensaje += (
+                f"\n\nEscribí *{numero_secretaria}* y una secretaria te cuenta "
+                "las opciones de pago."
+            )
+        return mensaje
 
     listado = "\n".join(f"• {obra.nombre}" for obra in obras)
-    return (
+    mensaje = (
         "🏥 *Obras sociales con convenio*\n\n"
         f"{listado}\n\n"
         f"Son {len(obras)} coberturas. Traé tu credencial a la consulta y te "
-        "informamos el coseguro que corresponda.\n\n"
-        "Escribí *4* si querés que una secretaria te confirme tu cobertura."
+        "informamos el coseguro que corresponda."
     )
+    if numero_secretaria:
+        mensaje += (
+            f"\n\nEscribí *{numero_secretaria}* si querés que una secretaria te "
+            "confirme tu cobertura."
+        )
+    return mensaje
 
 
-def mensaje_ubicacion() -> str:
+def mensaje_ubicacion(
+    *, numero_secretaria: Optional[str] = OPCION_SECRETARIA
+) -> str:
     """Dirección y horarios del consultorio (se configuran en el ``.env``)."""
-    return (
+    mensaje = (
         "📍 *Ubicación y horarios*\n\n"
         f"Dirección: {settings.whatsapp_consultorio_direccion}\n"
         f"Horarios de atención: {settings.whatsapp_consultorio_horarios}\n\n"
-        "Te esperamos. Si querés agendar un turno escribí *4* y te damos una fecha."
+        "Te esperamos."
     )
+    if numero_secretaria:
+        mensaje += (
+            f" Si querés agendar un turno escribí *{numero_secretaria}* y te damos "
+            "una fecha."
+        )
+    return mensaje
 
 
 # ===========================================================================
@@ -283,10 +375,10 @@ def _atencion_manual(
 ) -> RespuestaBot:
     """Registra la conversación y **omite** la respuesta automática.
 
-    Es el camino de la opción 4 y de todo texto que el bot no entiende: no se
-    envía nada por WhatsApp y queda el log **'Atención Manual Requerida'** con el
-    teléfono, el mensaje y el motivo, que es lo que revisa la secretaría para
-    contestar a mano.
+    Es el camino de las opciones de tipo ``SECRETARIA`` y de todo texto que el
+    bot no entiende: no se envía nada por WhatsApp y queda el log **'Atención
+    Manual Requerida'** con el teléfono, el mensaje y el motivo, que es lo que
+    revisa la secretaría para contestar a mano.
     """
     logger.warning(
         "%s: telefono=%s opcion=%s motivo=%s mensaje=%r",
@@ -307,20 +399,129 @@ def _atencion_manual(
     )
 
 
+def _responder_opcion(
+    db: Session,
+    opcion: OpcionMenuWhatsApp,
+    opciones: Sequence[OpcionMenuWhatsApp],
+    *,
+    destinatario: str,
+    texto_entrante: str,
+) -> RespuestaBot:
+    """Ejecuta la acción configurada para la opción que eligió el paciente."""
+    numero_obras = _numero_de_tipo(opciones, TipoOpcionMenu.OBRAS_SOCIALES)
+    numero_secretaria = _numero_de_tipo(opciones, TipoOpcionMenu.SECRETARIA)
+
+    # --- Precio de la consulta (datos del nomenclador) -----------------------
+    if opcion.tipo == TipoOpcionMenu.PRECIO:
+        prestacion = obtener_prestacion_consulta(db)
+        if prestacion is None:
+            logger.warning(
+                "FAQ Bot: no hay una prestación activa con el código de consulta %r.",
+                settings.whatsapp_consulta_codigo,
+            )
+            if numero_secretaria:
+                respuesta = MENSAJE_PRECIO_NO_DISPONIBLE.replace(
+                    f"*{OPCION_SECRETARIA}*", f"*{numero_secretaria}*"
+                )
+            else:
+                respuesta = MENSAJE_PRECIO_NO_DISPONIBLE.replace(
+                    f"Escribí *{OPCION_SECRETARIA}* y una secretaria",
+                    "Una secretaria",
+                )
+            return _responder(
+                tipo="PRECIO",
+                destinatario=destinatario,
+                texto_entrante=texto_entrante,
+                respuesta=respuesta,
+                opcion=opcion.numero,
+            )
+        return _responder(
+            tipo="PRECIO",
+            destinatario=destinatario,
+            texto_entrante=texto_entrante,
+            respuesta=mensaje_precio_consulta(
+                prestacion,
+                numero_obras_sociales=numero_obras,
+                numero_secretaria=numero_secretaria,
+            ),
+            opcion=opcion.numero,
+        )
+
+    # --- Obras sociales vigentes ---------------------------------------------
+    if opcion.tipo == TipoOpcionMenu.OBRAS_SOCIALES:
+        return _responder(
+            tipo="OBRAS_SOCIALES",
+            destinatario=destinatario,
+            texto_entrante=texto_entrante,
+            respuesta=mensaje_obras_sociales(
+                listar_obras_sociales_activas(db),
+                numero_secretaria=numero_secretaria,
+            ),
+            opcion=opcion.numero,
+        )
+
+    # --- Ubicación y horarios -------------------------------------------------
+    if opcion.tipo == TipoOpcionMenu.UBICACION:
+        return _responder(
+            tipo="UBICACION",
+            destinatario=destinatario,
+            texto_entrante=texto_entrante,
+            respuesta=mensaje_ubicacion(numero_secretaria=numero_secretaria),
+            opcion=opcion.numero,
+        )
+
+    # --- Derivar a una persona ------------------------------------------------
+    if opcion.tipo == TipoOpcionMenu.SECRETARIA:
+        return _atencion_manual(
+            destinatario=destinatario,
+            texto_entrante=texto_entrante,
+            opcion=opcion.numero,
+            motivo=f"el paciente eligió «{opcion.titulo}» (atención humana)",
+        )
+
+    # --- Texto libre cargado por la secretaría -------------------------------
+    if opcion.tipo == TipoOpcionMenu.TEXTO:
+        if not (opcion.respuesta or "").strip():
+            return _atencion_manual(
+                destinatario=destinatario,
+                texto_entrante=texto_entrante,
+                opcion=opcion.numero,
+                motivo=f"la opción «{opcion.titulo}» no tiene texto configurado",
+            )
+        return _responder(
+            tipo="TEXTO",
+            destinatario=destinatario,
+            texto_entrante=texto_entrante,
+            respuesta=opcion.respuesta,
+            opcion=opcion.numero,
+        )
+
+    # Tipo desconocido (dato viejo o corrupto): no se inventa una respuesta.
+    return _atencion_manual(
+        destinatario=destinatario,
+        texto_entrante=texto_entrante,
+        opcion=opcion.numero,
+        motivo=f"la opción «{opcion.titulo}» tiene un tipo desconocido",
+    )
+
+
 def responder_mensaje(db: Session, telefono: str, texto: str) -> RespuestaBot:
-    """Contesta un mensaje entrante de texto siguiendo el árbol de decisión.
+    """Contesta un mensaje entrante de texto siguiendo el menú configurado.
 
     Los pasos, en orden:
 
     1. **Normaliza** el texto (minúsculas, sin acentos) y el teléfono (sólo dígitos).
-    2. Si el texto es una **opción del menú** (1 a 4) ejecuta la rama que
-       corresponde.
-    3. Si es un **saludo o palabra clave** ("hola", "buenas", "info", "turnos",
-       "menú"…) envía el menú principal.
-    4. En cualquier otro caso —una opción fuera del menú, texto libre o un
+    2. Lee de la base el **menú vigente** (opciones activas). Si no hay ninguna
+       fila configurada usa las cuatro históricas por defecto.
+    3. Si el texto es una **opción del menú**, ejecuta la acción de esa opción:
+       texto libre, precio de la consulta, obras sociales, ubicación o derivar a
+       una secretaria.
+    4. Si es un **saludo o palabra clave** ("hola", "buenas", "info", "turnos",
+       "menú"…) envía el menú configurado.
+    5. En cualquier otro caso —una opción fuera del menú, texto libre o un
        mensaje sin texto— **no responde** y registra la atención manual requerida.
 
-    :param db: sesión para leer ``Prestacion`` (opción 1) y ``ObraSocial`` (opción 2).
+    :param db: sesión para leer el menú, ``Prestacion`` y ``ObraSocial``.
     :param telefono: número del remitente tal como llega en el webhook (``from``).
     :param texto: cuerpo del mensaje (``text.body``).
     """
@@ -336,76 +537,47 @@ def responder_mensaje(db: Session, telefono: str, texto: str) -> RespuestaBot:
             motivo="el mensaje no tiene texto",
         )
 
-    opcion = detectar_opcion(normalizado)
+    opciones = whatsapp_menu_service.obtener_menu_vigente(db)
+    numero = detectar_opcion(normalizado)
 
-    # --- Opción 1: precio de la consulta -------------------------------------
-    if opcion == OPCION_PRECIO_CONSULTA:
-        prestacion = obtener_prestacion_consulta(db)
-        if prestacion is None:
-            logger.warning(
-                "FAQ Bot: no hay una prestación activa con el código de consulta %r.",
-                settings.whatsapp_consulta_codigo,
-            )
-            return _responder(
-                tipo="PRECIO",
+    # --- Una tecla del menú: se busca la opción configurada ------------------
+    if numero is not None:
+        opcion = next((o for o in opciones if o.numero == numero), None)
+        if opcion is None:
+            return _atencion_manual(
                 destinatario=destinatario,
                 texto_entrante=texto,
-                respuesta=MENSAJE_PRECIO_NO_DISPONIBLE,
-                opcion=opcion,
+                opcion=numero,
+                motivo=f"la opción {numero} no existe en el menú",
             )
-        return _responder(
-            tipo="PRECIO",
-            destinatario=destinatario,
-            texto_entrante=texto,
-            respuesta=mensaje_precio_consulta(prestacion),
-            opcion=opcion,
+        logger.info(
+            "FAQ Bot: opción %s (%s) elegida por %s",
+            opcion.numero,
+            opcion.titulo,
+            destinatario or "?",
         )
-
-    # --- Opción 2: obras sociales vigentes -----------------------------------
-    if opcion == OPCION_OBRAS_SOCIALES:
-        return _responder(
-            tipo="OBRAS_SOCIALES",
+        return _responder_opcion(
+            db,
+            opcion,
+            opciones,
             destinatario=destinatario,
             texto_entrante=texto,
-            respuesta=mensaje_obras_sociales(listar_obras_sociales_activas(db)),
-            opcion=opcion,
-        )
-
-    # --- Opción 3: ubicación y horarios --------------------------------------
-    if opcion == OPCION_UBICACION:
-        return _responder(
-            tipo="UBICACION",
-            destinatario=destinatario,
-            texto_entrante=texto,
-            respuesta=mensaje_ubicacion(),
-            opcion=opcion,
-        )
-
-    # --- Opción 4: el paciente quiere hablar con una persona ------------------
-    if opcion == OPCION_SECRETARIA:
-        return _atencion_manual(
-            destinatario=destinatario,
-            texto_entrante=texto,
-            opcion=opcion,
-            motivo="el paciente pidió hablar con una secretaria",
-        )
-
-    # --- Un número que no está en el menú ------------------------------------
-    if opcion is not None:
-        return _atencion_manual(
-            destinatario=destinatario,
-            texto_entrante=texto,
-            opcion=opcion,
-            motivo=f"la opción {opcion} no existe en el menú",
         )
 
     # --- Saludo o palabra clave: se manda el menú ----------------------------
     if es_saludo_inicial(normalizado):
+        if not opciones:
+            return _atencion_manual(
+                destinatario=destinatario,
+                texto_entrante=texto,
+                opcion=None,
+                motivo="el menú no tiene opciones activas",
+            )
         return _responder(
             tipo="MENU",
             destinatario=destinatario,
             texto_entrante=texto,
-            respuesta=mensaje_menu(),
+            respuesta=mensaje_menu(opciones),
         )
 
     # --- Texto libre no reconocido -------------------------------------------

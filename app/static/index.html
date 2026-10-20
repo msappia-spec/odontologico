@@ -92,6 +92,11 @@
           <span class="flex-1">Obras Sociales</span>
           <span id="nav-os-activas" class="nav-badge hide">0</span>
         </a>
+        <a class="nav-link" data-view="bot-whatsapp">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
+          <span class="flex-1">Bot WhatsApp</span>
+          <span id="nav-menu-wa-activas" class="nav-badge hide">0</span>
+        </a>
       </nav>
 
       <div class="px-3 py-4 border-t border-white/10 space-y-2">
@@ -682,6 +687,87 @@
           </div>
         </section>
 
+        <!-- ================= VISTA: BOT WHATSAPP ================= -->
+        <section id="view-bot-whatsapp" class="anim-fade space-y-5 hide">
+
+          <!-- Encabezado: explicación del menú y acciones globales -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="w-11 h-11 rounded-xl bg-[#25d366]/15 text-[#128c7e] flex items-center justify-center flex-none">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-extrabold tracking-tight text-slate-900">Menú del Bot de WhatsApp</h2>
+                <p id="menu-wa-subtitulo" class="text-xs text-slate-500">
+                  Opciones que el bot le ofrece al paciente cuando escribe «hola».
+                </p>
+              </div>
+              <span id="count-menu-whatsapp" class="badge badge-brand">0</span>
+              <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                <input id="menu-wa-inactivas" type="checkbox"
+                       class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+                <span class="text-sm text-slate-600">Mostrar las dadas de baja</span>
+              </label>
+              <button type="button" id="btn-restaurar-menu" class="btn btn-soft btn-sm"
+                      title="Volver a las cuatro opciones históricas del bot">
+                Restaurar menú histórico
+              </button>
+              <button type="button" id="btn-nueva-opcion-menu" class="btn btn-primary btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                Nueva opción
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-3">
+              El paciente contesta con el n&uacute;mero de la opci&oacute;n. Las respuestas de precio, obras
+              sociales y ubicaci&oacute;n se arman solas con los datos del sistema; «Texto libre» env&iacute;a
+              exactamente lo que escribas y «Derivar a secretar&iacute;a» deja el mensaje para que una persona
+              responda. Si no queda ninguna opci&oacute;n activa, el bot no contesta y el mensaje queda para
+              atenci&oacute;n manual.
+            </p>
+          </div>
+
+          <div class="grid gap-5 xl:grid-cols-5">
+            <!-- Tabla de opciones configuradas -->
+            <div class="card overflow-hidden xl:col-span-3">
+              <div class="px-5 py-4 border-b border-slate-100">
+                <h2 class="font-bold text-slate-900">Opciones configuradas</h2>
+                <p class="text-[11px] text-slate-400">El n&uacute;mero (tecla) es &uacute;nico; el orden define en qu&eacute; rengl&oacute;n aparece.</p>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>N&ordm;</th><th>Opci&oacute;n</th><th>Tipo</th><th>Respuesta</th>
+                      <th>Estado</th><th class="text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="lista-menu-whatsapp"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Vista previa del mensaje que recibe el paciente -->
+            <div class="card p-4 sm:p-5 xl:col-span-2">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h2 class="font-bold text-slate-900">Vista previa</h2>
+                  <p class="text-[11px] text-slate-400">Lo que recibe el paciente al escribir «hola».</p>
+                </div>
+                <button type="button" id="btn-vista-previa-menu" class="btn btn-ghost btn-sm" title="Volver a pedir la vista previa">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                  Actualizar
+                </button>
+              </div>
+              <div id="menu-wa-preview"
+                   class="mt-3 rounded-xl bg-slate-900 text-slate-100 p-4 text-xs leading-relaxed whitespace-pre-wrap min-h-[220px]">Cargando vista previa&hellip;</div>
+              <p class="text-[11px] text-slate-400 mt-3">
+                Es el mismo texto que manda el webhook. Los asteriscos son el <span class="font-semibold">negrita</span> de WhatsApp.
+                Si no hay opciones activas, el bot no responde y se muestra el aviso de menú vacío.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <!-- ============== VISTA: RECORDATORIOS PENDIENTES ============== -->
         <section id="view-recordatorios" class="anim-fade space-y-5 hide">
 
@@ -1247,6 +1333,71 @@
       </form>
     </div>
   </div>
+
+  <!-- ===================== MODAL: OPCIÓN DEL MENÚ DEL BOT ===================== -->
+  <div id="modal-opcion-menu" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-lg p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 id="modal-menu-titulo" class="text-lg font-extrabold text-slate-900">Nueva opción del menú</h3>
+          <p class="text-xs text-slate-500">La tecla es única y se muestra delante del título.</p>
+        </div>
+        <button type="button" id="modal-menu-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-opcion-menu" class="space-y-4" autocomplete="off">
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="field-label" for="menu-numero">Tecla</label>
+            <select id="menu-numero" name="numero" class="field" required>
+              <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+              <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+              <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+              <option value="0">0</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label class="field-label" for="menu-titulo">Título de la opción</label>
+            <input id="menu-titulo" name="titulo" class="field" placeholder="Ej.: Precio de la consulta" required maxlength="80" />
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="menu-tipo">Qué responde el bot</label>
+          <select id="menu-tipo" name="tipo" class="field">
+            <option value="TEXTO">Texto libre (lo escribís acá)</option>
+            <option value="PRECIO">Precio de la consulta (dato del nomenclador)</option>
+            <option value="OBRAS_SOCIALES">Obras sociales vigentes (catálogo)</option>
+            <option value="UBICACION">Ubicación y horarios (dato fijo)</option>
+            <option value="SECRETARIA">Derivar a una secretaría (atención humana)</option>
+          </select>
+        </div>
+        <div id="menu-respuesta-wrap">
+          <label class="field-label" for="menu-respuesta">Respuesta</label>
+          <textarea id="menu-respuesta" name="respuesta" class="field" rows="5" maxlength="2000"
+                    placeholder="Escribí el mensaje tal cual lo va a recibir el paciente."></textarea>
+          <p id="menu-respuesta-hint" class="text-[11px] text-slate-400 mt-1"></p>
+        </div>
+        <div class="grid grid-cols-2 gap-3 items-end">
+          <div>
+            <label class="field-label" for="menu-orden">Orden</label>
+            <input id="menu-orden" name="orden" type="number" class="field" min="0" max="99" value="0" />
+          </div>
+          <label class="flex items-center gap-2.5 cursor-pointer select-none pb-2">
+            <input id="menu-activa" name="activa" type="checkbox" checked
+                   class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            <span class="text-sm text-slate-600">Activa (se muestra en el menú)</span>
+          </label>
+        </div>
+        <div id="menu-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-menu-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-menu-save" class="btn btn-primary flex-1">Guardar opción</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
 
   <!-- ============ MODAL: COBRAR UNA VISITA (Módulo 3) ============ -->
   <div id="modal-cobro" class="modal-backdrop hide">
