@@ -11,7 +11,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import Settings, settings
@@ -106,15 +106,21 @@ def destino_url(tmp_path) -> str:
 
 
 def _conteos(url: str) -> dict[str, int]:
-    """Cuenta las filas de cada tabla en la base indicada."""
+    """Cuenta las filas de cada tabla **existente** en la base indicada.
+
+    Una base local creada con una versión anterior puede no tener las tablas
+    nuevas del proyecto; se omiten para poder comparar origen y destino.
+    """
     engine = create_engine(url, future=True)
     try:
+        existentes = set(inspect(engine).get_table_names())
         with engine.connect() as conn:
             return {
                 tabla: int(
                     conn.exec_driver_sql(f'SELECT COUNT(*) FROM "{tabla}"').scalar()
                 )
                 for tabla in TABLAS
+                if tabla in existentes
             }
     finally:
         engine.dispose()
@@ -350,5 +356,7 @@ def test_migra_la_base_local_real_si_existe(tmp_path):
 
     assert resultado.total_insertadas > 0
     assert resultado.destino_final == resultado.origen_filas
-    assert _conteos(destino) == _conteos(url_origen)
+    conteos_origen = _conteos(url_origen)
+    conteos_destino = _conteos(destino)
+    assert {tabla: conteos_destino[tabla] for tabla in conteos_origen} == conteos_origen
 

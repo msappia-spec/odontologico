@@ -1,6 +1,7 @@
 """Modelos ORM del dominio (Módulo 1: turnos; Módulo 2: historia clínica;
-Módulo 3: facturación, caja y liquidaciones)."""
+Módulo 3: facturación, caja y liquidaciones; Módulo 4: anamnesis)."""
 
+from app.models.antecedentes_salud import AntecedentesSalud
 from app.models.arancel_obra_social import ArancelObraSocial
 from app.models.archivo_adjunto import ArchivoAdjunto
 from app.models.disponibilidad import DisponibilidadDoctor
@@ -22,6 +23,7 @@ from app.models.prestacion import Prestacion
 from app.models.turno import Turno
 
 __all__ = [
+    "AntecedentesSalud",
     "ArancelObraSocial",
     "ArchivoAdjunto",
     "DetalleMovimientoCaja",

@@ -39,3 +39,9 @@ publicar.bat
 
 # Configuración local del propio CLI
 .vercel/
+
+# Secretos locales: en Vercel se cargan como Environment Variables,
+# no se empaquetan en el deploy.
+.env
+.env.local
+.env.*.local

@@ -142,6 +142,27 @@
         <span id="hist-total" class="badge badge-brand">0</span>
       </div>
 
+      <!-- Ficha de salud completada por el paciente desde el enlace público
+           (Módulo 4). La dibuja medico.js a partir del detalle de la historia. -->
+      <div id="hist-antecedentes" class="m-salud"></div>
+
+      <!-- Alerta médica flotante, descartable: queda a la vista mientras se
+           carga la evolución para no pasar por alto alergias o cardiopatías. -->
+      <div id="hist-alerta" class="salud-alerta-flotante m-alerta-medica hide" role="alert" aria-live="assertive">
+        <span class="salud-alerta-icono" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>
+          </svg>
+        </span>
+        <div class="salud-alerta-texto">
+          <p class="salud-alerta-titulo">Alerta médica</p>
+          <p id="hist-alerta-motivos" class="salud-alerta-motivos"></p>
+        </div>
+        <button type="button" class="salud-alerta-cerrar" data-cerrar-alerta aria-label="Ocultar la alerta médica" title="Ocultar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
       <!-- Único formulario de escritura del módulo: la evolución sólo se crea. -->
       <form id="form-evolucion" class="m-form m-hist-form" novalidate>
         <input type="hidden" id="evo-doctor-id" />

@@ -978,6 +978,137 @@ select.field {
 }
 
 /* ==========================================================================
+   Módulo 4 · Ficha de salud declarada por el paciente (anamnesis)
+   --------------------------------------------------------------------------
+   Se muestra en el Panel Principal y en la vista móvil del odontólogo. Usa
+   clases compartidas para que ambas pantallas lean igual; el banner de alerta
+   es flotante y descartable.
+   ========================================================================== */
+.hist-salud { margin-bottom: 1rem; }
+.hist-salud:empty { margin-bottom: 0; }
+.hist-salud .salud-card { margin-bottom: 0; }
+.m-salud { margin-bottom: .9rem; }
+.m-salud:empty { margin-bottom: 0; }
+
+.salud-card {
+  padding: .9rem 1rem;
+  margin-bottom: 1rem;
+  background: #fff;
+  border: 1px solid #e6ecf1;
+  border-left: 4px solid var(--brand-500);
+  border-radius: .85rem;
+  box-shadow: 0 10px 26px -24px rgba(15, 28, 36, .55);
+}
+.salud-card-alerta {
+  background: linear-gradient(180deg, #fff8f8 0%, #fff 60%);
+  border-color: #fecaca;
+  border-left-color: #dc2626;
+}
+.salud-card-pendiente { background: #fbfdfe; border-left-color: #cbd5e1; }
+
+.salud-cabecera { display: flex; align-items: flex-start; gap: .65rem; }
+.salud-icono {
+  width: 2rem; height: 2rem; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: .65rem;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-200);
+  color: var(--brand-700);
+}
+.salud-icono svg { width: 1.05rem; height: 1.05rem; }
+.salud-card-alerta .salud-icono {
+  background: #fef2f2; border-color: #fecaca; color: #b91c1c;
+}
+.salud-card-pendiente .salud-icono {
+  background: #f1f5f9; border-color: #e2e8f0; color: #64748b;
+}
+.salud-cabecera-texto { flex: 1 1 auto; min-width: 0; }
+.salud-titulo { font-size: .9rem; font-weight: 800; color: #0f1c24; }
+.salud-sub { margin-top: .1rem; font-size: .72rem; line-height: 1.4; color: #64748b; }
+.salud-cabecera > .badge { flex: none; }
+
+.salud-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .7rem .9rem;
+  margin-top: .85rem;
+}
+.salud-dato-ancho { grid-column: 1 / -1; }
+.salud-dato-titulo {
+  font-size: .66rem; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; color: #94a3b8;
+}
+.salud-dato-texto {
+  margin-top: .18rem; font-size: .82rem; line-height: 1.45;
+  color: #33454f; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.salud-sin-dato { color: #94a3b8; font-style: italic; }
+.salud-booleano {
+  display: inline-flex; align-items: center;
+  padding: .12rem .5rem;
+  background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 999px;
+  font-size: .72rem; font-weight: 700; color: #475569;
+}
+.salud-booleano-si {
+  background: #fef2f2; border-color: #fecaca; color: #b91c1c; font-weight: 800;
+}
+.salud-alerta-nota {
+  margin-top: .8rem; padding: .55rem .65rem;
+  background: #fef2f2; border: 1px solid #fecaca; border-radius: .6rem;
+  font-size: .73rem; line-height: 1.45; color: #991b1b;
+}
+.salud-pendiente { margin-top: .65rem; font-size: .76rem; line-height: 1.45; color: #64748b; }
+
+/* Aviso flotante de antecedentes de riesgo. Se oculta con ``.hide`` y se
+   vuelve a mostrar cada vez que se abre una ficha con alerta. */
+.salud-alerta-flotante {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 68;
+  display: flex; align-items: flex-start; gap: .65rem;
+  width: min(23rem, calc(100vw - 2rem));
+  padding: .8rem .85rem;
+  background: #7f1d1d;
+  border: 1px solid #991b1b;
+  border-radius: .9rem;
+  color: #fff;
+  box-shadow: 0 18px 40px -18px rgba(127, 29, 29, .75);
+  animation: saludAlertaEntra .25s ease both;
+}
+@keyframes saludAlertaEntra {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.salud-alerta-icono {
+  width: 1.9rem; height: 1.9rem; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, .14);
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: .6rem;
+}
+.salud-alerta-icono svg { width: 1.1rem; height: 1.1rem; }
+.salud-alerta-texto { flex: 1 1 auto; min-width: 0; }
+.salud-alerta-titulo {
+  font-size: .8rem; font-weight: 800; letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.salud-alerta-motivos {
+  margin-top: .12rem; font-size: .76rem; line-height: 1.4;
+  color: #fecaca;
+}
+.salud-alerta-cerrar {
+  width: 1.8rem; height: 1.8rem; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: .5rem;
+  background: rgba(255, 255, 255, .12); color: #fff;
+  cursor: pointer;
+}
+.salud-alerta-cerrar:hover { background: rgba(255, 255, 255, .22); }
+.salud-alerta-cerrar svg { width: .95rem; height: .95rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .salud-alerta-flotante { animation: none; }
+}
+
+/* ==========================================================================
    Módulo 3 · Facturación y Caja (obras sociales, coseguros y liquidaciones)
    ========================================================================== */
 

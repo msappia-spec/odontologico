@@ -5,6 +5,7 @@ Importar este módulo garantiza que **todos** los modelos estén registrados en
 """
 
 from app.db.base_class import Base
+from app.models.antecedentes_salud import AntecedentesSalud
 from app.models.arancel_obra_social import ArancelObraSocial
 from app.models.archivo_adjunto import ArchivoAdjunto
 from app.models.disponibilidad import DisponibilidadDoctor
@@ -21,6 +22,7 @@ from app.models.turno import Turno
 
 __all__ = [
     "Base",
+    "AntecedentesSalud",
     "ArancelObraSocial",
     "ArchivoAdjunto",
     "DetalleMovimientoCaja",

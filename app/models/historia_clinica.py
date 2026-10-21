@@ -20,7 +20,7 @@ Notas de diseño:
   En el uso normal el paciente no se borra: se conserva su registro.
 """
 
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -28,6 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
+    from app.models.antecedentes_salud import AntecedentesSalud
     from app.models.evolucion_medica import EvolucionMedica
     from app.models.paciente import Paciente
 
@@ -54,6 +55,15 @@ class HistoriaClinica(Base):
     # borre una por una las evoluciones.
     evoluciones: Mapped[List["EvolucionMedica"]] = relationship(
         back_populates="historia_clinica",
+        passive_deletes=True,
+    )
+    # Declaración de salud que el paciente completa antes de la consulta
+    # (Módulo 4). Es opcional: una ficha puede tener evoluciones y todavía no
+    # tener antecedentes cargados.
+    antecedentes_salud: Mapped[Optional["AntecedentesSalud"]] = relationship(
+        back_populates="historia_clinica",
+        uselist=False,
+        cascade="all, delete-orphan",
         passive_deletes=True,
     )
 

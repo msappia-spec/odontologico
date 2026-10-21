@@ -29,6 +29,7 @@ from pydantic import (
 
 from app.core.datetime_utils import to_naive_utc
 from app.models.archivo_adjunto import TIPO_ARCHIVO_POR_DEFECTO
+from app.schemas.antecedentes_salud import AntecedentesSaludRead
 
 # Límite de los textos clínicos (el dictado de una atención sobra de largo).
 _MAX_TEXTO = 4000
@@ -161,16 +162,24 @@ class EvolucionMedicaRead(BaseModel):
 class HistoriaClinicaDetalle(BaseModel):
     """Historia clínica de un paciente con su línea de tiempo (sólo lectura).
 
-    ``id`` viaja en ``null`` mientras el paciente no tenga ninguna evolución
-    cargada: la ficha se crea con la primera evolución, así que una consulta de
-    sólo lectura nunca escribe en la base.
+    ``id`` viaja en ``null`` mientras el paciente no tenga **evoluciones ni
+    ficha de salud**: la historia se crea con la primera evolución o cuando el
+    paciente envía su anamnesis. Una consulta de sólo lectura nunca escribe en
+    la base.
+
+    ``alerta_medica`` y ``motivos_alerta`` se repiten en el nivel superior para
+    que el odontólogo pueda mostrar el aviso rojo sin recorrer el objeto de
+    antecedentes (la sección móvil usa exactamente esos dos campos).
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = Field(
         None,
-        description="Id de la ficha; ``null`` si el paciente aún no tiene evoluciones.",
+        description=(
+            "Id de la ficha; ``null`` si el paciente aún no tiene evoluciones "
+            "ni ficha de salud."
+        ),
     )
     paciente_id: int
     paciente_nombre: str
@@ -178,5 +187,17 @@ class HistoriaClinicaDetalle(BaseModel):
     numero_ficha: str
     total_evoluciones: int
     evoluciones: List[EvolucionMedicaRead] = Field(default_factory=list)
+    antecedentes_salud: Optional[AntecedentesSaludRead] = Field(
+        None,
+        description="Declaración de salud enviada por el paciente (Módulo 4).",
+    )
+    alerta_medica: bool = Field(
+        default=False,
+        description="``True`` si la ficha de salud tiene antecedentes de riesgo.",
+    )
+    motivos_alerta: List[str] = Field(
+        default_factory=list,
+        description="Antecedentes de riesgo, con etiquetas listas para mostrar.",
+    )
 
 

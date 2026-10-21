@@ -3,6 +3,7 @@
 Las variables se leen del archivo ``.env`` (si existe) y del entorno del sistema.
 """
 
+import hashlib
 import logging
 import os
 from typing import List, Optional
@@ -180,6 +181,51 @@ class Settings(BaseSettings):
     # cuando se arma el enlace "Click-to-Chat" (https://wa.me/...).
     # Para Argentina móvil el formato es 54 + 9 + área + número -> "549".
     whatsapp_codigo_pais: str = "549"
+
+    # --- Ficha de salud pública (anamnesis) ---
+    # Base absoluta con la que se arma el enlace que recibe el paciente por
+    # WhatsApp (``https://mi-consultorio.com/anamnesis/<token>``). Si no se
+    # define, en Vercel se usa el dominio del proyecto y en local
+    # ``http://localhost:8000``.
+    public_base_url: Optional[str] = None
+    # Secreto con el que se firman los tokens de la ficha de salud. Si no se
+    # define se reutiliza el ``WHATSAPP_VERIFY_TOKEN`` (o, en su defecto, una
+    # clave derivada de la configuración de la base). Conviene fijarlo en
+    # producción para que los enlaces sean estables e imposibles de falsificar.
+    anamnesis_token_secret: Optional[str] = None
+
+    @property
+    def url_publica(self) -> str:
+        """URL base absoluta para enlaces públicos (sin ``/`` final)."""
+        if self.public_base_url and self.public_base_url.strip():
+            return self.public_base_url.strip().rstrip("/")
+        # Vercel expone el dominio de producción/preview como variable de
+        # entorno. Se usa para que los enlaces de WhatsApp funcionen sin tener
+        # que configurar la URL a mano en cada despliegue.
+        dominio = (
+            os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
+            or os.getenv("VERCEL_URL")
+            or ""
+        ).strip()
+        if dominio:
+            return f"https://{dominio.rstrip('/')}"
+        return "http://localhost:8000"
+
+    @property
+    def anamnesis_secreto_efectivo(self) -> str:
+        """Clave usada para firmar/validar los tokens de anamnesis.
+
+        Prioridad: ``ANAMNESIS_TOKEN_SECRET`` -> ``WHATSAPP_VERIFY_TOKEN`` ->
+        una clave derivada de la URL de la base y del nombre de la app. La
+        última opción evita un secreto hardcodeado y sigue siendo impredecible
+        para quien no conozca la configuración del servidor.
+        """
+        if self.anamnesis_token_secret and self.anamnesis_token_secret.strip():
+            return self.anamnesis_token_secret.strip()
+        if self.whatsapp_verify_token and self.whatsapp_verify_token.strip():
+            return self.whatsapp_verify_token.strip()
+        semilla = f"{self.database_url}|{self.app_name}|anamnesis"
+        return hashlib.sha256(semilla.encode("utf-8")).hexdigest()
 
     @property
     def whatsapp_envio_real(self) -> bool:

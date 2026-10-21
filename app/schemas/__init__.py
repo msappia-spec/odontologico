@@ -1,5 +1,11 @@
 """Esquemas Pydantic para validación/serialización de la API."""
 
+from app.schemas.antecedentes_salud import (
+    AnamnesisGuardadaRead,
+    AnamnesisPublicaRead,
+    AntecedentesSaludRead,
+    DeclaracionSaludCreate,
+)
 from app.schemas.arancel import (
     ArancelObraSocialCreate,
     ArancelObraSocialRead,
@@ -69,6 +75,9 @@ from app.schemas.whatsapp import (
 )
 
 __all__ = [
+    "AnamnesisGuardadaRead",
+    "AnamnesisPublicaRead",
+    "AntecedentesSaludRead",
     "ArancelObraSocialCreate",
     "ArancelObraSocialRead",
     "ArancelObraSocialUpdate",
@@ -77,6 +86,7 @@ __all__ = [
     "BloqueDisponible",
     "CobrarMovimientoRequest",
     "DebitarMovimientoRequest",
+    "DeclaracionSaludCreate",
     "DetalleMovimientoCajaRead",
     "DisponibilidadCreate",
     "DisponibilidadEspecificaCreate",

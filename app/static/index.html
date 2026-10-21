@@ -264,6 +264,10 @@
               </div>
               <span id="hist-panel-ficha" class="badge badge-slate">Sin ficha abierta</span>
             </div>
+            <!-- Ficha de salud declarada por el paciente desde el enlace de
+                 WhatsApp (Módulo 4). La dibuja app.js con el detalle de la
+                 historia clínica; si tiene antecedentes de riesgo se resalta. -->
+            <div id="hist-panel-antecedentes" class="hist-salud"></div>
             <div class="grid grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)] gap-5">
               <div>
                 <label class="field-label" for="hist-panel-buscar">Paciente</label>
@@ -276,6 +280,25 @@
                 <p id="hist-panel-total" class="text-xs text-slate-500"></p>
                 <div id="hist-panel-timeline" class="hist-timeline mt-3"></div>
               </div>
+            </div>
+
+            <!-- Alerta médica flotante: se muestra al abrir una ficha con
+                 antecedentes de riesgo (alergias, presión alta, cardiopatías,
+                 medicación o embarazo). Se puede cerrar y reaparece al volver
+                 a abrir la ficha. -->
+            <div id="hist-panel-alerta" class="salud-alerta-flotante hide" role="alert" aria-live="assertive">
+              <span class="salud-alerta-icono" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>
+                </svg>
+              </span>
+              <div class="salud-alerta-texto">
+                <p class="salud-alerta-titulo">Alerta médica</p>
+                <p id="hist-panel-alerta-motivos" class="salud-alerta-motivos"></p>
+              </div>
+              <button type="button" class="salud-alerta-cerrar" data-cerrar-alerta aria-label="Ocultar la alerta médica" title="Ocultar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
             </div>
           </div>
         </section>

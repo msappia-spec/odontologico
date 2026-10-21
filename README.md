@@ -1,8 +1,9 @@
-# Sistema Odontológico — Módulos 1, 2 y 3
+# Sistema Odontológico — Módulos 1, 2, 3 y 4
 
 **Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
 **Módulo 2: Historias Clínicas y Evoluciones Médicas** ·
-**Módulo 3: Obras Sociales, Liquidación de Médicos y Facturación Mixta** —
+**Módulo 3: Obras Sociales, Liquidación de Médicos y Facturación Mixta** ·
+**Módulo 4: Ficha de Salud previa (Anamnesis)** —
 Backend en **FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
 
 El **Módulo 1** implementa:
@@ -145,6 +146,41 @@ hasta la liquidación mensual de los profesionales.
    sistema traduce cada código contra el nomenclador, muestra una **vista previa**
    (nuevas, actualizadas, sin cambios, sin precio y filas con error) y recién
    entonces confirma la importación.
+
+---
+
+## 🦷 Módulo 4 · Ficha de salud previa (anamnesis)
+
+Antes de la consulta el paciente completa, desde el celular y **sin iniciar
+sesión**, un breve cuestionario de salud. El enlace viaja en el recordatorio de
+WhatsApp y es la única credencial necesaria: un **token HMAC-SHA256** firmado con
+`ANAMNESIS_TOKEN_SECRET` que identifica el turno y el paciente.
+
+1. **Modelo `AntecedentesSalud`**: una ficha por historia clínica (índice único
+   `uq_antecedentes_historia_clinica`) con alergias, presión alta, problemas
+   cardíacos, medicación actual, embarazo, `completado` y `fecha_completado`.
+   Los textos son opcionales (se guardan limpios o en `NULL`) y los booleanos
+   ausentes equivalen a «no». El paciente puede **corregir** su declaración
+   reenviando el mismo enlace sin duplicar filas.
+2. **Página pública** `GET /anamnesis/{token}`: muestra el paciente, la fecha y
+   el profesional del turno; el formulario o el resumen ya enviado. Se sirve sin
+   caché (`Cache-Control: no-store`), sin `Referer` y con `noindex`.
+3. **API pública** (`/api/v1/anamnesis/{token}`): `GET` devuelve el contexto y la
+   declaración existente **sin crear la historia clínica**; `POST` guarda la
+   ficha, crea la historia si es la primera vez y responde `400` para un token
+   alterado o `404` si el turno ya no existe.
+4. **Alerta médica para el odontólogo**: la ficha aparece en el Panel Principal y
+   en `/medico`, con un **banner rojo flotante** y los motivos (`Alergias a
+   medicamentos`, `Presión arterial alta`, `Problemas cardíacos`, `Medicación
+   actual`, `Embarazo`). El detalle de la historia expone `alerta_medica` y
+   `motivos_alerta` calculados, sin campos duplicados en la base.
+5. **Recordatorio de WhatsApp**: mientras la ficha siga pendiente, el mensaje
+   Click-to-Chat (y el cuerpo interactivo de la Cloud API) incluye el enlace
+   público firmado. Una vez completada, el recordatorio vuelve a su texto normal.
+
+Variables específicas: `PUBLIC_BASE_URL` (dominio absoluto usado en el enlace;
+en Vercel se deduce del despliegue) y `ANAMNESIS_TOKEN_SECRET` (secreto de firma;
+si se omite se reutiliza `WHATSAPP_VERIFY_TOKEN`).
 
 ---
 
@@ -394,6 +430,8 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
    | `CORS_ORIGINS` | `["https://TU-PROYECTO.vercel.app"]` | No (por defecto `["*"]`) |
    | `RECORDATORIO_DIAS` | `3` | No |
    | `WHATSAPP_CODIGO_PAIS` | `549` | No |
+   | `PUBLIC_BASE_URL` | `https://TU-PROYECTO.vercel.app` | No (se deduce en Vercel; sirve para enlaces de anamnesis) |
+   | `ANAMNESIS_TOKEN_SECRET` | secreto largo y aleatorio | Recomendada (firma los enlaces de la ficha de salud) |
    | `WHATSAPP_API_URL` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | credenciales de Meta (`WHATSAPP_TOKEN` es sinónimo del último) | Sólo para envíos reales |
    | `WHATSAPP_VERIFY_TOKEN` | secreto elegido, p. ej. `odontologia_secreto_2026` | Sí, para conectar el webhook en Meta |
    | `WHATSAPP_CONSULTA_CODIGO` | `10100` | No (código del nomenclador de la consulta) |
@@ -1391,7 +1429,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**461 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**609 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de

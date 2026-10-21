@@ -21,6 +21,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.anamnesis_token import construir_enlace_anamnesis
 from app.core.config import URL_WHATSAPP_POR_DEFECTO, settings
 from app.core.datetime_utils import rango_del_dia, to_naive_utc, utcnow
 from app.core.exceptions import (
@@ -29,6 +30,8 @@ from app.core.exceptions import (
     WhatsAppEnvioError,
 )
 from app.models.enums import EstadoTurno, EstadoWhatsApp
+from app.models.historia_clinica import HistoriaClinica
+from app.models.paciente import Paciente
 from app.models.turno import Turno
 from app.schemas.whatsapp import (
     RecordatorioEnviado,
@@ -38,6 +41,7 @@ from app.schemas.whatsapp import (
     WhatsAppInboundMessage,
     WhatsAppWebhookPayload,
 )
+from app.services.anamnesis_service import necesita_completar_anamnesis
 
 logger = logging.getLogger("app.services.whatsapp")
 
@@ -55,11 +59,46 @@ BOTONES_ESTADO: dict[str, EstadoTurno] = {
 # ===========================================================================
 
 
+def _opciones_recordatorio():
+    """Carga las relaciones que necesita el recordatorio en una sola consulta.
+
+    ``necesita_completar_anamnesis`` mira ``paciente.historia_clinica`` y su
+    declaración de salud. Se cargan con ``selectinload`` para no disparar una
+    consulta por turno ni acceder a una relación fuera de la sesión.
+    """
+    return (
+        selectinload(Turno.paciente)
+        .selectinload(Paciente.historia_clinica)
+        .selectinload(HistoriaClinica.antecedentes_salud),
+        selectinload(Turno.doctor),
+    )
+
+
+def _enlace_anamnesis_pendiente(turno: Turno) -> str:
+    """Enlace público de la ficha de salud, sólo si el paciente aún no la envió."""
+    if not necesita_completar_anamnesis(turno):
+        return ""
+    return construir_enlace_anamnesis(turno.id, turno.paciente_id)
+
+
+def _agregar_enlace_anamnesis(texto: str, turno: Turno) -> str:
+    """Suma al recordatorio el enlace de la ficha cuando está pendiente."""
+    enlace = _enlace_anamnesis_pendiente(turno)
+    if not enlace:
+        return texto
+    return f"{texto}\n\n{TEXTO_ANAMNESIS_PENDIENTE.format(enlace=enlace)}"
+
+
 def construir_payload_recordatorio(turno: Turno) -> dict:
     """Arma el cuerpo JSON del mensaje interactivo (botones Confirmar/Cancelar)."""
     nombre = turno.paciente.nombre if turno.paciente else "paciente"
     doctor = turno.doctor.nombre if turno.doctor else "su profesional"
     inicio = turno.fecha_hora_inicio.strftime("%d/%m/%Y %H:%M")
+    texto = _agregar_enlace_anamnesis(
+        f"Hola {nombre}, le recordamos su turno con {doctor} "
+        f"el {inicio}. ¿Confirma su asistencia?",
+        turno,
+    )
 
     return {
         "messaging_product": "whatsapp",
@@ -68,12 +107,7 @@ def construir_payload_recordatorio(turno: Turno) -> dict:
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {
-                "text": (
-                    f"Hola {nombre}, le recordamos su turno con {doctor} "
-                    f"el {inicio}. ¿Confirma su asistencia?"
-                )
-            },
+            "body": {"text": texto},
             "action": {
                 "buttons": [
                     {
@@ -230,6 +264,7 @@ def enviar_recordatorios(
 
     stmt = (
         select(Turno)
+        .options(*_opciones_recordatorio())
         .where(
             Turno.fecha_hora_inicio >= inicio_dia,
             Turno.fecha_hora_inicio <= fin_dia,
@@ -380,6 +415,11 @@ PLANTILLA_RECORDATORIO = (
     "mensaje. ¡Muchas gracias!"
 )
 
+#: Se agrega al recordatorio mientras la ficha de salud siga pendiente.
+TEXTO_ANAMNESIS_PENDIENTE = (
+    "Antes de la consulta, completá tu ficha de salud en este enlace: {enlace}"
+)
+
 #: URL oficial de Click-to-Chat. Marcadores: número (sólo dígitos) y mensaje.
 URL_CLICK_TO_CHAT = "https://wa.me/{}?text={}"
 
@@ -489,16 +529,21 @@ def profesional_con_articulo(nombre: Optional[str]) -> str:
 def construir_mensaje_recordatorio(turno: Turno) -> str:
     """Redacta el texto del recordatorio con los datos del turno.
 
-    :param turno: turno con las relaciones ``paciente`` y ``doctor`` cargadas.
+    Si el paciente todavía no completó su ficha de salud, se agrega al final el
+    enlace público firmado para que pueda hacerlo antes de la consulta.
+
+    :param turno: turno con las relaciones ``paciente`` (e historia clínica) y
+        ``doctor`` cargadas.
     """
     paciente = (turno.paciente.nombre if turno.paciente else "").strip() or "paciente"
     doctor = profesional_con_articulo(turno.doctor.nombre if turno.doctor else "")
-    return PLANTILLA_RECORDATORIO.format(
+    texto = PLANTILLA_RECORDATORIO.format(
         paciente=paciente,
         fecha=formatear_fecha_recordatorio(turno.fecha_hora_inicio),
         hora=turno.fecha_hora_inicio.strftime("%H:%M"),
         profesional=doctor or "tu profesional",
     )
+    return _agregar_enlace_anamnesis(texto, turno)
 
 
 def construir_enlace_whatsapp(
@@ -553,7 +598,7 @@ def listar_turnos_pendientes_de_recordatorio(
 
     stmt = (
         select(Turno)
-        .options(selectinload(Turno.paciente), selectinload(Turno.doctor))
+        .options(*_opciones_recordatorio())
         .where(
             Turno.fecha_hora_inicio >= referencia,
             Turno.fecha_hora_inicio <= fin_ventana,

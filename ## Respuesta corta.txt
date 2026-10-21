@@ -1,0 +1,154 @@
+## Respuesta corta
+
+El bot **no recibe mensajes por el servidor local ni por el `PHONE_NUMBER_ID`**. Recibe los mensajes que Meta envía al webhook cuando alguien le escribe al **número de WhatsApp real** asociado a la app.
+
+Tenés que:
+
+1. Enviar el WhatsApp al **número de teléfono que muestra Meta** en *WhatsApp → API Setup* (columna “From” o “Número de teléfono”).
+2. Enviar desde **otro celular**, no desde el mismo número del consultorio.
+3. Escribir:
+
+```text
+hola
+```
+
+o también `menu`, `info`, `turnos`, `consulta`, `precio`, `ayuda`, etc.
+
+Después el menú responde con las opciones y podés escribir `1`, `2` o `3`.
+
+> **Importante:** la opción `4` (“Hablar con una secretaria”) **no recibe respuesta automática a propósito**: el bot registra “Atención Manual Requerida” y espera que una persona conteste. Cualquier texto que no sea saludo u opción del menú tampoco recibe respuesta.
+
+---
+
+## El problema que encontré
+
+En tu `.env` está esto:
+
+```env
+WHATSAPP_PHONE_NUMBER_ID="61595577629691"
+```
+
+Ese valor **no es un Phone Number ID válido para enviar mensajes**. Hice una prueba directa contra Meta con un destinatario inválido y devolvió:
+
+```text
+Unsupported post request. Object with ID '61595577629691'
+does not exist, cannot be loaded due to missing permissions,
+or does not support this operation.
+```
+
+Es decir: aunque el webhook reciba el mensaje del paciente, cuando el bot intenta contestar, Meta rechaza el envío porque el ID del número está mal. Por eso no te llega ninguna respuesta.
+
+El token sí es válido y tiene permisos de WhatsApp (`whatsapp_business_management` y `whatsapp_business_messaging`). El webhook público de Vercel también responde correctamente:
+
+- `GET https://odontologico-omega.vercel.app/api/v1/whatsapp/webhook` → `200` con el challenge correcto.
+- Con verify token incorrecto → `403`.
+
+Así que el problema principal es el **Phone Number ID**, no el token.
+
+---
+
+## Dónde está el dato correcto en Meta
+
+Entrá a:
+
+**Meta for Developers → tu app “Odontologico” → WhatsApp → API Setup**
+
+Ahí vas a ver dos datos distintos:
+
+| Dato en Meta | Para qué sirve |
+|---|---|
+| **Phone number** / “From” | Es el número de WhatsApp al que tenés que enviarle el mensaje |
+| **Phone number ID** | Es el ID numérico largo que va en `WHATSAPP_PHONE_NUMBER_ID` |
+| **WhatsApp Business Account ID** | No va en `WHATSAPP_PHONE_NUMBER_ID` |
+
+Copiá el **Phone number ID** y reemplazá el valor en:
+
+```text
+C:\Sistema\Odontologico\.env
+```
+
+```env
+WHATSAPP_PHONE_NUMBER_ID="EL_ID_CORRECTO_QUE_COPIASTE"
+```
+
+No copies el número de teléfono con `+`, ni el WABA ID, ni el número del consultorio. Tiene que ser el ID que Meta llama exactamente **Phone number ID**.
+
+---
+
+## Si estás usando el número de prueba de Meta
+
+El número de prueba de WhatsApp Cloud API tiene una limitación:
+
+- En *API Setup*, dentro de **“To”**, tenés que agregar y verificar tu número personal.
+- Después, desde ese número personal, escribí al número que aparece en **“From”**.
+- Si intentás escribirte desde el mismo número de prueba, no va a funcionar.
+
+---
+
+## Revisá también el webhook en Meta
+
+En **WhatsApp → Configuration → Webhook** tiene que estar:
+
+- **Callback URL:**  
+  `https://odontologico-omega.vercel.app/api/v1/whatsapp/webhook`
+- **Verify token:** el mismo valor de `WHATSAPP_VERIFY_TOKEN` de tu `.env`.
+- En **Webhook fields**, tildado **`messages`**.
+
+La URL ya está funcionando, pero si Meta no tiene guardada esa configuración o no está suscripto el campo `messages`, los mensajes entrantes nunca llegan a la app.
+
+El servidor local `http://192.168.1.123:8000` **no sirve para que Meta entregue mensajes**, porque Meta necesita una URL pública HTTPS. Por eso el webhook tiene que apuntar a Vercel, no a tu PC.
+
+---
+
+## Cómo queda el flujo
+
+```text
+Paciente escribe "hola" por WhatsApp
+        ↓
+Meta lo envía al webhook de Vercel
+        ↓
+POST /api/v1/whatsapp/webhook
+        ↓
+El bot lee el menú activo de la base
+        ↓
+Responde por la Cloud API al número del paciente
+```
+
+Mensajes que entiende:
+
+| Mensaje | Respuesta |
+|---|---|
+| `hola`, `buenas`, `info`, `menu`, `turnos`, `consulta`, `precio`, `ayuda` | Menú principal |
+| `1` | Precio de la consulta |
+| `2` | Obras sociales con convenio |
+| `3` | Ubicación y horarios |
+| `4` | **No responde**: atención manual |
+| Otro texto | **No responde**: atención manual |
+
+---
+
+## Un detalle importante sobre Vercel
+
+La lista de variables de entorno del proyecto Vercel **no muestra ninguna `WHATSAPP_*`**, pero el deploy igual está intentando enviar con el ID incorrecto. Eso indica que las credenciales están saliendo del archivo `.env` empaquetado en el deploy.
+
+Para que el cambio funcione en producción:
+
+1. Corregí el `WHATSAPP_PHONE_NUMBER_ID` en el `.env` local.
+2. Cargá también las variables en **Vercel → Project Settings → Environment Variables**:
+   - `WHATSAPP_TOKEN`
+   - `WHATSAPP_PHONE_NUMBER_ID`
+   - `WHATSAPP_VERIFY_TOKEN`
+3. Hacé un nuevo deploy.
+
+Además, sería recomendable excluir `.env` del deploy agregándolo a `.vercelignore`, para no empaquetar secretos. Pero primero cargá las variables en Vercel; si no, el deploy se queda sin credenciales.
+
+---
+
+## Resumen para probar ahora
+
+1. Copiá el **Phone number ID** correcto desde Meta.
+2. Reemplazalo en `.env` y en Vercel.
+3. Asegurate de que el webhook de Meta apunte a `https://odontologico-omega.vercel.app/api/v1/whatsapp/webhook` y tenga suscripto `messages`.
+4. Desde otro celular, escribile **`hola`** al número que muestra Meta en **“From”**.
+
+Si me pasás el **Phone Number ID** correcto, te actualizo el `.env` y te dejo la configuración de Vercel lista para probar.

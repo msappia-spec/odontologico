@@ -507,6 +507,7 @@
 
   /* --------------------------- Pantallas y refresco ----------------------- */
   function mostrarAgenda() {
+    ocultarAlertaHistoria();
     $("pantalla-profesional").classList.add("hide");
     $("pantalla-agenda").classList.remove("hide");
     $("m-header").classList.remove("hide");
@@ -692,6 +693,110 @@
     }
   }
 
+  /* ================= Módulo 4 · Ficha de salud (sólo lectura) ============== */
+  /* La anamnesis que completa el paciente desde el enlace público se muestra
+     antes del formulario de evolución. Si declaró antecedentes de riesgo, se
+     enciende un banner flotante que el odontólogo puede cerrar. */
+
+  function fechaHoraSalud(iso) {
+    return `${fechaLarga(parteFecha(iso))} · ${parteHora(iso)} hs`;
+  }
+
+  function saludTexto(valor, vacio) {
+    const limpio = String(valor || "").trim();
+    return limpio ? esc(limpio) : `<span class="salud-sin-dato">${esc(vacio || "No informado")}</span>`;
+  }
+
+  function saludBooleano(valor) {
+    return valor
+      ? `<span class="salud-booleano salud-booleano-si">Sí</span>`
+      : `<span class="salud-booleano">No</span>`;
+  }
+
+  function antecedentesSaludHTML(detalle) {
+    const a = detalle && detalle.antecedentes_salud;
+    if (!a) {
+      return (
+        `<section class="salud-card salud-card-pendiente">` +
+        `<div class="salud-cabecera">` +
+        `<span class="salud-icono">` +
+        `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
+        `<path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><path d="M9 4V3h6v1M12 10v6M9 13h6"/></svg>` +
+        `</span>` +
+        `<div class="salud-cabecera-texto">` +
+        `<p class="salud-titulo">Ficha de salud</p>` +
+        `<p class="salud-sub">Anamnesis pendiente del paciente.</p>` +
+        `</div>` +
+        `<span class="badge badge-slate">Pendiente</span>` +
+        `</div>` +
+        `<p class="salud-pendiente">Se completa desde el enlace que el paciente recibe por WhatsApp. Cuando la envíe, sus antecedentes aparecen acá.</p>` +
+        `</section>`
+      );
+    }
+
+    const motivos = Array.isArray(detalle.motivos_alerta)
+      ? detalle.motivos_alerta
+      : (Array.isArray(a.motivos_alerta) ? a.motivos_alerta : []);
+    const alerta = Boolean(detalle.alerta_medica ?? a.alerta_medica ?? motivos.length);
+    const actualizada = a.fecha_completado
+      ? `<p class="salud-sub">Actualizada el ${esc(fechaHoraSalud(a.fecha_completado))}</p>`
+      : "";
+
+    return (
+      `<section class="salud-card${alerta ? " salud-card-alerta" : ""}">` +
+      `<div class="salud-cabecera">` +
+      `<span class="salud-icono">` +
+      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
+      `<path d="M9 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><path d="M9 4V3h6v1M12 10v6M9 13h6"/></svg>` +
+      `</span>` +
+      `<div class="salud-cabecera-texto">` +
+      `<p class="salud-titulo">Ficha de salud</p>` +
+      actualizada +
+      `</div>` +
+      `<span class="badge ${alerta ? "badge-red" : "badge-green"}">${alerta ? "Alerta médica" : "Sin alertas"}</span>` +
+      `</div>` +
+      `<div class="salud-grid">` +
+      `<div class="salud-dato salud-dato-ancho"><p class="salud-dato-titulo">Alergias a medicamentos</p>` +
+      `<p class="salud-dato-texto">${saludTexto(a.alergias_medicamentos, "Sin alergias informadas")}</p></div>` +
+      `<div class="salud-dato"><p class="salud-dato-titulo">Presión arterial alta</p>` +
+      `<p class="salud-dato-texto">${saludBooleano(a.presion_alta)}</p></div>` +
+      `<div class="salud-dato"><p class="salud-dato-titulo">Problemas cardíacos</p>` +
+      `<p class="salud-dato-texto">${saludBooleano(a.problemas_cardiacos)}</p></div>` +
+      `<div class="salud-dato salud-dato-ancho"><p class="salud-dato-titulo">Medicación actual</p>` +
+      `<p class="salud-dato-texto">${saludTexto(a.medicacion_actual, "No informada")}</p></div>` +
+      `<div class="salud-dato"><p class="salud-dato-titulo">Embarazo</p>` +
+      `<p class="salud-dato-texto">${saludBooleano(a.embarazo)}</p></div>` +
+      `</div>` +
+      (alerta
+        ? `<p class="salud-alerta-nota"><strong>Revisar antes de atender:</strong> ${esc(motivos.join(" · "))}</p>`
+        : "") +
+      `</section>`
+    );
+  }
+
+  function ocultarAlertaHistoria() {
+    const banner = $("hist-alerta");
+    if (banner) banner.classList.add("hide");
+  }
+
+  function renderAntecedentes(detalle) {
+    const cont = $("hist-antecedentes");
+    if (cont) cont.innerHTML = antecedentesSaludHTML(detalle);
+
+    const banner = $("hist-alerta");
+    if (!banner) return;
+    const motivos = Array.isArray(detalle.motivos_alerta)
+      ? detalle.motivos_alerta
+      : [];
+    if (detalle.alerta_medica && motivos.length) {
+      const texto = $("hist-alerta-motivos");
+      if (texto) texto.textContent = motivos.join(" · ");
+      banner.classList.remove("hide");
+    } else {
+      banner.classList.add("hide");
+    }
+  }
+
   function mostrarHistoria() {
     // Mientras se mira la ficha no hace falta refrescar la agenda cada minuto.
     detenerRefresco();
@@ -711,6 +816,12 @@
     mostrarHistoria();
     $("hist-paciente").textContent = p.nombre;
     $("hist-ficha").textContent = detallePaciente(p) || "Sin datos extra";
+    const salud = $("hist-antecedentes");
+    if (salud) {
+      salud.classList.remove("hide");
+      salud.innerHTML = `<p class="m-ficha-nota">Cargando la ficha de salud…</p>`;
+    }
+    ocultarAlertaHistoria();
     const doctor = doctorActual();
     $("evo-doctor-id").value = doctor ? String(doctor.id) : "";
     const fecha = $("evo-fecha");
@@ -728,6 +839,7 @@
         `Ficha ${detalle.numero_ficha}` +
         (detalle.paciente_dni ? ` · DNI ${detalle.paciente_dni}` : "");
       $("hist-total").textContent = String(detalle.total_evoluciones);
+      renderAntecedentes(detalle);
       const evoluciones = Array.isArray(detalle.evoluciones) ? detalle.evoluciones : [];
       cont.innerHTML = evoluciones.length
         ? evoluciones.map(evolucionHTML).join("")
@@ -738,6 +850,9 @@
           );
     } catch (err) {
       cont.innerHTML = `<p class="m-error">${esc(err.message)}</p>`;
+      const salud = $("hist-antecedentes");
+      if (salud) salud.innerHTML = `<p class="m-ficha-nota">No se pudo cargar la ficha de salud.</p>`;
+      ocultarAlertaHistoria();
     }
   }
 
@@ -1312,6 +1427,7 @@
 
       if (objetivo.closest("[data-cerrar-hoja]")) { cerrarHojas(); return; }
       if (objetivo.closest("[data-reintentar]")) { iniciar(); return; }
+      if (objetivo.closest("[data-cerrar-alerta]")) { ocultarAlertaHistoria(); return; }
 
       const doctor = objetivo.closest("[data-doctor]");
       if (doctor) { seleccionarDoctor(doctor.dataset.doctor); return; }

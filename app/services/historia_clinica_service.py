@@ -31,6 +31,7 @@ from app.models.doctor import Doctor
 from app.models.evolucion_medica import EvolucionMedica
 from app.models.historia_clinica import HistoriaClinica
 from app.models.paciente import Paciente
+from app.schemas.antecedentes_salud import AntecedentesSaludRead
 from app.schemas.historia_clinica import (
     EvolucionMedicaCreate,
     EvolucionMedicaRead,
@@ -185,12 +186,23 @@ def detalle_historia(db: Session, paciente_id: int) -> HistoriaClinicaDetalle:
     """Arma la ficha del paciente con su línea de tiempo completa.
 
     Es una operación de **sólo lectura**: si el paciente todavía no tiene
-    evoluciones no se crea ninguna fila; se responde con ``id = null`` y el
-    ``numero_ficha`` que le corresponderá cuando se cargue la primera atención.
+    evoluciones ni ficha de salud no se crea ninguna fila; se responde con
+    ``id = null`` y el ``numero_ficha`` que le corresponderá cuando se cargue la
+    primera atención o el paciente complete su anamnesis.
+
+    La declaración de salud viaja dentro del detalle (Módulo 4) con sus campos
+    calculados de alerta, para que el odontólogo vea los antecedentes al abrir
+    la ficha sin una segunda llamada a la API.
     """
     paciente = _obtener_paciente(db, paciente_id)
     historia = obtener_historia(db, paciente_id)
     evoluciones = listar_evoluciones(db, paciente_id)
+
+    antecedentes_salud = None
+    if historia is not None and historia.antecedentes_salud is not None:
+        antecedentes_salud = AntecedentesSaludRead.model_validate(
+            historia.antecedentes_salud
+        )
 
     return HistoriaClinicaDetalle(
         id=historia.id if historia is not None else None,
@@ -202,5 +214,10 @@ def detalle_historia(db: Session, paciente_id: int) -> HistoriaClinicaDetalle:
         ),
         total_evoluciones=len(evoluciones),
         evoluciones=[EvolucionMedicaRead.model_validate(ev) for ev in evoluciones],
+        antecedentes_salud=antecedentes_salud,
+        alerta_medica=bool(antecedentes_salud and antecedentes_salud.alerta_medica),
+        motivos_alerta=(
+            list(antecedentes_salud.motivos_alerta) if antecedentes_salud else []
+        ),
     )
 

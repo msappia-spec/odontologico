@@ -1,0 +1,46 @@
+Listo. Actualicé Vercel con los valores actuales del `.env` y generé un deploy nuevo.
+
+## Cambios realizados
+
+- **`WHATSAPP_PHONE_NUMBER_ID`**: `1420047357855940`
+- **`WHATSAPP_TOKEN`**: actualizado al token nuevo del `.env` — no se muestra por seguridad
+- Actualizadas en **Production, Preview y Development** como variables secretas.
+- Nuevo deploy de producción:
+  - ID: `dpl_FAixCB3zjYGzbiACv1kXwapA9NzP`
+  - URL: `https://odontologico-jeta5ovu1-marcozface-2235.vercel.app`
+  - Alias: `https://odontologico-omega.vercel.app`
+
+## Validaciones
+
+- El token nuevo es un **System User permanente** (`expires_at: 0`), con permisos:
+  - `whatsapp_business_messaging`
+  - `whatsapp_business_management`
+  - `whatsapp_business_manage_events`
+- El número nuevo está:
+  - **+54 9 351 643-2863**
+  - Estado: `CONNECTED`
+  - Modo: `LIVE`
+  - Verificación: `VERIFIED`
+- El runtime de producción ya usa el Phone Number ID nuevo:
+  `https://graph.facebook.com/v21.0/1420047357855940/messages`
+- Webhook de producción: `200 OK` devolviendo el challenge.
+- `/health`: `200 OK`.
+- La app **Odontologico** ya quedó suscripta a la WABA nueva **`1672010817672741`**.
+
+## Bloqueo pendiente en Meta
+
+Aunque el deploy y las credenciales están bien, Meta reporta que la cuenta **no puede enviar mensajes** todavía:
+
+- `141006` — Error con el **método de pago**.
+- `141008` — La **WABA no está activa**.
+- `141010` — La **verificación de negocio** no está completada.
+- El nombre visible aún no está aprobado, lo que limita el envío.
+
+Por eso, el bot puede recibir el webhook, pero Meta podría bloquear las respuestas salientes hasta que se resuelva esto en **Meta Business Suite / WhatsApp Manager**:
+
+1. Configurar un método de pago válido.
+2. Completar la verificación del negocio.
+3. Verificar el estado de la WABA con soporte de WhatsApp si sigue inactiva.
+4. Solicitar aprobación del nombre visible si corresponde.
+
+Después de eso, probá enviando **`hola`** desde otro WhatsApp al **+54 9 351 643-2863**. Si el webhook llega pero no responde, el problema ya no será Vercel sino los bloqueos de cuenta de Meta.

@@ -111,7 +111,12 @@ def test_construir_mensaje_y_enlace_no_rompen_la_url(db_session, doctor, pacient
     assert mensaje.startswith("Hola Paciente Demo, te recordamos tu turno el día")
     assert "viernes 16 de octubre de 2026 a las 10:00" in mensaje
     assert "con el Dr. House" in mensaje
-    assert mensaje.endswith("¡Muchas gracias!")
+    # El paciente todavía no tiene ficha de salud: el recordatorio suma el
+    # enlace público firmado después del texto original.
+    cuerpo, bloque_salud = mensaje.split("\n\n", 1)
+    assert cuerpo.endswith("¡Muchas gracias!")
+    assert bloque_salud.startswith("Antes de la consulta, completá tu ficha de salud")
+    assert "/anamnesis/" in bloque_salud
 
     enlace = whatsapp_service.construir_enlace_whatsapp(turno)
     assert enlace.startswith("https://wa.me/5491122334455?text=Hola%20Paciente%20Demo%2C")

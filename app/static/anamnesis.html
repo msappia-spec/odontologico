@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d8578" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="description" content="Ficha de salud previa a la consulta odontológica: alergias, medicación y antecedentes relevantes." />
+  <title>Mi ficha de salud · OdontoCare</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A6%B7%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eefbf8', 100: '#d3f4ee', 200: '#a9e9df', 300: '#74d7c9',
+              400: '#3fbfae', 500: '#17a394', 600: '#0d8578', 700: '#106a61',
+              800: '#12554f', 900: '#134742'
+            }
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/anamnesis.css" />
+  <script src="/static/anamnesis.js" defer></script>
+</head>
+<body class="an-body">
+  <div class="an-fondo" aria-hidden="true">
+    <span class="an-fondo-burbuja an-fondo-burbuja-1"></span>
+    <span class="an-fondo-burbuja an-fondo-burbuja-2"></span>
+  </div>
+
+  <div class="an-wrap">
+    <header class="an-header">
+      <span class="an-marca" aria-label="OdontoCare">
+        <span class="an-marca-icono" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5.5C10.5 3.8 8.6 3 6.9 3 4.7 3 3 4.8 3 7.2c0 3 1.6 5.6 2.4 8.6.5 1.9.7 5.2 2.4 5.2 1.6 0 1.2-4.1 2.2-5.6.5-.8 1.5-.8 2 0 1 1.5.6 5.6 2.2 5.6 1.7 0 1.9-3.3 2.4-5.2.8-3 2.4-5.6 2.4-8.6C21 4.8 19.3 3 17.1 3c-1.7 0-3.6.8-5.1 2.5z"/>
+          </svg>
+        </span>
+        <span>
+          <strong>OdontoCare</strong>
+          <small>Salud dental</small>
+        </span>
+      </span>
+      <span class="an-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>
+        </svg>
+        Enlace seguro
+      </span>
+    </header>
+
+    <main class="an-main">
+      <!-- Estado de carga: se reemplaza por el formulario o el resumen. -->
+      <section id="an-cargando" class="an-card an-estado" role="status" aria-live="polite">
+        <span class="an-spinner" aria-hidden="true"></span>
+        <h1>Estamos abriendo tu ficha…</h1>
+        <p>Verificando el enlace de tu turno.</p>
+      </section>
+
+      <!-- Token inválido, turno eliminado o error de red. -->
+      <section id="an-error" class="an-card an-estado" hidden>
+        <span class="an-estado-icono an-estado-icono-error" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5h.01"/>
+          </svg>
+        </span>
+        <h1>No pudimos abrir tu ficha</h1>
+        <p id="an-error-texto">El enlace puede estar incompleto o haber vencido.</p>
+        <button id="an-reintentar" class="an-btn an-btn-secundario" type="button">
+          Volver a intentar
+        </button>
+        <p class="an-ayuda-error">Si sigue sin funcionar, pedí un enlace nuevo en el consultorio.</p>
+      </section>
+
+      <!-- Contexto del turno + formulario o resumen. -->
+      <div id="an-contenido" hidden>
+        <section class="an-contexto" aria-labelledby="an-titulo">
+          <p class="an-eyebrow">Ficha de salud</p>
+          <h1 id="an-titulo">Hola, <span id="an-nombre">paciente</span></h1>
+          <p class="an-bajada">
+            Antes de tu consulta necesitamos conocer algunos datos importantes para
+            cuidarte. Te lleva menos de 2 minutos.
+          </p>
+
+          <div class="an-turno">
+            <span class="an-turno-icono" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 11h18"/>
+              </svg>
+            </span>
+            <div class="an-turno-datos">
+              <strong id="an-turno-fecha">Tu próximo turno</strong>
+              <span id="an-turno-profesional">Con tu profesional</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Resumen cuando la ficha ya fue enviada (o después de enviarla). -->
+        <section id="an-resumen" class="an-card an-resumen" hidden aria-labelledby="an-resumen-titulo">
+          <span class="an-estado-icono an-estado-icono-ok" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m5 12 4.5 4.5L19 7"/>
+            </svg>
+          </span>
+          <h2 id="an-resumen-titulo">¡Ficha enviada!</h2>
+          <p id="an-resumen-mensaje" class="an-resumen-mensaje">
+            El profesional verá esta información antes de tu consulta.
+          </p>
+
+          <dl id="an-resumen-datos" class="an-resumen-datos"></dl>
+
+          <button id="an-corregir" class="an-btn an-btn-secundario" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+            </svg>
+            Corregir mis respuestas
+          </button>
+        </section>
+
+        <!-- Formulario público: único punto de escritura. -->
+        <form id="an-form" class="an-card an-form" novalidate hidden>
+          <div class="an-form-cabecera">
+            <div>
+              <p class="an-eyebrow">Cuestionario</p>
+              <h2>Contanos cómo estás de salud</h2>
+            </div>
+            <span class="an-tiempo">≈ 2 min</span>
+          </div>
+
+          <div class="an-campo">
+            <label for="an-alergias" class="an-label">¿Tenés alergias a medicamentos?</label>
+            <p class="an-hint">Contanos cuáles, aunque sean leves. Si no tenés, dejá el campo vacío.</p>
+            <div class="an-textarea-caja">
+              <textarea id="an-alergias" name="alergias_medicamentos" maxlength="1000" rows="3"
+                placeholder="Ej.: penicilina, ibuprofeno, anestesia…"></textarea>
+              <span class="an-contador" data-contador="an-alergias">0 / 1000</span>
+            </div>
+          </div>
+
+          <fieldset class="an-fieldset">
+            <legend class="an-legend">Marcá lo que corresponda</legend>
+
+            <label class="an-switch-fila" for="an-presion">
+              <span class="an-switch-texto">
+                <strong>Presión arterial alta</strong>
+                <small>Hipertensión diagnosticada o en tratamiento.</small>
+              </span>
+              <input id="an-presion" name="presion_alta" type="checkbox" class="an-switch-input" />
+              <span class="an-switch-ui" aria-hidden="true"></span>
+            </label>
+
+            <label class="an-switch-fila" for="an-cardiacos">
+              <span class="an-switch-texto">
+                <strong>Problemas cardíacos</strong>
+                <small>Arritmias, soplo, válvulas o alguna cirugía del corazón.</small>
+              </span>
+              <input id="an-cardiacos" name="problemas_cardiacos" type="checkbox" class="an-switch-input" />
+              <span class="an-switch-ui" aria-hidden="true"></span>
+            </label>
+
+            <label class="an-switch-fila" for="an-embarazo">
+              <span class="an-switch-texto">
+                <strong>Embarazo</strong>
+                <small>Nos ayuda a elegir estudios y medicación seguros.</small>
+              </span>
+              <input id="an-embarazo" name="embarazo" type="checkbox" class="an-switch-input" />
+              <span class="an-switch-ui" aria-hidden="true"></span>
+            </label>
+          </fieldset>
+
+          <div class="an-campo">
+            <label for="an-medicacion" class="an-label">¿Tomás alguna medicación?</label>
+            <p class="an-hint">Incluí anticoagulantes, aspirina o suplementos. Si no tomás nada, dejalo vacío.</p>
+            <div class="an-textarea-caja">
+              <textarea id="an-medicacion" name="medicacion_actual" maxlength="1000" rows="3"
+                placeholder="Ej.: enalapril 10 mg por día…"></textarea>
+              <span class="an-contador" data-contador="an-medicacion">0 / 1000</span>
+            </div>
+          </div>
+
+          <label class="an-consentimiento" for="an-consentimiento">
+            <input id="an-consentimiento" type="checkbox" required />
+            <span class="an-consentimiento-caja" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m5 12 4 4L19 6"/>
+              </svg>
+            </span>
+            <span>
+              Declaro que la información es correcta y autorizo su uso para mi
+              atención odontológica.
+            </span>
+          </label>
+
+          <p id="an-form-error" class="an-form-error" role="alert" hidden></p>
+
+          <button id="an-enviar" class="an-btn an-btn-primario" type="submit">
+            <span class="an-btn-texto">Enviar mi ficha</span>
+            <span class="an-btn-cargando" hidden>
+              <span class="an-spinner an-spinner-chico" aria-hidden="true"></span>
+              Enviando…
+            </span>
+            <svg class="an-btn-flecha" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>
+            </svg>
+          </button>
+          <p class="an-privacidad">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+            </svg>
+            Tus datos viajan cifrados y sólo los ve tu profesional.
+          </p>
+        </form>
+      </div>
+    </main>
+    <footer class="an-footer">
+      <p>OdontoCare · Cuidamos tu sonrisa con información clara.</p>
+      <p class="an-footer-seguridad">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>
+        </svg>
+        Ficha privada y protegida por un enlace único
+      </p>
+    </footer>
+  </div>
+</body>
+</html>

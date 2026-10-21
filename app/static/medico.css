@@ -380,6 +380,37 @@ button, a, input, select, textarea { touch-action: manipulation; }
   font-size: .72rem; font-weight: 700; color: #0d8578; text-decoration: none;
 }
 
+/* ------------------- Módulo 4 · Ficha de salud (móvil) ------------------- */
+/* La tarjeta compartida se compacta para el ancho del celular y el aviso de
+   riesgo queda debajo del encabezado fijo, lejos del pulgar. */
+.m-salud .salud-card {
+  padding: .8rem .85rem; margin-bottom: 0;
+  border-radius: .9rem;
+  box-shadow: 0 12px 28px -26px rgba(15, 28, 36, .55);
+}
+.m-salud .salud-cabecera { gap: .5rem; flex-wrap: wrap; align-items: center; }
+.m-salud .salud-cabecera > .badge { margin-left: auto; font-size: .62rem; }
+.m-salud .salud-icono { width: 1.8rem; height: 1.8rem; }
+.m-salud .salud-titulo { font-size: .86rem; }
+.m-salud .salud-sub { font-size: .68rem; }
+.m-salud .salud-grid { gap: .6rem .8rem; margin-top: .7rem; }
+.m-salud .salud-dato-titulo { font-size: .62rem; }
+.m-salud .salud-dato-texto { font-size: .8rem; }
+.m-salud .salud-pendiente { font-size: .73rem; }
+.m-salud .salud-alerta-nota { font-size: .7rem; }
+
+.m-alerta-medica {
+  top: calc(4.35rem + env(safe-area-inset-top));
+  bottom: auto;
+  left: .7rem; right: .7rem;
+  width: auto;
+  z-index: 45;
+  border-radius: .8rem;
+}
+.m-alerta-medica .salud-alerta-titulo { font-size: .72rem; }
+.m-alerta-medica .salud-alerta-motivos { font-size: .72rem; }
+
+
 /* ------------------- Pantallas grandes: columna centrada ----------------- */
 @media (min-width: 640px) {
   .m-header-inner, .m-main { max-width: 480px; margin-left: auto; margin-right: auto; }

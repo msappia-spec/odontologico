@@ -19,7 +19,9 @@ Qué hace
 3. Copia **tabla por tabla en orden de dependencias** (``Base.metadata
    .sorted_tables``: obras sociales y doctores antes que pacientes y turnos),
    preservando los ``id`` originales para que las claves foráneas sigan
-   apuntando al mismo registro.
+   apuntando al mismo registro. Si una base local antigua todavía no tiene
+   alguna tabla nueva (por ejemplo, ``antecedentes_salud``), esa tabla se omite
+   y se informa al final, en lugar de abortar la migración.
 4. En PostgreSQL reajusta las **secuencias** (``setval``) para que el próximo
    INSERT que haga la app no choque con un ``id`` ya copiado.
 5. Verifica al final que los conteos del destino sean los esperados; si no,
@@ -62,7 +64,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
-from sqlalchemy import Engine, create_engine, delete, func, select
+from sqlalchemy import Engine, create_engine, delete, func, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
@@ -84,6 +86,7 @@ class Resultado:
     salteadas: dict[str, int] = field(default_factory=dict)
     destino_final: dict[str, int] = field(default_factory=dict)
     secuencias: list[str] = field(default_factory=list)
+    tablas_omitidas: list[str] = field(default_factory=list)
 
     @property
     def total_insertadas(self) -> int:
@@ -238,7 +241,17 @@ def migrar(
     Base.metadata.create_all(engine_destino)
 
     modelos = _modelos_por_tabla()
-    tablas = list(Base.metadata.sorted_tables)  # orden de dependencias (FKs)
+    tablas_metadata = list(Base.metadata.sorted_tables)  # orden de dependencias (FKs)
+    # Una base local creada con una versión anterior de la app puede no tener
+    # todavía alguna tabla nueva (p. ej. ``antecedentes_salud``). ``create_all``
+    # ya creó el esquema completo en el destino; del origen sólo se copian las
+    # tablas que existen, para que el migrador siga siendo compatible con bases
+    # viejas en lugar de fallar con «no such table».
+    existentes_origen = set(inspect(engine_origen).get_table_names())
+    tablas = [tabla for tabla in tablas_metadata if tabla.name in existentes_origen]
+    resultado.tablas_omitidas = [
+        tabla.name for tabla in tablas_metadata if tabla.name not in existentes_origen
+    ]
 
     sesion_origen = _sesion(engine_origen)
     sesion_destino = _sesion(engine_destino)
@@ -333,6 +346,11 @@ def _imprimir(resultado: Resultado) -> None:
     print(f"Total de filas copiadas: {resultado.total_insertadas}")
     if resultado.secuencias:
         print("Secuencias reajustadas: " + ", ".join(resultado.secuencias))
+    if resultado.tablas_omitidas:
+        print(
+            "Tablas ausentes en el origen (se omiten): "
+            + ", ".join(resultado.tablas_omitidas)
+        )
     if not resultado.ejecutado:
         print()
         print("Simulacro terminado: repetir con --ejecutar para escribir en el destino.")

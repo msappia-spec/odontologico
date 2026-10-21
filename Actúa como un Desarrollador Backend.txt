@@ -1,0 +1,10 @@
+Actúa como un Desarrollador Backend Senior. Mar ya generó el Token y el Phone Number ID reales en el panel de Meta. Necesitamos activar el chatbot de WhatsApp real en el proyecto para que deje de simular.
+
+Por favor, realiza las siguientes tareas de inmediato:
+1. Abre el archivo '.env' de la raíz del proyecto y configura de forma real las siguientes variables utilizando las credenciales que conseguimos (pídele a Mar en el chat los valores si no los tienes en el historial):
+   - WHATSAPP_TOKEN="EAAXzJdVDxZCMBSwo3fm463nazwApnLIZB6ZCPj5VWSOZC54jiOaYlZAavOcy7pZB5rgsVQv21mbddQUDJPzMa3xWwDmLoJWz6lquZCqfjDlgw0eCGM2Qtmj9pGXqEBanGuN1u42xymCPb9xC3uAzE92WwXbc0R55EQZAhwg4SmzKOh4qrR1sCELEXq7yipFoxgZDZD"
+   - WHATSAPP_PHONE_NUMBER_ID="+5493516432863"
+   - WHATSAPP_VERIFY_TOKEN="odontologia_secreto_2026"
+2. Verifica que las configuraciones de 'app/core/config.py' levanten correctamente estas variables para activar el 'whatsapp_envio_real' (con httpx haciendo el POST hacia la API de Meta).
+3. Asegúrate de que el endpoint 'GET /api/v1/whatsapp/webhook' valide correctamente el token de verificación "odontologia_secreto_2026" para pasar la auditoría de Facebook.
+4. Cuando termines, indícale a Mar en el chat el mensaje exacto para ejecutar el script '.\publicar.bat' y subir todo listo a Vercel.
