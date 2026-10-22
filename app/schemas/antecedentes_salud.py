@@ -132,3 +132,36 @@ class AnamnesisGuardadaRead(AnamnesisPublicaRead):
     """Respuesta del envío: el estado actualizado y un mensaje de confirmación."""
 
     mensaje: str = "¡Gracias! Recibimos tu ficha de salud."
+
+
+class FichaSaludPanelRead(BaseModel):
+    """Fila del panel interno «Fichas de salud».
+
+    A diferencia de :class:`AnamnesisPublicaRead`, esta vista es para la
+    secretaría y el odontólogo: incluye el nombre y el teléfono del paciente y
+    el **enlace firmado** que se puede reenviar por WhatsApp. El enlace se arma
+    en el servidor porque el token HMAC no se puede firmar desde el navegador.
+    """
+
+    turno_id: int
+    paciente_id: int
+    paciente_nombre: str
+    paciente_telefono: str = ""
+    doctor_nombre: Optional[str] = None
+    fecha_hora_inicio: datetime
+    fecha_hora_fin: datetime
+    estado_turno: EstadoTurno
+    completado: bool = False
+    alerta_medica: bool = False
+    motivos_alerta: List[str] = Field(default_factory=list)
+    fecha_completado: Optional[datetime] = None
+    antecedentes_salud: Optional[AntecedentesSaludRead] = Field(
+        None,
+        description=(
+            "Declaración completa para precargar el formulario interno de la "
+            "secretaría. ``null`` si el paciente todavía no cargó la ficha."
+        ),
+    )
+    enlace: str = Field(
+        ..., description="URL pública firmada para abrir o reenviar la ficha."
+    )

@@ -177,6 +177,18 @@ WhatsApp y es la única credencial necesaria: un **token HMAC-SHA256** firmado c
 5. **Recordatorio de WhatsApp**: mientras la ficha siga pendiente, el mensaje
    Click-to-Chat (y el cuerpo interactivo de la Cloud API) incluye el enlace
    público firmado. Una vez completada, el recordatorio vuelve a su texto normal.
+6. **Panel interno «Fichas de salud»** (menú lateral del Panel Principal): lista
+   los turnos de hoy y de los próximos `dias` con la ficha **pendiente** o
+   **completada**, el teléfono del paciente, la fecha de carga y la **alerta
+   médica** con sus motivos. Cada fila permite **cargar o editar la ficha desde
+   el mostrador** (para el paciente que está presente o responde por teléfono),
+   **abrir la ficha pública** o **copiar el enlace firmado** para reenviarlo por
+   WhatsApp. Los datos salen de `GET /api/v1/anamnesis/panel?dias=30&solo_pendientes=true`
+   (el token se firma en el servidor, nunca en el navegador) y las pendientes
+   alimentan el contador del menú. La carga asistida usa
+   `PUT /api/v1/anamnesis/panel/{turno_id}`: reutiliza el mismo cuestionario y
+   las mismas validaciones, crea la historia clínica si hace falta y recalcula
+   la alerta médica.
 
 Variables específicas: `PUBLIC_BASE_URL` (dominio absoluto usado en el enlace;
 en Vercel se deduce del despliegue) y `ANAMNESIS_TOKEN_SECRET` (secreto de firma;
@@ -456,6 +468,13 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
   se cargan una vez contra esa base con `python -m scripts.seed` y la base local
   se puede copiar entera con `python -m scripts.migrar_sqlite_a_postgres`
   (ver *Migrar los datos locales a la nube*).
+- **Esquema desactualizado.** En cada arranque, `init_db()` ejecuta además
+  `app/db/migraciones.py`, que agrega con `ALTER TABLE ... ADD COLUMN` las
+  columnas incorporadas después de crear la base (por ejemplo
+  `doctores.tipo_pago` y `doctores.valor_pago`). Es idempotente y sólo aditivo:
+  no borra datos. Así un deploy sobre una PostgreSQL/Neon anterior no responde
+  `500` por una columna faltante; los logs de Vercel muestran
+  `Columna agregada en postgresql: doctores.tipo_pago` la primera vez.
 - **Recordatorios.** La tarea programada no corre en segundo plano: se dispara
   con `POST /api/v1/tareas/enviar-recordatorios`. Para automatizarla, apuntar un
   *Cron Job* externo (cron-job.org, GitHub Actions) a la URL de producción.
@@ -889,6 +908,12 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > con el 100 % de su producción) hasta que se les configure otra modalidad.
 > El encabezado del script incluye el `ALTER TABLE` y el DDL equivalente para
 > PostgreSQL.
+>
+> **En PostgreSQL/Vercel este paso ya es automático:** `init_db()` llama a
+> `aplicar_columnas_faltantes` (`app/db/migraciones.py`) en cada arranque y
+> agrega esas columnas si faltan, sin borrar datos ni exigir acceso manual a la
+> base. El script sigue siendo la vía explícita para SQLite y deja copia de
+> seguridad.
 >
 > **Nomenclador odontológico de Córdoba (opcional, no es una migración).** La
 > grilla referencial del Colegio Odontológico de la Provincia de Córdoba se
@@ -1429,7 +1454,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**609 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**621 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
@@ -1441,7 +1466,9 @@ dado de baja y el modal/botones de la vista), **la forma de pago del
 profesional** (`test_doctores_pago.py`: tipo y valor de pago persistidos y
 validados en el alta, el `PUT` del modal y el `PATCH`, la liquidación del mes que
 sale de esa regla y los controles del panel que habilitan el campo numérico),
-**catálogo de obras sociales**
+**migraciones aditivas al arrancar** (`test_migraciones_esquema.py`: una base
+vieja sin `tipo_pago`/`valor_pago` se completa sin perder filas y el segundo
+arranque no repite DDL), **catálogo de obras sociales**
 (`test_obras_sociales.py`: CRUD, nombre único `409` sin distinguir mayúsculas,
 baja lógica y reactivación, filtros, vínculo por `obra_social_id`, compatibilidad
 con el texto heredado y la cobertura del paciente que sobrevive a la baja), la
@@ -1493,6 +1520,17 @@ endpoint (orden cronológico, ventana de días, exclusión de turnos cancelados 
 de los ya enviados, paciente sin teléfono, validación de `dias` con `422` y
 lista vacía), la codificación de la URL y el flujo completo (abrir el enlace
 marca `ENVIADO`, no altera el estado clínico y el turno sale de la lista).
+
+La **ficha pública de salud** se cubre en `tests/test_anamnesis.py`: firma HMAC
+determinística y rechazo de payloads/firmas alterados, `GET` público sin crear
+la historia, `POST` que guarda y permite corregir la declaración, alerta médica
+calculada, integración con el detalle de la historia y el recordatorio, y el
+panel interno **Fichas de salud** (enlaces firmados, ventana de días, filtro de
+pendientes, exclusión de cancelados y presencia en el menú del panel). La
+**carga asistida por la secretaría** se prueba con el `PUT` interno: alta sin
+historia previa, corrección sin duplicar la fila, recálculo de la alerta,
+`404` para un turno inexistente, `409` para uno cancelado, `422` para textos
+demasiado largos y presencia del formulario/modal en el panel.
 
 La **facturación mixta del Módulo 3** se cubre en `tests/test_facturacion.py`
 (*59 pruebas*): el catálogo de prestaciones (código único `409`, normalización y

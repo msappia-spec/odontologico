@@ -58,6 +58,14 @@
     recordatorios: [],
     recDias: 3,
     recError: null,
+    // Fichas de salud (GET /anamnesis/panel): turnos de los próximos días con
+    // el estado de la anamnesis, la alerta médica y el enlace público firmado.
+    fichasSalud: [],
+    fichasDias: 30,
+    fichasSoloPendientes: false,
+    fichasError: null,
+    // Turno cuya ficha se está cargando o corrigiendo desde el panel interno.
+    fichaEditTurnoId: null,
     vista: "calendario",
     agendaFecha: hoyISO(),
     agendaDoctor: "",
@@ -1197,6 +1205,7 @@
     renderDashboard();
     renderAgenda();
     renderRecordatorios();
+    renderFichasSalud();
     renderDoctores();
     renderPacientes();
     renderObrasSociales();
@@ -1224,6 +1233,8 @@
       estadoApi(true);
       // Los recordatorios pendientes se piden aparte para no demorar el panel.
       cargarRecordatorios();
+      // Las fichas de salud alimentan su propio panel y el contador del menú.
+      cargarFichasSalud();
       // La agenda semanal de cada odontólogo también llega en su propia petición.
       cargarDisponibilidad();
       // El menú del bot se pide aparte para no frenar el panel si la consulta falla.
@@ -3804,6 +3815,10 @@
       "Agenda semanal por odontólogo: rangos de mañana y tarde para cada día",
     ],
     recordatorios: ["Recordatorios pendientes", "Turnos próximos que todavía no recibieron el aviso de WhatsApp"],
+    "fichas-salud": [
+      "Fichas de salud",
+      "Declaración de salud de los próximos turnos, con enlace público y alerta médica",
+    ],
     doctores: ["Doctores", "Registro de profesionales del consultorio"],
     pacientes: ["Pacientes", "Registro de pacientes y sus teléfonos de WhatsApp"],
     "obras-sociales": [
@@ -3847,6 +3862,13 @@
       // ventana de días vigente.
       actualizarSubtituloRecordatorios();
       cargarRecordatorios();
+    }
+    if (v === "fichas-salud") {
+      // El panel de anamnesis se refresca al entrar para ver los cambios que
+      // hizo el paciente desde el enlace público.
+      actualizarSubtituloFichas();
+      renderFichasSalud();
+      cargarFichasSalud();
     }
     if (v === "disponibilidad") {
       // La grilla semanal se redibuja con lo que ya haya en memoria; si todavía
@@ -4846,6 +4868,300 @@
     }
   }
 
+  /* ------------------------- Fichas de salud (Módulo 4) ------------------ */
+  // Panel interno de la anamnesis. El backend entrega una fila por turno con
+  // el estado de la ficha y el enlace público ya firmado (GET /anamnesis/panel);
+  // acá sólo se listan, se abren y se copian los enlaces.
+
+  function diasFichas() {
+    return Number(state.fichasDias) || 30;
+  }
+
+  function actualizarSubtituloFichas() {
+    const filtro = state.fichasSoloPendientes ? " Sólo se muestran las pendientes." : "";
+    const texto =
+      `Turnos de los próximos ${textoDias(diasFichas())} y estado de la ` +
+      `declaración de salud.${filtro}`;
+    const sub = document.getElementById("fichas-subtitulo");
+    if (sub) sub.textContent = texto;
+    if (state.vista === "fichas-salud") {
+      document.getElementById("page-subtitle").textContent = texto;
+    }
+  }
+
+  function actualizarContadoresFichas() {
+    const pendientes = state.fichasSalud.filter((f) => !f.completado).length;
+    const total = state.fichasSalud.length;
+    const badge = document.getElementById("nav-fichas-pendientes");
+    if (badge) {
+      badge.textContent = String(pendientes);
+      badge.classList.toggle("hide", pendientes === 0);
+    }
+    const contador = document.getElementById("fichas-contador");
+    if (contador) {
+      contador.textContent = state.fichasSoloPendientes
+        ? `${pendientes} pendiente${pendientes === 1 ? "" : "s"}`
+        : `${total} turno${total === 1 ? "" : "s"} · ${pendientes} pendiente${pendientes === 1 ? "" : "s"}`;
+    }
+    actualizarSubtituloFichas();
+  }
+
+  function estadoFicha(f) {
+    if (f.completado && f.alerta_medica) {
+      return `<span class="badge badge-red">Alerta médica</span>`;
+    }
+    if (f.completado) return `<span class="badge badge-green">Ficha completa</span>`;
+    return `<span class="badge badge-amber">Ficha pendiente</span>`;
+  }
+
+  function filaFichaSalud(f) {
+    const alerta = Boolean(f.completado && f.alerta_medica);
+    const motivos =
+      alerta && (f.motivos_alerta || []).length
+        ? `<p class="fichas-motivos">Revisar antes de atender: ${esc(
+            f.motivos_alerta.join(" · ")
+          )}</p>`
+        : "";
+    const enviada = f.completado
+      ? f.fecha_completado
+        ? `Completada el ${fechaCorta(f.fecha_completado)} a las ${parteHora(f.fecha_completado)}.`
+        : "Ficha completada."
+      : "Ficha pendiente de carga.";
+
+    return (
+      `<div class="turno-row fichas-row${alerta ? " fichas-riesgo" : ""}">` +
+        `<div class="turno-hora">` +
+          `<p class="h">${esc(parteHora(f.fecha_hora_inicio))}</p>` +
+          `<p class="d">${esc(fechaCorta(f.fecha_hora_inicio))}</p>` +
+        `</div>` +
+        `<div class="min-w-0 flex-1">` +
+          `<div class="flex flex-wrap items-center gap-2">` +
+            `<p class="font-bold text-slate-800">${esc(f.paciente_nombre)}</p>` +
+            estadoFicha(f) +
+            `<span class="badge badge-slate">Turno #${esc(f.turno_id)}</span>` +
+          `</div>` +
+          `<p class="text-xs text-slate-500 mt-0.5">` +
+            `${esc(f.doctor_nombre || "Sin profesional")}` +
+            (f.paciente_telefono ? ` · ${esc(f.paciente_telefono)}` : "") +
+            ` · ${esc(etiquetaDias(f.fecha_hora_inicio))}` +
+          `</p>` +
+          motivos +
+          `<p class="text-[11px] text-slate-400 mt-1">${esc(enviada)}</p>` +
+        `</div>` +
+        `<div class="fichas-acciones">` +
+          `<button type="button" class="btn btn-primary btn-sm" ` +
+            `data-ficha-editar="${esc(f.turno_id)}">` +
+            `${f.completado ? "Editar ficha" : "Cargar ficha"}` +
+          `</button>` +
+          `<a class="btn btn-soft btn-sm" href="${esc(f.enlace)}" target="_blank" rel="noopener">` +
+            `Abrir ficha` +
+          `</a>` +
+          `<button type="button" class="btn btn-ghost btn-sm" ` +
+            `data-ficha-copiar="${esc(f.enlace)}" data-ficha-paciente="${esc(f.paciente_nombre)}">` +
+            `Copiar enlace` +
+          `</button>` +
+        `</div>` +
+      `</div>`
+    );
+  }
+
+  function renderFichasSalud() {
+    const cont = document.getElementById("fichas-lista");
+    if (!cont) return;
+    actualizarContadoresFichas();
+
+    if (state.fichasError) {
+      cont.innerHTML = `<div class="card">${vacio(
+        "No se pudieron cargar las fichas de salud",
+        state.fichasError
+      )}</div>`;
+      return;
+    }
+    if (!state.fichasSalud.length) {
+      cont.innerHTML = `<div class="card">${vacio(
+        state.fichasSoloPendientes
+          ? "No hay fichas pendientes"
+          : `No hay turnos en los próximos ${textoDias(diasFichas())}`,
+        state.fichasSoloPendientes
+          ? "Todos los turnos de la ventana ya tienen su ficha de salud completada."
+          : "Cuando agendes turnos, acá vas a poder abrir o copiar el enlace de la ficha de cada paciente."
+      )}</div>`;
+      return;
+    }
+    cont.innerHTML = state.fichasSalud.map(filaFichaSalud).join("");
+  }
+
+  async function cargarFichasSalud(avisar) {
+    try {
+      const filtro = state.fichasSoloPendientes ? "&solo_pendientes=true" : "";
+      const datos = await api(`/anamnesis/panel?dias=${diasFichas()}${filtro}`);
+      state.fichasSalud = datos || [];
+      state.fichasError = null;
+      if (avisar) {
+        toast(
+          "info",
+          "Fichas de salud actualizadas",
+          `${state.fichasSalud.length} turno(s) en los próximos ${textoDias(diasFichas())}.`
+        );
+      }
+    } catch (err) {
+      state.fichasError = err.message;
+      if (avisar) toast("error", "No se pudieron cargar las fichas de salud", err.message);
+    }
+    renderFichasSalud();
+  }
+
+  async function copiarEnlaceFicha(enlace, paciente) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(enlace);
+      } else {
+        // Fallback para navegadores viejos o contextos sin Clipboard API.
+        const area = document.createElement("textarea");
+        area.value = enlace;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        document.body.removeChild(area);
+      }
+      toast(
+        "exito",
+        "Enlace copiado",
+        `${paciente || "Ficha de salud"} · pegalo en WhatsApp para que complete la ficha.`
+      );
+    } catch (err) {
+      toast("error", "No se pudo copiar el enlace", err.message);
+    }
+  }
+
+  /* La secretaría carga la misma declaración del enlace público cuando el
+     paciente está en el mostrador o responde por teléfono. El formulario se
+     precarga con ``antecedentes_salud`` de la fila y se guarda con el PUT
+     interno por turno. */
+  function abrirModalFicha(turnoId) {
+    const ficha = state.fichasSalud.find(
+      (f) => String(f.turno_id) === String(turnoId)
+    );
+    if (!ficha) {
+      toast("error", "No se encontró la ficha", "Actualizá el panel e intentá de nuevo.");
+      return;
+    }
+
+    state.fichaEditTurnoId = ficha.turno_id;
+    const a = ficha.antecedentes_salud || {};
+
+    document.getElementById("ficha-titulo").textContent = ficha.completado
+      ? "Editar ficha de salud"
+      : "Cargar ficha de salud";
+    document.getElementById("ficha-subtitulo").textContent =
+      `${ficha.paciente_nombre} · ${fechaCorta(ficha.fecha_hora_inicio)} ` +
+      `${parteHora(ficha.fecha_hora_inicio)} h · ` +
+      `${ficha.doctor_nombre || "Sin profesional"}`;
+    document.getElementById("modal-ficha-save").textContent = ficha.completado
+      ? "Guardar cambios"
+      : "Guardar ficha";
+
+    const estado = document.getElementById("ficha-estado");
+    if (ficha.completado) {
+      const cuando = ficha.fecha_completado
+        ? ` el ${fechaCorta(ficha.fecha_completado)} a las ${parteHora(ficha.fecha_completado)}`
+        : "";
+      const alerta =
+        ficha.alerta_medica && (ficha.motivos_alerta || []).length
+          ? ` Alerta médica: ${ficha.motivos_alerta.join(" · ")}.`
+          : " Sin antecedentes de riesgo.";
+      estado.textContent = `Ficha completada${cuando}.${alerta}`;
+    } else {
+      estado.textContent =
+        "Ficha pendiente: completá las respuestas que da el paciente y confirmá el consentimiento.";
+    }
+    estado.classList.remove("hide");
+
+    document.getElementById("ficha-alergias").value =
+      a.alergias_medicamentos || "";
+    document.getElementById("ficha-medicacion").value =
+      a.medicacion_actual || "";
+    document.getElementById("ficha-presion").checked = Boolean(a.presion_alta);
+    document.getElementById("ficha-cardiacos").checked = Boolean(
+      a.problemas_cardiacos
+    );
+    document.getElementById("ficha-embarazo").checked = Boolean(a.embarazo);
+    document.getElementById("ficha-consentimiento").checked = false;
+    ocultarAviso("ficha-error");
+    mostrarModal("modal-ficha-salud");
+  }
+
+  function cerrarModalFicha() {
+    state.fichaEditTurnoId = null;
+    const form = document.getElementById("form-ficha-salud");
+    if (form) form.reset();
+    ocultarAviso("ficha-error");
+    document.getElementById("ficha-estado").classList.add("hide");
+    ocultarModal("modal-ficha-salud");
+  }
+
+  function payloadFicha() {
+    return {
+      alergias_medicamentos:
+        document.getElementById("ficha-alergias").value.trim() || null,
+      presion_alta: document.getElementById("ficha-presion").checked,
+      problemas_cardiacos: document.getElementById("ficha-cardiacos").checked,
+      medicacion_actual:
+        document.getElementById("ficha-medicacion").value.trim() || null,
+      embarazo: document.getElementById("ficha-embarazo").checked,
+    };
+  }
+
+  async function guardarFichaSalud(ev) {
+    ev.preventDefault();
+    const turnoId = state.fichaEditTurnoId;
+    if (!turnoId) return;
+
+    if (!document.getElementById("ficha-consentimiento").checked) {
+      mostrarAviso(
+        "ficha-error",
+        "Para guardar la ficha, el paciente tiene que confirmar que los datos son correctos."
+      );
+      return;
+    }
+
+    const ficha = state.fichasSalud.find(
+      (f) => String(f.turno_id) === String(turnoId)
+    );
+    const paciente = ficha ? ficha.paciente_nombre : `Turno #${turnoId}`;
+    const btn = document.getElementById("modal-ficha-save");
+    ocultarAviso("ficha-error");
+    bloquear(btn, true);
+
+    try {
+      const datos = await api(`/anamnesis/panel/${turnoId}`, {
+        method: "PUT",
+        body: JSON.stringify(payloadFicha()),
+      });
+      cerrarModalFicha();
+      const alerta = Boolean(datos && datos.alerta_medica);
+      const motivos =
+        datos && Array.isArray(datos.motivos_alerta)
+          ? datos.motivos_alerta.join(" · ")
+          : "";
+      toast(
+        alerta ? "info" : "exito",
+        "Ficha de salud guardada",
+        alerta
+          ? `${paciente} · alerta médica: ${motivos}`
+          : `${paciente} · ficha sin antecedentes de riesgo.`
+      );
+      await cargarFichasSalud();
+    } catch (err) {
+      mostrarAviso("ficha-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
   /* --------------------- Webhook: respuesta del paciente ------------------ */
   async function responderWhatsApp(wamid, botonId) {
     const esConfirmar = botonId === "confirmar_turno";
@@ -4917,6 +5233,19 @@
         ocultarAlertaPanel();
         return;
       }
+      const editarFicha = e.target.closest("[data-ficha-editar]");
+      if (editarFicha) {
+        abrirModalFicha(editarFicha.dataset.fichaEditar);
+        return;
+      }
+      const copiarFicha = e.target.closest("[data-ficha-copiar]");
+      if (copiarFicha) {
+        copiarEnlaceFicha(
+          copiarFicha.dataset.fichaCopiar,
+          copiarFicha.dataset.fichaPaciente
+        );
+        return;
+      }
       const ficha = e.target.closest("[data-hist-paciente]");
       if (ficha) {
         abrirHistoriaPanel(ficha.dataset.histPaciente);
@@ -4950,6 +5279,7 @@
       cerrarModalArancel();
       cerrarDebito();
       cerrarModalOpcionMenu();
+      cerrarModalFicha();
     });
 
     document.getElementById("form-doctor").addEventListener("submit", crearDoctor);
@@ -5046,6 +5376,46 @@
         cargarRecordatorios(true);
       });
     }
+
+    // Fichas de salud: ventana de días, filtro de pendientes y refresco manual.
+    const fichasDias = document.getElementById("fichas-dias");
+    if (fichasDias) {
+      fichasDias.value = String(diasFichas());
+      fichasDias.addEventListener("change", function (e) {
+        state.fichasDias = parseInt(e.target.value, 10) || 30;
+        cargarFichasSalud(true);
+      });
+    }
+    const fichasSolo = document.getElementById("fichas-solo-pendientes");
+    if (fichasSolo) {
+      fichasSolo.checked = state.fichasSoloPendientes;
+      fichasSolo.addEventListener("change", function (e) {
+        state.fichasSoloPendientes = Boolean(e.target.checked);
+        cargarFichasSalud();
+      });
+    }
+    const fichasActualizar = document.getElementById("fichas-actualizar");
+    if (fichasActualizar) {
+      fichasActualizar.addEventListener("click", function () {
+        cargarFichasSalud(true);
+      });
+    }
+
+    // Carga interna de la ficha: la secretaría la completa por el paciente.
+    document
+      .getElementById("form-ficha-salud")
+      .addEventListener("submit", guardarFichaSalud);
+    document
+      .getElementById("modal-ficha-close")
+      .addEventListener("click", cerrarModalFicha);
+    document
+      .getElementById("modal-ficha-cancel")
+      .addEventListener("click", cerrarModalFicha);
+    document
+      .getElementById("modal-ficha-salud")
+      .addEventListener("click", function (e) {
+        if (e.target.id === "modal-ficha-salud") cerrarModalFicha();
+      });
 
     // Disponibilidad: selector de odontólogo, alta y baja de rangos, plantilla
     // sugerida, vaciado de la semana y vista previa de bloques de un día.
@@ -5580,6 +5950,11 @@
     renderAgenda,
     renderRecordatorios,
     cargarRecordatorios,
+    // Fichas de salud (Módulo 4: anamnesis)
+    renderFichasSalud,
+    cargarFichasSalud,
+    abrirModalFicha,
+    cerrarModalFicha,
     // Doctores y obras sociales (catálogo de coberturas)
     doctoresActivos,
     obrasSocialesActivas,

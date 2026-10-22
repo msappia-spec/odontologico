@@ -162,7 +162,8 @@ def test_el_dashboard_actualiza_turnos_con_patch():
     # expone GET y PATCH. Los PUT/DELETE del panel apuntan a `/doctores/`: la
     # agenda semanal (/doctores/{id}/disponibilidad) y la gestión del profesional
     # (PUT de edición y DELETE de baja lógica en /doctores/{id}), todos declarados
-    # por la API (app/api/v1/endpoints/disponibilidad.py y doctores.py).
+    # por la API (app/api/v1/endpoints/disponibilidad.py y doctores.py). El panel
+    # de anamnesis agrega el PUT interno que carga la ficha de un turno.
     assert not re.search(r'method:\s*"(PUT|DELETE)"', calendar_js)
     assert not re.search(r'method:\s*"(PUT|DELETE)"', _leer_estatico("index.html"))
 
@@ -170,7 +171,8 @@ def test_el_dashboard_actualiza_turnos_con_patch():
         r"api\(\s*`([^`]+)`\s*,\s*\{\s*method:\s*\"(?:PUT|DELETE)\"", app_js
     )
     assert usos_put_delete, "app.js debería gestionar la agenda semanal con PUT/DELETE"
-    assert all(ruta.startswith("/doctores/") for ruta in usos_put_delete), usos_put_delete
+    permitidos = ("/doctores/", "/anamnesis/panel/")
+    assert all(ruta.startswith(permitidos) for ruta in usos_put_delete), usos_put_delete
     assert all("turnos" not in ruta for ruta in usos_put_delete), usos_put_delete
 
 

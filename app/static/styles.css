@@ -311,6 +311,46 @@ select.field {
   overflow: hidden;
 }
 
+/* Panel de fichas de salud (Módulo 4): una tarjeta por turno con el estado de
+   la anamnesis y el enlace público firmado. Las que tienen antecedentes de
+   riesgo se resaltan en rojo para que no pasen desapercibidas. */
+.fichas-row { align-items: center; flex-wrap: wrap; }
+.fichas-row.fichas-riesgo {
+  border-color: #fecaca;
+  background: #fffafa;
+}
+.fichas-row.fichas-riesgo:hover {
+  border-color: #fca5a5;
+  box-shadow: 0 12px 28px -20px rgba(185, 28, 28, .55);
+}
+.fichas-acciones {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .35rem;
+  flex: none;
+}
+.fichas-motivos {
+  margin-top: .4rem;
+  padding: .35rem .55rem;
+  border-radius: .45rem;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: .74rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+@media (max-width: 640px) {
+  .fichas-acciones {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    padding-top: .55rem;
+    border-top: 1px dashed #e2e8f0;
+  }
+}
+
 /* Contador de recordatorios pendientes (navegación y encabezado) */
 .nav-badge {
   min-width: 1.35rem;
