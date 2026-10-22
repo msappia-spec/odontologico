@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 112" role="img" aria-labelledby="logo-horizontal-titulo">
+  <title id="logo-horizontal-titulo">Franciosi Odontología</title>
+  <g transform="translate(0 6) scale(0.55)">
+    <g fill="none" stroke="#c99a96" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M66 47C66 24 80 9 101 9c15 0 27 8 27 21 0 8-4 14-11 15" />
+      <path d="M66 47v99" />
+      <path d="M42 154c14 0 23-6 26-16v16h26" />
+    </g>
+    <circle cx="117" cy="45" r="9" fill="#c99a96" />
+    <circle cx="101" cy="103" r="9" fill="#c99a96" />
+  </g>
+  <g fill="#c99a96" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="300">
+    <text x="90" y="52" textLength="275" lengthAdjust="spacing" font-size="32">FRANCIOSI</text>
+    <text x="90" y="82" textLength="275" lengthAdjust="spacing" font-size="16">ODONTOLOGÍA</text>
+  </g>
+</svg>

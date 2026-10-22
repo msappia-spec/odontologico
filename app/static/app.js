@@ -1,5 +1,5 @@
 /* =========================================================================
-   OdontoCare - Panel Principal de la Secretaría
+   Franciosi Odontología - Panel Principal de la Secretaría
    Conexión real con la API FastAPI (prefijo /api/v1).
    Vanilla JS + Fetch. Sin dependencias.
    ========================================================================= */

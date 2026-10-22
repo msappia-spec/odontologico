@@ -1,5 +1,5 @@
 /* =========================================================================
-   OdontoCare Móvil - Agenda diaria del odontólogo (vista /medico)
+   Franciosi Odontología Móvil - Agenda diaria del odontólogo (vista /medico)
    -------------------------------------------------------------------------
    Página *mobile-first* y autónoma: no carga app.js ni calendar.js, sólo
    consume la MISMA API FastAPI (``/api/v1``) que el panel de la secretaría.

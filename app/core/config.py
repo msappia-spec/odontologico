@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     )
 
     # --- Aplicación ---
-    app_name: str = "Sistema Odontológico API"
+    app_name: str = "Franciosi Odontología API"
     app_version: str = "1.0.0"
     api_v1_prefix: str = "/api/v1"
     debug: bool = False

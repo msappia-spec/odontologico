@@ -1,5 +1,5 @@
 /* =========================================================================
-   OdontoCare - Módulo de Calendario Mensual y Disponibilidad del Día
+   Franciosi Odontología - Módulo de Calendario Mensual y Disponibilidad del Día
    -------------------------------------------------------------------------
    JavaScript puro (sin librerías externas) montado sobre el puente
    `window.OdontoApp` que expone app.js. Responsabilidades:

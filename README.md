@@ -1,4 +1,4 @@
-# Sistema Odontológico — Módulos 1, 2, 3 y 4
+# Franciosi Odontología — Módulos 1, 2, 3 y 4
 
 **Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
 **Módulo 2: Historias Clínicas y Evoluciones Médicas** ·
@@ -1454,7 +1454,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**622 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**624 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de

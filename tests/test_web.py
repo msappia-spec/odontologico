@@ -10,7 +10,7 @@ def test_dashboard_raiz_devuelve_html(client):
     r = client.get("/")
     assert r.status_code == 200, r.text
     assert "text/html" in r.headers["content-type"]
-    assert "OdontoCare" in r.text
+    assert "Franciosi Odontología" in r.text
     assert "/static/app.js" in r.text
 
 
@@ -24,6 +24,36 @@ def test_javascript_disponible_y_apunta_a_la_api(client):
     r = client.get("/static/app.js")
     assert r.status_code == 200
     assert "/api/v1" in r.text
+
+
+def test_la_marca_franciosi_esta_en_las_tres_interfaces(client):
+    """El panel, la vista móvil y la ficha pública comparten nombre y favicon."""
+    panel = client.get("/").text
+    movil = client.get("/medico").text
+    ficha = client.get("/anamnesis/token-de-prueba").text
+
+    for html in (panel, movil, ficha):
+        assert "Franciosi Odontología" in html
+        assert "/static/img/favicon-franciosi.svg" in html
+
+    # Cada interfaz usa además la pieza de marca adecuada a su tamaño.
+    assert "/static/img/marca-franciosi.svg" in panel
+    assert "/static/img/logo-franciosi.svg" in movil
+    assert "/static/img/marca-franciosi.svg" in ficha
+
+
+def test_los_recursos_de_marca_se_sirven_como_svg(client):
+    """Los logos viajan como SVG estático y no dependen de un CDN externo."""
+    for recurso in (
+        "/static/img/marca-franciosi.svg",
+        "/static/img/logo-franciosi.svg",
+        "/static/img/logo-franciosi-horizontal.svg",
+        "/static/img/favicon-franciosi.svg",
+    ):
+        r = client.get(recurso)
+        assert r.status_code == 200, recurso
+        assert "image/svg+xml" in r.headers["content-type"]
+        assert "<svg" in r.text
 
 
 def test_health_y_api_siguen_operativos(client):

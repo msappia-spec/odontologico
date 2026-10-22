@@ -1,5 +1,5 @@
 /* ==========================================================================
-   OdontoCare Móvil - Vista del odontólogo (mobile-first)
+   Franciosi Odontología Móvil - Vista del odontólogo (mobile-first)
    Ajustes complementarios a Tailwind (CDN) y a styles.css: áreas táctiles
    cómodas, hojas deslizantes y respeto por las zonas seguras del celular.
    ========================================================================== */
@@ -55,6 +55,7 @@ button, a, input, select, textarea { touch-action: manipulation; }
 
 /* ---------------------------------- Hero --------------------------------- */
 .m-hero { padding: 1.1rem .25rem; }
+.m-hero-logo { display: block; width: min(190px, 58vw); height: auto; margin: 0 0 .7rem; }
 .m-hero-eyebrow { font-size: .7rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--m-brand); }
 .m-hero-titulo { margin-top: .35rem; font-size: 1.75rem; line-height: 1.15; font-weight: 800; color: #0f1c24; letter-spacing: -.02em; }
 .m-hero-sub { margin-top: .45rem; font-size: .875rem; color: #64748b; }
