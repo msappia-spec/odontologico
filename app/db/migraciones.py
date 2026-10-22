@@ -26,6 +26,7 @@ import logging
 from typing import NamedTuple
 
 from sqlalchemy import Engine, inspect
+from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger("app.db")
 
@@ -68,6 +69,28 @@ def _ddl_para(columna: ColumnaNueva, dialecto: str) -> str:
     return columna.ddl_sqlite
 
 
+def _sentencia_alter(columna: ColumnaNueva, dialecto: str) -> str:
+    """Arma el ``ALTER TABLE`` tolerante a arranques concurrentes.
+
+    Vercel puede iniciar varias instancias de la Function a la vez y todas
+    ejecutan ``init_db``. PostgreSQL soporta ``ADD COLUMN IF NOT EXISTS``, así
+    que la segunda instancia no falla si la primera ya migró. SQLite no admite
+    esa cláusula; allí el arranque es de un solo proceso y, por las dudas, el
+    bucle ignora el error de columna duplicada.
+    """
+    if dialecto == "postgresql":
+        return (
+            f'ALTER TABLE "{columna.tabla}" '
+            f'ADD COLUMN IF NOT EXISTS "{columna.columna}" '
+            f"{_ddl_para(columna, dialecto)}"
+        )
+    return (
+        f'ALTER TABLE "{columna.tabla}" '
+        f'ADD COLUMN "{columna.columna}" '
+        f"{_ddl_para(columna, dialecto)}"
+    )
+
+
 def aplicar_columnas_faltantes(engine: Engine) -> list[str]:
     """Agrega las columnas conocidas que falten en una base existente.
 
@@ -99,11 +122,25 @@ def aplicar_columnas_faltantes(engine: Engine) -> list[str]:
     aplicadas: list[str] = []
     with engine.begin() as conexion:
         for columna in pendientes:
-            conexion.exec_driver_sql(
-                f'ALTER TABLE "{columna.tabla}" '
-                f'ADD COLUMN "{columna.columna}" '
-                f"{_ddl_para(columna, dialecto)}"
-            )
+            try:
+                conexion.exec_driver_sql(
+                    _sentencia_alter(columna, dialecto)
+                )
+            except OperationalError as exc:
+                # SQLite no tiene ``IF NOT EXISTS`` para ADD COLUMN: si otro
+                # proceso la agregó entre la inspección y el ALTER, el estado
+                # final ya es el correcto.
+                if (
+                    dialecto != "sqlite"
+                    or "duplicate column name" not in str(exc).lower()
+                ):
+                    raise
+                logger.info(
+                    "La columna %s.%s ya había sido agregada por otro proceso.",
+                    columna.tabla,
+                    columna.columna,
+                )
+                continue
             aplicadas.append(f"{columna.tabla}.{columna.columna}")
             logger.info(
                 "Columna agregada en %s: %s.%s",

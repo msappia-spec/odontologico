@@ -1454,7 +1454,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**621 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**622 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
@@ -1467,8 +1467,9 @@ profesional** (`test_doctores_pago.py`: tipo y valor de pago persistidos y
 validados en el alta, el `PUT` del modal y el `PATCH`, la liquidación del mes que
 sale de esa regla y los controles del panel que habilitan el campo numérico),
 **migraciones aditivas al arrancar** (`test_migraciones_esquema.py`: una base
-vieja sin `tipo_pago`/`valor_pago` se completa sin perder filas y el segundo
-arranque no repite DDL), **catálogo de obras sociales**
+vieja sin `tipo_pago`/`valor_pago` se completa sin perder filas, el segundo
+arranque no repite DDL y PostgreSQL usa `ADD COLUMN IF NOT EXISTS` para tolerar
+instancias concurrentes de Vercel), **catálogo de obras sociales**
 (`test_obras_sociales.py`: CRUD, nombre único `409` sin distinguir mayúsculas,
 baja lógica y reactivación, filtros, vínculo por `obra_social_id`, compatibilidad
 con el texto heredado y la cobertura del paciente que sobrevive a la baja), la

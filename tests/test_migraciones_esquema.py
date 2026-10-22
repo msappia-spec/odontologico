@@ -9,7 +9,11 @@ profesionales. ``create_all`` no agrega columnas a tablas existentes, así que
 import app.db.init_db as init_db_module
 from sqlalchemy import create_engine, inspect
 
-from app.db.migraciones import aplicar_columnas_faltantes
+from app.db.migraciones import (
+    COLUMNAS_NUEVAS,
+    _sentencia_alter,
+    aplicar_columnas_faltantes,
+)
 
 
 def _crear_base_legacy(ruta):
@@ -58,6 +62,22 @@ def test_la_migracion_es_idempotente(tmp_path):
     assert aplicar_columnas_faltantes(engine)
     assert aplicar_columnas_faltantes(engine) == []
     engine.dispose()
+
+
+def test_postgres_usa_add_column_if_not_exists():
+    """Dos instancias de Vercel no fallan al migrar la misma columna."""
+    columna = next(
+        c
+        for c in COLUMNAS_NUEVAS
+        if c.tabla == "doctores" and c.columna == "tipo_pago"
+    )
+
+    sentencia_pg = _sentencia_alter(columna, "postgresql")
+    assert "ADD COLUMN IF NOT EXISTS" in sentencia_pg
+    assert "VARCHAR(15) NOT NULL DEFAULT 'DUENO'" in sentencia_pg
+
+    sentencia_sqlite = _sentencia_alter(columna, "sqlite")
+    assert "IF NOT EXISTS" not in sentencia_sqlite
 
 
 def test_init_db_aplica_la_migracion_antes_de_sembrar(monkeypatch):
