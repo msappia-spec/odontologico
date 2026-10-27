@@ -3,6 +3,7 @@
 import logging
 from datetime import timedelta
 
+from app.core.config import settings
 from app.core.datetime_utils import utcnow
 from app.models.enums import EstadoTurno
 from app.models.turno import Turno
@@ -82,6 +83,26 @@ def test_tarea_envia_recordatorio_y_actualiza_estado(client, doctor, paciente):
     actualizado = client.get(f"{API}/turnos/{turno['id']}").json()
     assert actualizado["estado_whatsapp"] == "ENVIADO"
     assert actualizado["whatsapp_mensaje_id"] == detalle["whatsapp_mensaje_id"]
+
+
+def test_tarea_rechaza_ejecucion_sin_el_secreto(client, doctor, paciente):
+    _crear_turno(client, doctor, paciente, dias=3, hora=10)
+
+    r = client._client.post(f"{API}/tareas/enviar-recordatorios")
+
+    assert r.status_code == 401
+
+
+def test_cron_autorizado_usa_el_mismo_flujo(client, doctor, paciente):
+    _crear_turno(client, doctor, paciente, dias=3, hora=10)
+
+    r = client.get(
+        f"{API}/tareas/enviar-recordatorios",
+        headers={"Authorization": f"Bearer {settings.cron_secret}"},
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["enviados"] == 1
 
 
 def test_tarea_registra_log_de_envio(client, doctor, paciente, caplog):

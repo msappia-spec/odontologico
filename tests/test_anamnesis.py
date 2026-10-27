@@ -480,9 +480,10 @@ def test_recordatorio_agrega_el_enlace_solo_mientras_falta_la_ficha(
     datos = validar_token_anamnesis(enlace.rsplit("/", 1)[1])
     assert (datos.turno_id, datos.paciente_id) == (turno.id, paciente.id)
 
-    # El payload interactivo de la Cloud API también lleva el enlace.
+    # El cuarto parámetro de la plantilla de Cloud API también lleva el enlace.
     payload = whatsapp_service.construir_payload_recordatorio(turno)
-    assert "/anamnesis/" in payload["interactive"]["body"]["text"]
+    parametros = payload["template"]["components"][0]["parameters"]
+    assert "/anamnesis/" in parametros[3]["text"]
 
     token = firmar_token_anamnesis(turno.id, paciente.id)
     assert client.post(f"{API}/anamnesis/{token}", json={}).status_code == 200

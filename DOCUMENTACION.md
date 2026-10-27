@@ -407,21 +407,41 @@ servicios ni de `services` desde modelos.
 
 Hay dos caminos distintos:
 
-**A. Envío automático (`POST /api/v1/tareas/enviar-recordatorios`)**
+**A. Envío automático (`GET` / `POST /api/v1/tareas/enviar-recordatorios`)**
 
 - Busca turnos cuya `fecha_hora_inicio` cae exactamente en el día
   `hoy + N` (`RECORDATORIO_DIAS`, por defecto 3).
 - Filtra `estado_turno = PENDIENTE` y `estado_whatsapp = PENDIENTE_ENVIO`.
-- Arma un mensaje interactivo con botones **Confirmar** / **Cancelar**.
+- Arma una plantilla Utility aprobada con botones **Confirmar** / **Cancelar**,
+  válida también fuera de la ventana de 24 horas.
 - Si el paciente todavía no completó la anamnesis, agrega el enlace HMAC.
 - Envía por `httpx` a la Graph API si hay `WHATSAPP_PHONE_NUMBER_ID` y token;
   si no, simula el envío.
 - Actualiza `estado_whatsapp` a `ENVIADO` o `FALLIDO` y guarda
   `whatsapp_mensaje_id` (wamid) cuando el envío fue exitoso.
 
-> **No hay scheduler interno.** El endpoint está pensado para que lo invoque un
-> cron externo (por ejemplo, Vercel Cron) o una tarea manual. En el repositorio
-> no hay configuración de cron ni proceso en segundo plano.
+> **Scheduler incluido.** `vercel.json` ejecuta el endpoint todos los días a
+> las 12:00 UTC. El cron y cualquier ejecución manual deben presentar
+> `Authorization: Bearer <CRON_SECRET>`.
+
+**Plantilla requerida en Meta.** Crear y aprobar la plantilla Utility
+`recordatorio_turno`, idioma `es_AR`, con este cuerpo y los botones rápidos en
+este orden:
+
+```
+Hola {{1}}, te recordamos tu turno con {{2}} el {{3}}. ¿Confirmás tu asistencia?
+{{4}}
+```
+
+1. `{{1}}`: nombre del paciente.
+2. `{{2}}`: profesional.
+3. `{{3}}`: fecha y hora.
+4. `{{4}}`: instrucción y enlace de anamnesis, o la indicación de que no hay
+   documentación pendiente.
+5. Quick reply 1: `Confirmar`; Quick reply 2: `Cancelar`.
+
+El backend envía los payloads `confirmar_turno` y `cancelar_turno`, por lo que
+las respuestas actualizan el estado del turno sin configuración adicional.
 
 **B. Click-to-Chat (`GET /api/v1/whatsapp/recordatorios-pendientes`)**
 
@@ -969,7 +989,7 @@ fallo de WhatsApp.
 | `GET` | `/api/v1/liquidaciones/profesionales?anio=&mes=&doctor_id=` | Producción y honorarios del mes. |
 | `GET` | `/api/v1/liquidaciones/obras-sociales/pdf?...` | Presentación en PDF. |
 | `GET` | `/api/v1/liquidaciones/profesionales/pdf?...` | Liquidación en PDF. |
-| `POST` | `/api/v1/tareas/enviar-recordatorios?dias=` | Dispara recordatorios del día `hoy + N`. |
+| `GET` / `POST` | `/api/v1/tareas/enviar-recordatorios?dias=` | Dispara recordatorios del día `hoy + N`; requiere `Bearer CRON_SECRET`. |
 | `GET` | `/api/v1/whatsapp/webhook` | Verificación `hub.mode`, `hub.verify_token`, `hub.challenge`. |
 | `POST` | `/api/v1/whatsapp/webhook` | Procesa texto (bot) o botón (confirmar/cancelar). |
 | `GET` | `/api/v1/whatsapp/recordatorios-pendientes?dias=` | Lista con enlace `wa.me` y mensaje redactado. |

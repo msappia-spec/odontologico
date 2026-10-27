@@ -102,36 +102,59 @@ def _agregar_enlace_anamnesis(texto: str, turno: Turno) -> str:
 
 
 def construir_payload_recordatorio(turno: Turno) -> dict:
-    """Arma el cuerpo JSON del mensaje interactivo (botones Confirmar/Cancelar)."""
+    """Arma el mensaje de plantilla para un recordatorio proactivo.
+
+    Los mensajes libres o ``interactive`` sólo se permiten dentro de las 24 h
+    desde el último mensaje del paciente. Esta plantilla ``Utility`` aprobada
+    permite enviar el recordatorio aunque esa ventana ya haya vencido.
+    """
     nombre = turno.paciente.nombre if turno.paciente else "paciente"
     doctor = turno.doctor.nombre if turno.doctor else "su profesional"
     inicio = turno.fecha_hora_inicio.strftime("%d/%m/%Y %H:%M")
-    texto = _agregar_enlace_anamnesis(
-        f"Hola {nombre}, le recordamos su turno con {doctor} "
-        f"el {inicio}. ¿Confirma su asistencia?",
-        turno,
+    enlace_anamnesis = _enlace_anamnesis_pendiente(turno)
+    indicacion_anamnesis = (
+        TEXTO_ANAMNESIS_PENDIENTE.format(enlace=enlace_anamnesis)
+        if enlace_anamnesis
+        else "No necesitás completar documentación previa para este turno."
     )
 
     return {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": turno.paciente.telefono if turno.paciente else "",
-        "type": "interactive",
-        "interactive": {
-            "type": "button",
-            "body": {"text": texto},
-            "action": {
-                "buttons": [
-                    {
-                        "type": "reply",
-                        "reply": {"id": "confirmar_turno", "title": "Confirmar"},
-                    },
-                    {
-                        "type": "reply",
-                        "reply": {"id": "cancelar_turno", "title": "Cancelar"},
-                    },
-                ]
-            },
+        "to": normalizar_telefono_whatsapp(
+            turno.paciente.telefono if turno.paciente else ""
+        ),
+        "type": "template",
+        "template": {
+            "name": settings.whatsapp_template_recordatorio,
+            "language": {"code": settings.whatsapp_template_idioma},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": nombre},
+                        {"type": "text", "text": doctor},
+                        {"type": "text", "text": inicio},
+                        {"type": "text", "text": indicacion_anamnesis},
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "0",
+                    "parameters": [
+                        {"type": "payload", "payload": "confirmar_turno"}
+                    ],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": "1",
+                    "parameters": [
+                        {"type": "payload", "payload": "cancelar_turno"}
+                    ],
+                },
+            ],
         },
     }
 
@@ -151,6 +174,20 @@ def _enviar_http_whatsapp(payload: dict) -> str:
         respuesta.raise_for_status()
         data = respuesta.json()
         return data["messages"][0]["id"]
+    except httpx.HTTPStatusError as exc:
+        respuesta_error = exc.response
+        try:
+            error_meta = respuesta_error.json().get("error", {})
+        except (ValueError, AttributeError):
+            error_meta = {}
+        codigo = error_meta.get("code", "sin código")
+        subcodigo = error_meta.get("error_subcode")
+        mensaje = error_meta.get("message") or respuesta_error.text or str(exc)
+        detalle_subcodigo = f", subcode={subcodigo}" if subcodigo is not None else ""
+        raise WhatsAppEnvioError(
+            f"Meta rechazó el mensaje (HTTP {respuesta_error.status_code}, "
+            f"code={codigo}{detalle_subcodigo}): {mensaje}"
+        ) from exc
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         raise WhatsAppEnvioError(f"Fallo el envío a WhatsApp: {exc}") from exc
 

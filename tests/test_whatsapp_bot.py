@@ -21,13 +21,18 @@ y **qué texto** se le manda, sin depender del ``.env`` de la máquina. El fixtu
 se traduzca en un ``POST`` real.
 """
 
+import hashlib
+import hmac
+import json
 import logging
 from datetime import timedelta
 
+import httpx
 import pytest
 
 from app.core.config import URL_WHATSAPP_POR_DEFECTO, Settings, settings
 from app.core.datetime_utils import utcnow
+from app.core.exceptions import WhatsAppEnvioError
 from app.services import whatsapp_bot_service, whatsapp_service
 
 API = "/api/v1"
@@ -156,6 +161,55 @@ def test_el_payload_del_mensaje_de_texto_tiene_la_forma_de_la_cloud_api():
         "type": "text",
         "text": {"preview_url": False, "body": "Hola"},
     }
+
+
+def test_el_payload_de_recordatorio_usa_plantilla_y_normaliza_el_telefono(
+    db_session, doctor, paciente
+):
+    from datetime import datetime
+
+    from app.models.turno import Turno
+
+    turno = Turno(
+        paciente=paciente,
+        doctor=doctor,
+        paciente_id=paciente.id,
+        doctor_id=doctor.id,
+        fecha_hora_inicio=datetime(2026, 11, 5, 10, 30),
+        fecha_hora_fin=datetime(2026, 11, 5, 11, 0),
+    )
+    db_session.add(turno)
+    db_session.commit()
+    db_session.refresh(turno)
+
+    payload = whatsapp_service.construir_payload_recordatorio(turno)
+
+    assert payload["to"] == "5491122334455"
+    assert payload["type"] == "template"
+    assert payload["template"]["name"] == settings.whatsapp_template_recordatorio
+    assert payload["template"]["language"] == {"code": "es_AR"}
+    componentes = payload["template"]["components"]
+    assert componentes[1]["parameters"][0]["payload"] == "confirmar_turno"
+    assert componentes[2]["parameters"][0]["payload"] == "cancelar_turno"
+
+
+def test_error_de_meta_conserva_codigo_y_mensaje(monkeypatch):
+    request = httpx.Request("POST", "https://graph.facebook.com/messages")
+    respuesta = httpx.Response(
+        400,
+        request=request,
+        json={"error": {"code": 131047, "message": "Fuera de la ventana"}},
+    )
+
+    def _post_falso(*_args, **_kwargs):
+        return respuesta
+
+    monkeypatch.setattr(whatsapp_service.httpx, "post", _post_falso)
+    monkeypatch.setattr(settings, "whatsapp_access_token", "token-de-prueba")
+    monkeypatch.setattr(settings, "whatsapp_phone_number_id", "1234567890")
+
+    with pytest.raises(WhatsAppEnvioError, match=r"code=131047.*Fuera de la ventana"):
+        whatsapp_service._enviar_http_whatsapp({"type": "template"})
 
 
 def test_sin_credenciales_el_envio_se_simula_y_queda_en_el_log(monkeypatch, caplog):
@@ -653,6 +707,39 @@ def test_el_envio_real_solo_necesita_el_token_y_el_numero(
 # ---------------------------------------------------------------------------
 
 VERIFY_TOKEN = "odontologia_secreto_2026"
+
+
+def test_el_webhook_post_exige_una_firma_valida(client, monkeypatch):
+    """Un tercero no puede falsificar respuestas de pacientes."""
+    monkeypatch.setattr(settings, "whatsapp_app_secret", "secreto-de-prueba")
+    payload = _payload_texto("hola")
+    cuerpo = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+    sin_firma = client.post(
+        f"{API}/whatsapp/webhook",
+        content=cuerpo,
+        headers={"Content-Type": "application/json"},
+    )
+    assert sin_firma.status_code == 403
+
+    firma = "sha256=" + hmac.new(
+        b"secreto-de-prueba", cuerpo, hashlib.sha256
+    ).hexdigest()
+    valido = client.post(
+        f"{API}/whatsapp/webhook",
+        content=cuerpo,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": firma,
+        },
+    )
+    assert valido.status_code == 200, valido.text
+
+
+def test_el_webhook_post_falla_cerrado_sin_app_secret(client, monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_app_secret", None)
+    respuesta = client.post(f"{API}/whatsapp/webhook", json=_payload_texto("hola"))
+    assert respuesta.status_code == 503
 
 
 def test_el_webhook_devuelve_el_challenge_como_texto_plano(client, monkeypatch):

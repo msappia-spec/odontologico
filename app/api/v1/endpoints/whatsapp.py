@@ -13,11 +13,12 @@ El panel también ofrece el enlace *Click-to-Chat* de los recordatorios
 pendientes, que no pasa por la API: lo envía la secretaría desde su WhatsApp.
 """
 
+import hashlib
 import hmac
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
@@ -114,6 +115,36 @@ def _procesar_texto_del_bot(
     )
 
 
+async def validar_firma_webhook(request: Request) -> None:
+    """Comprueba que el POST fue emitido por Meta antes de procesarlo.
+
+    Meta firma los bytes exactos del cuerpo con la *App Secret* y los envía en
+    ``X-Hub-Signature-256``. La comparación se hace en tiempo constante para
+    que una firma inválida nunca pueda simular una confirmación o cancelación
+    de turno.
+    """
+    secreto = (settings.whatsapp_app_secret or "").strip()
+    if not secreto:
+        logger.error("WHATSAPP_APP_SECRET no está configurado; webhook rechazado.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Webhook de WhatsApp no configurado de forma segura.",
+        )
+
+    cuerpo = await request.body()
+    firma_recibida = request.headers.get("X-Hub-Signature-256", "")
+    firma_esperada = "sha256=" + hmac.new(
+        secreto.encode("utf-8"), cuerpo, hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(firma_recibida, firma_esperada):
+        logger.warning("Webhook de WhatsApp rechazado: firma inválida.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Firma de webhook inválida.",
+        )
+
+
 @router.post(
     "/webhook",
     response_model=WebhookProcesadoResponse,
@@ -136,10 +167,12 @@ def _procesar_texto_del_bot(
         "payload que no encaja en ninguno es 400 y un turno inexistente, 404."
     ),
 )
-def recibir_webhook(
+async def recibir_webhook(
+    request: Request,
     payload: WhatsAppWebhookPayload,
     db: Session = Depends(get_db),
 ) -> WebhookProcesadoResponse:
+    await validar_firma_webhook(request)
     # Un mensaje escrito por el paciente lo contesta el FAQ Bot…
     mensaje_texto = whatsapp_service.mensaje_de_texto(payload)
     if mensaje_texto is not None:

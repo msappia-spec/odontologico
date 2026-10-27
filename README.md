@@ -601,9 +601,11 @@ los conteos y recién borra cuando se escribe `SI`.
   no borra datos. Así un deploy sobre una PostgreSQL/Neon anterior no responde
   `500` por una columna faltante; los logs de Vercel muestran
   `Columna agregada en postgresql: doctores.tipo_pago` la primera vez.
-- **Recordatorios.** La tarea programada no corre en segundo plano: se dispara
-  con `POST /api/v1/tareas/enviar-recordatorios`. Para automatizarla, apuntar un
-  *Cron Job* externo (cron-job.org, GitHub Actions) a la URL de producción.
+- **Recordatorios.** Vercel Cron ejecuta diariamente
+  `GET /api/v1/tareas/enviar-recordatorios` a las 12:00 UTC (09:00 Argentina).
+  El endpoint exige `Authorization: Bearer <CRON_SECRET>`; Vercel lo agrega al
+  definir `CRON_SECRET` en el proyecto. El disparo manual por `POST` exige la
+  misma autorización.
 - **Webhook de WhatsApp.** Configurar
   `https://TU-PROYECTO.vercel.app/api/v1/whatsapp/webhook` como *Callback URL*
   en la app de Meta.
@@ -1153,7 +1155,7 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `GET`  | `/turnos` | Listar turnos (`?doctor_id=&paciente_id=&skip=&limit=`) |
 | `GET`  | `/turnos/{id}` | Obtener turno |
 | `PATCH`| `/turnos/{id}` | Actualizar turno (reprogramar, reasignar, cancelar o reactivar) con las mismas validaciones |
-| `POST` | `/tareas/enviar-recordatorios` | **Tarea programada** de recordatorios WhatsApp |
+| `GET` / `POST` | `/tareas/enviar-recordatorios` | **Tarea programada** de recordatorios WhatsApp; requiere `Bearer CRON_SECRET` |
 | `GET`  | `/whatsapp/recordatorios-pendientes` | **Recordatorios pendientes** con enlace Click-to-Chat (`?dias=1..30`, por defecto 3) |
 | `GET`  | `/whatsapp/webhook` | Verificación del webhook (Meta) |
 | `POST` | `/whatsapp/webhook` | **Webhook de entrada**: texto libre → FAQ Bot; botón del recordatorio → confirmar/cancelar el turno |

@@ -21,6 +21,8 @@ MEDICO_FILE = STATIC_DIR / "medico.html"
 # paciente no tenga que iniciar sesión. El JS valida el token contra la API y
 # muestra el formulario o el resumen ya enviado.
 ANAMNESIS_FILE = STATIC_DIR / "anamnesis.html"
+PRIVACIDAD_FILE = STATIC_DIR / "privacidad.html"
+ELIMINACION_DATOS_FILE = STATIC_DIR / "eliminacion_datos.html"
 
 # ``include_in_schema=False``: son páginas, no endpoints de la API.
 router = APIRouter(tags=["Interfaz web"], include_in_schema=False)
@@ -56,3 +58,15 @@ def ficha_de_salud(token: str) -> FileResponse:
             "X-Robots-Tag": "noindex, nofollow",
         },
     )
+
+
+@router.get("/privacidad")
+def politica_de_privacidad() -> FileResponse:
+    """Política pública requerida por Meta para la integración de WhatsApp."""
+    return FileResponse(PRIVACIDAD_FILE, media_type="text/html")
+
+
+@router.get("/eliminacion-datos")
+def instrucciones_eliminacion_datos() -> FileResponse:
+    """Canal público para solicitudes de eliminación de datos personales."""
+    return FileResponse(ELIMINACION_DATOS_FILE, media_type="text/html")

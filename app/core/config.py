@@ -143,6 +143,11 @@ class Settings(BaseSettings):
                 "WHATSAPP_VERIFY_TOKEN sin configurar: Meta no podrá verificar "
                 "el webhook GET /api/v1/whatsapp/webhook."
             )
+        if self.whatsapp_access_token and not self.whatsapp_app_secret:
+            logger.warning(
+                "WHATSAPP_APP_SECRET sin configurar: se rechazarán los POST "
+                "del webhook para impedir mensajes falsificados."
+            )
         return self
 
     # --- WhatsApp Cloud API (opcional) ---
@@ -161,6 +166,14 @@ class Settings(BaseSettings):
     # Es independiente del access token (nunca debe usarse el token de la API
     # como verify token).
     whatsapp_verify_token: Optional[str] = None
+    # Clave secreta de la aplicación de Meta (App Dashboard -> Settings -> Basic).
+    # Meta firma cada POST del webhook con esta clave en X-Hub-Signature-256;
+    # no es el verify token ni el access token de la Cloud API.
+    whatsapp_app_secret: Optional[str] = None
+    # Plantilla Utility aprobada en WhatsApp Manager. Debe tener cuatro
+    # variables en el cuerpo y dos botones de respuesta rápida (ver .env.example).
+    whatsapp_template_recordatorio: str = "recordatorio_turno"
+    whatsapp_template_idioma: str = "es_AR"
 
     # --- Chatbot de respuestas automáticas (FAQ Bot) ---
     # Código del nomenclador con el que se responde la tarifa de consulta
@@ -181,6 +194,8 @@ class Settings(BaseSettings):
     # cuando se arma el enlace "Click-to-Chat" (https://wa.me/...).
     # Para Argentina móvil el formato es 54 + 9 + área + número -> "549".
     whatsapp_codigo_pais: str = "549"
+    # Secreto que autoriza al cron de Vercel a disparar envíos automáticos.
+    cron_secret: Optional[str] = None
 
     # --- Ficha de salud pública (anamnesis) ---
     # Base absoluta con la que se arma el enlace que recibe el paciente por

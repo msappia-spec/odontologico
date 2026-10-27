@@ -78,6 +78,14 @@ def test_vercel_json_sin_formato_legacy() -> None:
     assert "routes" not in config, "Usar 'rewrites' en lugar de 'routes'."
 
 
+def test_vercel_configura_el_cron_de_recordatorios() -> None:
+    config = json.loads((RAIZ / "vercel.json").read_text(encoding="utf-8"))
+    assert {
+        "path": "/api/v1/tareas/enviar-recordatorios",
+        "schedule": "0 12 * * *",
+    } in config["crons"]
+
+
 @pytest.mark.parametrize(
     "url_inicial",
     ["sqlite:///./odontologico.db", "sqlite:///odontologico.db"],

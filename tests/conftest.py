@@ -4,6 +4,10 @@ Se usa una base SQLite **en memoria** (``StaticPool``) totalmente aislada del
 entorno real, y se sobreescribe la dependencia ``get_db`` de FastAPI.
 """
 
+import hashlib
+import hmac
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -31,6 +35,42 @@ def whatsapp_sin_credenciales(monkeypatch):
     """
     monkeypatch.setattr(settings, "whatsapp_phone_number_id", None)
     monkeypatch.setattr(settings, "whatsapp_access_token", None)
+    monkeypatch.setattr(settings, "whatsapp_app_secret", "app-secret-de-prueba")
+    monkeypatch.setattr(settings, "cron_secret", "cron-secret-de-prueba")
+
+
+class ClienteConFirmaWebhook:
+    """Agrega la firma de Meta a los POST de webhook de las pruebas.
+
+    Así las pruebas existentes ejercitan el mismo control que producción sin
+    repetir la construcción de la firma en cada caso.
+    """
+
+    def __init__(self, client: TestClient):
+        self._client = client
+
+    def __getattr__(self, nombre):
+        return getattr(self._client, nombre)
+
+    def post(self, url, *args, **kwargs):
+        if url == "/api/v1/tareas/enviar-recordatorios":
+            headers = dict(kwargs.pop("headers", {}) or {})
+            headers.setdefault("Authorization", "Bearer cron-secret-de-prueba")
+            return self._client.post(url, *args, headers=headers, **kwargs)
+
+        if url != "/api/v1/whatsapp/webhook" or "json" not in kwargs:
+            return self._client.post(url, *args, **kwargs)
+
+        payload = kwargs.pop("json")
+        cuerpo = json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers.setdefault("Content-Type", "application/json")
+        headers["X-Hub-Signature-256"] = "sha256=" + hmac.new(
+            b"app-secret-de-prueba", cuerpo, hashlib.sha256
+        ).hexdigest()
+        return self._client.post(url, *args, content=cuerpo, headers=headers, **kwargs)
 
 
 @pytest.fixture()
@@ -76,7 +116,7 @@ def client(engine, db_session) -> TestClient:
     app.dependency_overrides[get_db] = _override_get_db
     test_client = TestClient(app)
     try:
-        yield test_client
+        yield ClienteConFirmaWebhook(test_client)
     finally:
         app.dependency_overrides.clear()
 

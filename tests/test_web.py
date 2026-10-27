@@ -14,6 +14,15 @@ def test_dashboard_raiz_devuelve_html(client):
     assert "/static/app.js" in r.text
 
 
+def test_paginas_publicas_de_privacidad_y_eliminacion(client):
+    privacidad = client.get("/privacidad")
+    eliminacion = client.get("/eliminacion-datos")
+    assert privacidad.status_code == 200
+    assert "Política de privacidad" in privacidad.text
+    assert eliminacion.status_code == 200
+    assert "Solicitud de eliminación de datos" in eliminacion.text
+
+
 def test_hoja_de_estilos_disponible(client):
     r = client.get("/static/styles.css")
     assert r.status_code == 200
