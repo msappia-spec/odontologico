@@ -491,6 +491,22 @@ def test_un_mensaje_de_texto_sin_remitente_no_se_puede_contestar(client, envios)
     assert envios == []
 
 
+def test_el_webhook_confirma_el_evento_si_falla_el_envio_saliente(client, monkeypatch):
+    """Evita que Meta reintente indefinidamente un mensaje que no pudo salir."""
+
+    def _fallar_envio(*_args, **_kwargs):
+        raise WhatsAppEnvioError("Meta no disponible")
+
+    monkeypatch.setattr(whatsapp_bot_service, "responder_mensaje", _fallar_envio)
+
+    r = client.post(f"{API}/whatsapp/webhook", json=_payload_texto("hola"))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["tipo"] == "BOT"
+    assert r.json()["atencion_manual"] is True
+    assert r.json()["mensaje_id_saliente"] is None
+
+
 # ---------------------------------------------------------------------------
 # Convivencia con el flujo de botones del recordatorio
 # ---------------------------------------------------------------------------

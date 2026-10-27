@@ -23,7 +23,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import RespuestaWebhookInvalidaError
+from app.core.exceptions import RespuestaWebhookInvalidaError, WhatsAppEnvioError
 from app.db.session import get_db
 from app.schemas.whatsapp import (
     RecordatorioPendiente,
@@ -176,7 +176,23 @@ async def recibir_webhook(
     # Un mensaje escrito por el paciente lo contesta el FAQ Bot…
     mensaje_texto = whatsapp_service.mensaje_de_texto(payload)
     if mensaje_texto is not None:
-        return _procesar_texto_del_bot(db, mensaje_texto)
+        try:
+            return _procesar_texto_del_bot(db, mensaje_texto)
+        except WhatsAppEnvioError:
+            # Meta reintenta los webhooks que reciben 5xx. Si el problema es el
+            # envío saliente, reintentar el evento sólo duplica los intentos y
+            # no lo resuelve. Se confirma la recepción, se deja trazabilidad en
+            # el log y la conversación queda disponible para atención humana.
+            logger.exception(
+                "No se pudo responder el mensaje de %s; requiere atención manual.",
+                mensaje_texto.from_,
+            )
+            return WebhookProcesadoResponse(
+                tipo="BOT",
+                mensaje_id_entrante=mensaje_texto.id,
+                telefono=mensaje_texto.from_,
+                atencion_manual=True,
+            )
 
     # …y una respuesta de botón actualiza el turno del recordatorio.
     turno, mensaje, boton_id = whatsapp_service.procesar_respuesta_boton(db, payload)
