@@ -464,3 +464,30 @@
   .an-consentimiento-caja, .an-consentimiento-caja svg { transition: none; }
 }
 
+/* ---------------------- Cuestionario de la ficha médica ------------------ */
+/* El formulario lo genera /static/ficha_medica.js; acá sólo se ajusta al
+   aspecto de la tarjeta pública. */
+.an-campos {
+  margin-top: .55rem;
+}
+
+.an-campos .fm-seccion {
+  border-top-color: #e3efec;
+}
+
+.an-campos .fm-control {
+  font-size: .9rem;
+  padding: .55rem .7rem;
+}
+
+.an-campos .fm-campo-bool {
+  background: #f6fbfa;
+  border-color: #dbece8;
+}
+
+.an-resumen-actualizado {
+  margin: .6rem 0 0;
+  font-size: .72rem;
+  color: #64748b;
+}
+

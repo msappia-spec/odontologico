@@ -66,6 +66,8 @@
     fichasError: null,
     // Turno cuya ficha se está cargando o corrigiendo desde el panel interno.
     fichaEditTurnoId: null,
+    // Turno cuyo enlace de ficha se está preparando para mandar (modal).
+    fichaEnvioTurnoId: null,
     vista: "calendario",
     agendaFecha: hoyISO(),
     agendaDoctor: "",
@@ -98,6 +100,10 @@
     factPrestaciones: [],
     factMostrarInactivas: false,
     factPrestacionEditId: null,
+    // PDF de aranceles elegido para importar y su último reporte (la vista
+    // previa no escribe: el panel muestra qué va a cambiar antes de confirmar).
+    factPrestPdfArchivo: null,
+    factPrestPdfReporte: null,
     factAranceles: [],
     factArancelEditId: null,
     factArrObraSocial: "",
@@ -838,9 +844,19 @@
       return;
     }
     const guion = '<span class="text-slate-400">—</span>';
+    /* Los filiatorios que carga la ficha médica se sincronizan en el paciente:
+       la fecha de nacimiento (con la edad calculada por la API) se muestra
+       debajo del nombre para no sumar otra columna a la tabla. */
+    const fechaLegible = (iso) =>
+      window.FICHA_MEDICA ? FICHA_MEDICA.fechaLegible(iso) : iso;
     tbody.innerHTML = state.pacientes
       .map((p) => {
         const n = state.turnos.filter((t) => t.paciente_id === p.id).length;
+        const nacimiento = p.fecha_nacimiento
+          ? `<p class="text-[11px] text-slate-400">Nac. ${esc(fechaLegible(p.fecha_nacimiento))}` +
+            (p.edad === null || p.edad === undefined ? "" : ` · ${p.edad} años`) +
+            `</p>`
+          : "";
         const cobertura =
           p.obra_social || p.numero_afiliado
             ? `<p class="font-semibold text-slate-800">${p.obra_social ? esc(p.obra_social) : "Obra social s/d"}</p>` +
@@ -850,7 +866,7 @@
             : guion;
         return (
           `<tr><td><div class="flex items-center gap-3">${avatar(p.nombre, p.id)}` +
-          `<span class="font-semibold text-slate-800">${esc(p.nombre)}</span></div></td>` +
+          `<div><span class="font-semibold text-slate-800">${esc(p.nombre)}</span>${nacimiento}</div></div></td>` +
           `<td class="font-mono text-xs">${p.dni ? esc(p.dni) : guion}</td>` +
           `<td class="font-mono text-xs">${esc(p.telefono)}</td>` +
           `<td>${cobertura}</td>` +
@@ -984,26 +1000,31 @@
   }
 
   /* ================= Módulo 4 · Ficha de salud (sólo lectura) ============== */
-  /* El paciente completa la anamnesis desde el enlace público de WhatsApp y el
+  /* El paciente completa la ficha desde el enlace público de WhatsApp y el
      odontólogo la ve acá, junto a la línea de tiempo, antes de atender. Los
      antecedentes de riesgo se resaltan y disparan un aviso flotante que se
-     puede cerrar. */
-
-  function saludTexto(valor, vacio) {
-    const limpio = String(valor || "").trim();
-    return limpio ? esc(limpio) : `<span class="salud-sin-dato">${esc(vacio || "No informado")}</span>`;
-  }
-
-  function saludBooleano(valor) {
-    return valor
-      ? `<span class="salud-booleano salud-booleano-si">Sí</span>`
-      : `<span class="salud-booleano">No</span>`;
-  }
+     puede cerrar. El detalle lo arma ``FICHA_MEDICA.renderResumen``. */
 
   /* Tarjeta con la declaración del paciente. Si todavía no la envió, se
      explica cómo se completa: el enlace sale en el recordatorio de WhatsApp. */
   function antecedentesSaludHTML(detalle) {
     const a = detalle && detalle.antecedentes_salud;
+    const pacienteId = detalle && detalle.paciente_id;
+    const botonOdonto = pacienteId
+      ? `<button type="button" class="salud-btn-odonto"` +
+        ` data-odontograma="${esc(pacienteId)}"` +
+        ` data-odontograma-nombre="${esc((detalle && detalle.paciente_nombre) || "")}">` +
+        `Odontograma</button>`
+      : "";
+    /* La Historia Clínica General se imprime sobre la plantilla de papel: el
+       navegador abre el PDF en otra pestaña para imprimirlo o guardarlo. */
+    const botonPdf = pacienteId
+      ? `<button type="button" class="salud-btn-pdf"` +
+        ` data-ficha-pdf="${esc(pacienteId)}"` +
+        ` title="Imprimir la Historia Clínica General">` +
+        `Imprimir</button>`
+      : "";
+
     if (!a) {
       return (
         `<section class="salud-card salud-card-pendiente">` +
@@ -1016,7 +1037,11 @@
         `<p class="salud-titulo">Ficha de salud</p>` +
         `<p class="salud-sub">El paciente todavía no completó la anamnesis.</p>` +
         `</div>` +
+        `<div class="salud-acciones">` +
         `<span class="badge badge-slate">Pendiente</span>` +
+        botonOdonto +
+        botonPdf +
+        `</div>` +
         `</div>` +
         `<p class="salud-pendiente">Se envía desde el enlace de la ficha que el paciente recibe por WhatsApp. Al completarla, sus antecedentes aparecen acá y en la vista móvil.</p>` +
         `</section>`
@@ -1042,20 +1067,13 @@
       `<p class="salud-titulo">Ficha de salud</p>` +
       actualizada +
       `</div>` +
+      `<div class="salud-acciones">` +
       `<span class="badge ${alerta ? "badge-red" : "badge-green"}">${alerta ? "Alerta médica" : "Sin alertas"}</span>` +
+      botonOdonto +
+      botonPdf +
       `</div>` +
-      `<div class="salud-grid">` +
-      `<div class="salud-dato salud-dato-ancho"><p class="salud-dato-titulo">Alergias a medicamentos</p>` +
-      `<p class="salud-dato-texto">${saludTexto(a.alergias_medicamentos, "Sin alergias informadas")}</p></div>` +
-      `<div class="salud-dato"><p class="salud-dato-titulo">Presión arterial alta</p>` +
-      `<p class="salud-dato-texto">${saludBooleano(a.presion_alta)}</p></div>` +
-      `<div class="salud-dato"><p class="salud-dato-titulo">Problemas cardíacos</p>` +
-      `<p class="salud-dato-texto">${saludBooleano(a.problemas_cardiacos)}</p></div>` +
-      `<div class="salud-dato salud-dato-ancho"><p class="salud-dato-titulo">Medicación actual</p>` +
-      `<p class="salud-dato-texto">${saludTexto(a.medicacion_actual, "No informada")}</p></div>` +
-      `<div class="salud-dato"><p class="salud-dato-titulo">Embarazo</p>` +
-      `<p class="salud-dato-texto">${saludBooleano(a.embarazo)}</p></div>` +
       `</div>` +
+      `<div class="salud-resumen" data-resumen-salud></div>` +
       (alerta
         ? `<p class="salud-alerta-nota"><strong>Revisar antes de atender:</strong> ${esc(motivos.join(" · "))}</p>`
         : "") +
@@ -1070,7 +1088,16 @@
 
   function renderAntecedentesPanel(detalle) {
     const cont = document.getElementById("hist-panel-antecedentes");
-    if (cont) cont.innerHTML = antecedentesSaludHTML(detalle);
+    if (cont) {
+      cont.innerHTML = antecedentesSaludHTML(detalle);
+      const resumen = cont.querySelector("[data-resumen-salud]");
+      if (resumen && window.FICHA_MEDICA) {
+        FICHA_MEDICA.renderResumen(
+          resumen,
+          (detalle && detalle.antecedentes_salud) || {}
+        );
+      }
+    }
 
     const banner = document.getElementById("hist-panel-alerta");
     if (!banner) return;
@@ -3086,6 +3113,209 @@
       .join("");
   }
 
+  /* ------------------ Importador del PDF de aranceles ------------------- */
+  /* El botón abre el selector de archivos y, al elegirlo, se manda una
+     **vista previa** (``simular``): el panel muestra cuántas prácticas se crean,
+     cuántas cambian y qué filas fallaron. Recién cuando la secretaría confirma
+     se escribe en el catálogo. */
+  const MAX_BYTES_PDF_PRESTACIONES = 10 * 1024 * 1024;
+
+  function abrirImportadorPrestacionesPdf() {
+    const input = document.getElementById("fact-prest-pdf");
+    if (!input) return;
+    input.value = "";
+    input.click();
+  }
+
+  function cerrarImportacionPrestacionesPdf() {
+    state.factPrestPdfArchivo = null;
+    state.factPrestPdfReporte = null;
+    const input = document.getElementById("fact-prest-pdf");
+    if (input) input.value = "";
+    const panel = document.getElementById("fact-prest-pdf-panel");
+    if (panel) panel.classList.add("hide");
+    const reporte = document.getElementById("fact-prest-pdf-reporte");
+    if (reporte) reporte.innerHTML = "";
+    const confirmar = document.getElementById("fact-prest-pdf-confirmar");
+    if (confirmar) confirmar.classList.add("hide");
+  }
+
+  async function elegirPdfPrestaciones(archivo) {
+    if (!archivo) return;
+    const esPdf =
+      archivo.type === "application/pdf" || /\.pdf$/i.test(archivo.name || "");
+    if (!esPdf) {
+      toast("info", "El archivo no es un PDF", "Elegí el listado de aranceles en formato .pdf.");
+      return;
+    }
+    if (archivo.size > MAX_BYTES_PDF_PRESTACIONES) {
+      toast(
+        "info",
+        "El PDF es demasiado grande",
+        "El límite es de 10 MB: subí sólo el listado de aranceles."
+      );
+      return;
+    }
+
+    /* Al elegir otro archivo se descarta la vista previa anterior: el botón de
+       confirmar no debe quedar visible mientras se lee el PDF nuevo. */
+    state.factPrestPdfArchivo = null;
+    state.factPrestPdfReporte = null;
+    const confirmar = document.getElementById("fact-prest-pdf-confirmar");
+    if (confirmar) confirmar.classList.add("hide");
+    const panel = document.getElementById("fact-prest-pdf-panel");
+    if (panel) panel.classList.remove("hide");
+    const nombre = document.getElementById("fact-prest-pdf-nombre");
+    if (nombre) nombre.textContent = `Leyendo ${archivo.name}…`;
+    const reporte = document.getElementById("fact-prest-pdf-reporte");
+    if (reporte) reporte.innerHTML = "";
+
+    try {
+      const contenido = await base64DeArchivo(archivo);
+      state.factPrestPdfArchivo = { nombre: archivo.name, contenido: contenido };
+      state.factPrestPdfReporte = null;
+      if (nombre) {
+        const kb = Math.max(1, Math.round(archivo.size / 1024));
+        nombre.textContent = `PDF elegido: ${archivo.name} (${kb} KB)`;
+      }
+      await importarPrestacionesPdf(true);
+    } catch (err) {
+      state.factPrestPdfArchivo = null;
+      if (nombre) nombre.textContent = "";
+      toast("error", "No se pudo leer el PDF", err.message);
+      cerrarImportacionPrestacionesPdf();
+    }
+  }
+
+  async function importarPrestacionesPdf(simular) {
+    const archivo = state.factPrestPdfArchivo;
+    if (!archivo) {
+      toast("info", "No hay un PDF elegido", "Usá «Importar aranceles (PDF)» para elegir el archivo.");
+      return;
+    }
+    const btn = document.getElementById(
+      simular ? "fact-importar-prestaciones-pdf" : "fact-prest-pdf-confirmar"
+    );
+    try {
+      if (!simular) bloquear(btn, true);
+      const reporte = await api(`${RUTA_PRESTACIONES}/importar-pdf`, {
+        method: "POST",
+        body: JSON.stringify({
+          nombre_archivo: archivo.nombre,
+          contenido_base64: archivo.contenido,
+          simular: simular,
+        }),
+      });
+      state.factPrestPdfReporte = reporte;
+      renderReportePdfPrestaciones(reporte);
+      if (!simular) {
+        toast(
+          "exito",
+          "Aranceles importados",
+          `${reporte.creados} nueva${reporte.creados === 1 ? "" : "s"} y ` +
+            `${reporte.actualizados} actualizada${reporte.actualizados === 1 ? "" : "s"}` +
+            (reporte.errores ? ` · ${reporte.errores} con error.` : ".")
+        );
+        state.factPrestPdfArchivo = null;
+        const input = document.getElementById("fact-prest-pdf");
+        if (input) input.value = "";
+        await cargarPrestaciones();
+      }
+    } catch (err) {
+      toast(
+        "error",
+        simular ? "No se pudo leer el PDF" : "No se pudieron importar los aranceles",
+        err.message
+      );
+      const reporte = document.getElementById("fact-prest-pdf-reporte");
+      if (reporte) {
+        reporte.innerHTML =
+          `<p class="text-[12px] text-rose-600">${esc(err.message)}</p>`;
+      }
+    } finally {
+      if (!simular) bloquear(btn, false);
+    }
+  }
+
+  /* Reporte del importador: mismos chips que la planilla de convenios, con el
+     detalle de las filas que tienen error y de los primeros cambios. */
+  function renderReportePdfPrestaciones(reporte) {
+    const panel = document.getElementById("fact-prest-pdf-panel");
+    const cont = document.getElementById("fact-prest-pdf-reporte");
+    if (!cont) return;
+    if (panel) panel.classList.remove("hide");
+
+    const chip = (texto, clase) => `<span class="badge ${clase}">${esc(texto)}</span>`;
+    const aImportar = reporte.creados + reporte.actualizados;
+    const errores = (reporte.detalle || []).filter((f) => f.estado === "ERROR");
+    const cambios = (reporte.detalle || [])
+      .filter((f) => f.estado === "NUEVO" || f.estado === "ACTUALIZADO")
+      .slice(0, 20);
+
+    cont.innerHTML =
+      `<div class="conv-reporte-totales">` +
+      chip(`${reporte.filas_leidas} práctica(s) leídas`, "badge-slate") +
+      chip(`${reporte.creados} nueva(s)`, "badge-brand") +
+      chip(`${reporte.actualizados} actualizada(s)`, "badge-green") +
+      chip(`${reporte.sin_cambios} sin cambios`, "badge-slate") +
+      chip(
+        `${reporte.sin_precio} sin precio`,
+        reporte.sin_precio ? "badge-amber" : "badge-slate"
+      ) +
+      chip(
+        `${reporte.errores} con error`,
+        reporte.errores ? "badge-red" : "badge-slate"
+      ) +
+      `</div>` +
+      `<p class="text-[11px] text-slate-500 mt-2">` +
+      (reporte.simulado
+        ? "Vista previa: todavía no se guardó nada. Revisá el resumen y confirmá la importación."
+        : "Importación aplicada: el catálogo ya tiene estos códigos y honorarios.") +
+      (reporte.sin_precio
+        ? " Las prácticas sin honorario se crean con valor 0 (o conservan el que tenían)."
+        : "") +
+      `</p>` +
+      (errores.length
+        ? `<ul class="conv-reporte-lista">` +
+          errores
+            .slice(0, 20)
+            .map(
+              (fila) =>
+                `<li><span class="conv-linea">pág. ${fila.pagina}</span> · ` +
+                `<span class="font-mono">${esc(fila.codigo || "—")}</span> · ` +
+                `<span class="text-rose-600">${esc(fila.mensaje || "error")}</span></li>`
+            )
+            .join("") +
+          (errores.length > 20
+            ? `<li class="text-slate-400">… y ${errores.length - 20} fila(s) más con error.</li>`
+            : "") +
+          `</ul>`
+        : "") +
+      (cambios.length
+        ? `<ul class="conv-reporte-lista">` +
+          cambios
+            .map(
+              (fila) =>
+                `<li><span class="font-mono">${esc(fila.codigo)}</span> · ` +
+                `${esc(fila.descripcion)} · ` +
+                `<span class="text-slate-500">${fmtMoneda(fila.valor_base || 0)}</span> · ` +
+                `<span class="${fila.estado === "NUEVO" ? "text-brand-700" : "text-emerald-700"}">` +
+                `${fila.estado === "NUEVO" ? "nueva" : "actualizada"}</span></li>`
+            )
+            .join("") +
+          (aImportar > cambios.length
+            ? `<li class="text-slate-400">… y ${aImportar - cambios.length} práctica(s) más.</li>`
+            : "") +
+          `</ul>`
+        : "");
+
+    const confirmar = document.getElementById("fact-prest-pdf-confirmar");
+    if (confirmar) {
+      confirmar.classList.toggle("hide", !(reporte.simulado && aImportar > 0));
+      confirmar.textContent = `Confirmar importación (${aImportar})`;
+    }
+  }
+
   /* Modal de prestación: alta (``id`` vacío) o edición del catálogo. */
   function abrirModalPrestacion(id) {
     const prestacion = id
@@ -4445,6 +4675,15 @@
       document.getElementById("pac-telefono").value = paciente.telefono || "";
       document.getElementById("pac-email").value = paciente.email || "";
       document.getElementById("pac-dni").value = paciente.dni || "";
+      document.getElementById("pac-fecha-nacimiento").value =
+        paciente.fecha_nacimiento || "";
+      document.getElementById("pac-estado-civil").value = paciente.estado_civil || "";
+      document.getElementById("pac-nacionalidad").value = paciente.nacionalidad || "";
+      document.getElementById("pac-domicilio").value = paciente.domicilio || "";
+      document.getElementById("pac-profesion").value = paciente.profesion || "";
+      document.getElementById("pac-titular").value = paciente.titular || "";
+      document.getElementById("pac-lugar-trabajo").value = paciente.lugar_trabajo || "";
+      document.getElementById("pac-jerarquia").value = paciente.jerarquia || "";
       asegurarOpcionObraSocial(paciente.obra_social_id);
       document.getElementById("pac-obra-social").value = paciente.obra_social_id
         ? String(paciente.obra_social_id)
@@ -4495,6 +4734,18 @@
         ? Number(document.getElementById("pac-obra-social").value)
         : null,
       numero_afiliado: document.getElementById("pac-numero-afiliado").value.trim() || null,
+      // Filiatorios de la Historia Clínica General: se comparten con la ficha
+      // médica (el backend los sincroniza en el mismo registro).
+      fecha_nacimiento:
+        document.getElementById("pac-fecha-nacimiento").value || null,
+      estado_civil: document.getElementById("pac-estado-civil").value.trim() || null,
+      nacionalidad: document.getElementById("pac-nacionalidad").value.trim() || null,
+      domicilio: document.getElementById("pac-domicilio").value.trim() || null,
+      profesion: document.getElementById("pac-profesion").value.trim() || null,
+      titular: document.getElementById("pac-titular").value.trim() || null,
+      lugar_trabajo:
+        document.getElementById("pac-lugar-trabajo").value.trim() || null,
+      jerarquia: document.getElementById("pac-jerarquia").value.trim() || null,
     };
 
     const editando = Boolean(state.pacienteEditId);
@@ -4957,8 +5208,14 @@
             `Abrir ficha` +
           `</a>` +
           `<button type="button" class="btn btn-ghost btn-sm" ` +
-            `data-ficha-copiar="${esc(f.enlace)}" data-ficha-paciente="${esc(f.paciente_nombre)}">` +
-            `Copiar enlace` +
+            `data-ficha-enviar="${esc(f.turno_id)}" ` +
+            `title="Abre WhatsApp Web con el mensaje para el paciente">` +
+            `Enviar ficha` +
+          `</button>` +
+          `<button type="button" class="btn btn-ghost btn-sm" ` +
+            `data-ficha-opciones="${esc(f.turno_id)}" ` +
+            `title="Copiar el mensaje, ver el enlace o enviarlo por la API">` +
+            `Más opciones` +
           `</button>` +
         `</div>` +
       `</div>`
@@ -5037,6 +5294,188 @@
     }
   }
 
+  /* Envío manual del enlace de la ficha. El panel ya trae el enlace firmado, el
+     texto sugerido y el Click-to-Chat: el token no se puede firmar desde el
+     navegador, así que el modal sólo muestra y copia lo que armó el backend.
+     Se abre con «Más opciones» (o cuando el paciente no tiene WhatsApp) y
+     "Enviar por API" es el único botón que manda el mensaje solo. */
+  function fichaEnvioActual() {
+    return state.fichasSalud.find(
+      (f) => String(f.turno_id) === String(state.fichaEnvioTurnoId)
+    );
+  }
+
+  function abrirModalEnviarFicha(turnoId) {
+    const ficha = state.fichasSalud.find(
+      (f) => String(f.turno_id) === String(turnoId)
+    );
+    if (!ficha) {
+      toast("error", "No se encontró la ficha", "Actualizá el panel e intentá de nuevo.");
+      return;
+    }
+
+    state.fichaEnvioTurnoId = ficha.turno_id;
+    document.getElementById("enviar-ficha-titulo").textContent = ficha.completado
+      ? "Reenviar ficha de salud"
+      : "Enviar ficha de salud";
+    document.getElementById("enviar-ficha-subtitulo").textContent =
+      `${ficha.paciente_nombre} · ${fechaCorta(ficha.fecha_hora_inicio)} ` +
+      `${parteHora(ficha.fecha_hora_inicio)} h · ` +
+      `${ficha.doctor_nombre || "Sin profesional"}`;
+
+    const destino = document.getElementById("enviar-ficha-destino");
+    destino.textContent = ficha.telefono_whatsapp
+      ? `Destino: ${ficha.paciente_telefono} · el paciente completa la ficha desde el enlace.`
+      : "El paciente no tiene un teléfono válido para WhatsApp: copiá el mensaje y mandalo por otro medio.";
+
+    document.getElementById("enviar-ficha-mensaje").value =
+      ficha.mensaje || ficha.enlace || "";
+
+    // El enlace se muestra como <a> (azul y clickeable), no como texto readonly:
+    // el paciente lo recibe igual y la secretaría puede probarlo antes de mandarlo.
+    const enlaceFicha = document.getElementById("enviar-ficha-enlace");
+    enlaceFicha.textContent = ficha.enlace || "El servidor no devolvió el enlace";
+    if (ficha.enlace) {
+      enlaceFicha.href = ficha.enlace;
+    } else {
+      enlaceFicha.removeAttribute("href");
+    }
+    // WhatsApp no convierte en enlace una URL sin dominio (localhost, 127.0.0.1):
+    // el paciente la ve gris y el toque no hace nada. Además ese host es su propio
+    // celular, así que el enlace no abriría el formulario igual.
+    const enlaceLocal =
+      /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::|\/|$)/i;
+    document
+      .getElementById("enviar-ficha-local")
+      .classList.toggle("hide", !enlaceLocal.test(ficha.enlace || ""));
+
+    const wa = document.getElementById("enviar-ficha-wa");
+    if (ficha.enlace_whatsapp) {
+      wa.href = ficha.enlace_whatsapp;
+      wa.classList.remove("hide");
+    } else {
+      wa.removeAttribute("href");
+      wa.classList.add("hide");
+    }
+    document
+      .getElementById("enviar-ficha-api")
+      .classList.toggle("hide", !ficha.telefono_whatsapp);
+    document
+      .getElementById("enviar-ficha-sin-wa")
+      .classList.toggle("hide", Boolean(ficha.enlace_whatsapp));
+
+    ocultarAviso("enviar-ficha-error");
+    mostrarModal("modal-enviar-ficha");
+  }
+
+  function cerrarModalEnviarFicha() {
+    state.fichaEnvioTurnoId = null;
+    ocultarAviso("enviar-ficha-error");
+    ocultarModal("modal-enviar-ficha");
+  }
+
+  async function copiarMensajeFicha() {
+    const ficha = fichaEnvioActual();
+    if (!ficha) return;
+    // Se copia el mensaje completo (ya trae el enlace): es lo que se pega en WhatsApp.
+    await copiarEnlaceFicha(ficha.mensaje || ficha.enlace, ficha.paciente_nombre);
+  }
+
+  /* POST /anamnesis/panel/{turno_id}/enviar con ``canal=api``: la Cloud API
+     manda el mensaje sola. Si el servidor no tiene credenciales responde
+     ``simulado = true`` y no se envió nada, así que se avisa para copiar a mano.
+     Enviar la ficha nunca marca el recordatorio del turno como enviado. */
+  async function enviarFichaPorApi() {
+    const ficha = fichaEnvioActual();
+    if (!ficha) return;
+    const btn = document.getElementById("enviar-ficha-api");
+    ocultarAviso("enviar-ficha-error");
+    bloquear(btn, true);
+    try {
+      const r = await api(`/anamnesis/panel/${ficha.turno_id}/enviar`, {
+        method: "POST",
+        body: JSON.stringify({ canal: "api" }),
+      });
+      if (!r.enviado) {
+        mostrarAviso(
+          "enviar-ficha-error",
+          "El servidor no pudo enviar el mensaje. Copiá el texto o usá el botón de WhatsApp."
+        );
+        return;
+      }
+      if (r.simulado) {
+        mostrarAviso(
+          "enviar-ficha-error",
+          "Envío simulado: el servidor no tiene credenciales de WhatsApp. Copiá el mensaje o abrí WhatsApp para mandarlo."
+        );
+        return;
+      }
+      cerrarModalEnviarFicha();
+      toast(
+        "exito",
+        "Ficha enviada",
+        `${r.paciente_nombre} · el enlace salió por WhatsApp (${r.telefono_whatsapp || "destino configurado"}).`
+      );
+    } catch (err) {
+      mostrarAviso("enviar-ficha-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* "Enviar ficha" del listado: la secretaría manda el enlace desde su propio
+     WhatsApp. El clic abre WhatsApp Web con el número del paciente y el mensaje
+     ya escrito (los dos los arma el backend, que es el único que firma el token);
+     ella revisa y envía, y lo confirma en la conversación. La ficha sigue
+     pendiente hasta que el paciente complete el formulario. Si el paciente no
+     tiene un teléfono válido se abre el modal para copiar el texto y mandarlo por
+     otro medio. */
+  function abrirWhatsAppFicha(turnoId) {
+    const ficha = state.fichasSalud.find(
+      (f) => String(f.turno_id) === String(turnoId)
+    );
+    if (!ficha) {
+      toast("error", "No se encontró la ficha", "Actualizá el panel e intentá de nuevo.");
+      return;
+    }
+    if (!ficha.enlace_whatsapp) {
+      abrirModalEnviarFicha(ficha.turno_id);
+      return;
+    }
+
+    // Un <a> real evita el bloqueo de pestañas emergentes que sufren los
+    // window.open (y con "noopener" devuelven null, así que no se puede chequear).
+    const enlace = document.createElement("a");
+    enlace.href = ficha.enlace_whatsapp;
+    enlace.target = "_blank";
+    enlace.rel = "noopener";
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+
+    toast(
+      "exito",
+      "WhatsApp abierto",
+      `${ficha.paciente_nombre} · enviá el mensaje desde WhatsApp; la ficha queda pendiente hasta que el paciente la complete.`
+    );
+  }
+
+  /* Imprime la Historia Clínica General. El backend arma el PDF sobre la misma
+     plantilla de papel del consultorio (dos páginas + anexo si hace falta), así
+     lo que sale de la impresora se archiva igual que una ficha completada a
+     mano. Se abre con un <a> real para no chocar con el bloqueo de pestañas. */
+  function abrirPdfHistoria(pacienteId) {
+    if (!pacienteId) return;
+    const enlace = document.createElement("a");
+    enlace.href =
+      `${API}/pacientes/${encodeURIComponent(pacienteId)}/historia-clinica/pdf`;
+    enlace.target = "_blank";
+    enlace.rel = "noopener";
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+  }
+
   /* La secretaría carga la misma declaración del enlace público cuando el
      paciente está en el mostrador o responde por teléfono. El formulario se
      precarga con ``antecedentes_salud`` de la fila y se guarda con el PUT
@@ -5051,7 +5490,14 @@
     }
 
     state.fichaEditTurnoId = ficha.turno_id;
-    const a = ficha.antecedentes_salud || {};
+    /* Los filiatorios viven en el paciente y llegan aparte: se fusionan con la
+       declaración para que el modal se abra completo aunque la ficha esté
+       pendiente (el backend los devuelve en ``datos_filiatorios``). */
+    const a = Object.assign(
+      {},
+      ficha.datos_filiatorios || {},
+      ficha.antecedentes_salud || {}
+    );
 
     document.getElementById("ficha-titulo").textContent = ficha.completado
       ? "Editar ficha de salud"
@@ -5080,18 +5526,28 @@
     }
     estado.classList.remove("hide");
 
-    document.getElementById("ficha-alergias").value =
-      a.alergias_medicamentos || "";
-    document.getElementById("ficha-medicacion").value =
-      a.medicacion_actual || "";
-    document.getElementById("ficha-presion").checked = Boolean(a.presion_alta);
-    document.getElementById("ficha-cardiacos").checked = Boolean(
-      a.problemas_cardiacos
-    );
-    document.getElementById("ficha-embarazo").checked = Boolean(a.embarazo);
+    // El cuestionario completo lo genera el catálogo compartido: el panel carga
+    // exactamente las mismas preguntas que el enlace público, más el examen
+    // bucal y el diagnóstico que completa el profesional.
+    const contenedor = document.getElementById("ficha-campos");
+    if (contenedor && window.FICHA_MEDICA) {
+      FICHA_MEDICA.renderFormulario(contenedor, a);
+    }
     document.getElementById("ficha-consentimiento").checked = false;
     ocultarAviso("ficha-error");
     mostrarModal("modal-ficha-salud");
+  }
+
+  /* El PUT de la ficha sincroniza los datos filiatorios en el paciente, así que
+     después de guardarla se refresca la lista: la tabla y el formulario de
+     edición muestran lo último sin recargar la página. */
+  async function refrescarPacientes() {
+    try {
+      state.pacientes = (await api("/pacientes")) || [];
+      renderPacientes();
+    } catch (err) {
+      /* Es un refresco de cortesía: la ficha ya quedó guardada. */
+    }
   }
 
   function cerrarModalFicha() {
@@ -5104,15 +5560,9 @@
   }
 
   function payloadFicha() {
-    return {
-      alergias_medicamentos:
-        document.getElementById("ficha-alergias").value.trim() || null,
-      presion_alta: document.getElementById("ficha-presion").checked,
-      problemas_cardiacos: document.getElementById("ficha-cardiacos").checked,
-      medicacion_actual:
-        document.getElementById("ficha-medicacion").value.trim() || null,
-      embarazo: document.getElementById("ficha-embarazo").checked,
-    };
+    const contenedor = document.getElementById("ficha-campos");
+    if (!contenedor || !window.FICHA_MEDICA) return {};
+    return FICHA_MEDICA.leerFormulario(contenedor);
   }
 
   async function guardarFichaSalud(ev) {
@@ -5155,6 +5605,9 @@
           : `${paciente} · ficha sin antecedentes de riesgo.`
       );
       await cargarFichasSalud();
+      // El PUT sincroniza los datos filiatorios en el paciente: la tabla y el
+      // formulario de pacientes tienen que mostrar lo último.
+      await refrescarPacientes();
     } catch (err) {
       mostrarAviso("ficha-error", err.message);
     } finally {
@@ -5246,6 +5699,21 @@
         );
         return;
       }
+      const enviarFicha = e.target.closest("[data-ficha-enviar]");
+      if (enviarFicha) {
+        abrirWhatsAppFicha(enviarFicha.dataset.fichaEnviar);
+        return;
+      }
+      const imprimirFicha = e.target.closest("[data-ficha-pdf]");
+      if (imprimirFicha) {
+        abrirPdfHistoria(imprimirFicha.dataset.fichaPdf);
+        return;
+      }
+      const opcionesFicha = e.target.closest("[data-ficha-opciones]");
+      if (opcionesFicha) {
+        abrirModalEnviarFicha(opcionesFicha.dataset.fichaOpciones);
+        return;
+      }
       const ficha = e.target.closest("[data-hist-paciente]");
       if (ficha) {
         abrirHistoriaPanel(ficha.dataset.histPaciente);
@@ -5280,6 +5748,7 @@
       cerrarDebito();
       cerrarModalOpcionMenu();
       cerrarModalFicha();
+      cerrarModalEnviarFicha();
     });
 
     document.getElementById("form-doctor").addEventListener("submit", crearDoctor);
@@ -5411,10 +5880,40 @@
     document
       .getElementById("modal-ficha-cancel")
       .addEventListener("click", cerrarModalFicha);
+    // Imprime la Historia Clínica General del turno que se está cargando.
+    const imprimirFichaModal = document.getElementById("modal-ficha-print");
+    if (imprimirFichaModal) {
+      imprimirFichaModal.addEventListener("click", function () {
+        const ficha = state.fichasSalud.find(
+          (f) => String(f.turno_id) === String(state.fichaEditTurnoId)
+        );
+        if (ficha) abrirPdfHistoria(ficha.paciente_id);
+      });
+    }
     document
       .getElementById("modal-ficha-salud")
       .addEventListener("click", function (e) {
         if (e.target.id === "modal-ficha-salud") cerrarModalFicha();
+      });
+
+    // Envío del enlace de la ficha: copiar el mensaje listo o abrirlo en
+    // WhatsApp; el botón de la API es el único que manda el mensaje solo.
+    document
+      .getElementById("modal-enviar-ficha-close")
+      .addEventListener("click", cerrarModalEnviarFicha);
+    document
+      .getElementById("modal-enviar-ficha-cancel")
+      .addEventListener("click", cerrarModalEnviarFicha);
+    document
+      .getElementById("enviar-ficha-copiar")
+      .addEventListener("click", copiarMensajeFicha);
+    document
+      .getElementById("enviar-ficha-api")
+      .addEventListener("click", enviarFichaPorApi);
+    document
+      .getElementById("modal-enviar-ficha")
+      .addEventListener("click", function (e) {
+        if (e.target.id === "modal-enviar-ficha") cerrarModalEnviarFicha();
       });
 
     // Disponibilidad: selector de odontólogo, alta y baja de rangos, plantilla
@@ -5701,6 +6200,27 @@
         abrirModalPrestacion(null);
       });
     }
+    const btnImportarPrestPdf = document.getElementById("fact-importar-prestaciones-pdf");
+    if (btnImportarPrestPdf) {
+      btnImportarPrestPdf.addEventListener("click", abrirImportadorPrestacionesPdf);
+    }
+    const inputPrestPdf = document.getElementById("fact-prest-pdf");
+    if (inputPrestPdf) {
+      inputPrestPdf.addEventListener("change", function (e) {
+        const archivos = e.target.files;
+        if (archivos && archivos.length) elegirPdfPrestaciones(archivos[0]);
+      });
+    }
+    const btnConfirmarPrestPdf = document.getElementById("fact-prest-pdf-confirmar");
+    if (btnConfirmarPrestPdf) {
+      btnConfirmarPrestPdf.addEventListener("click", function () {
+        importarPrestacionesPdf(false);
+      });
+    }
+    const btnCancelarPrestPdf = document.getElementById("fact-prest-pdf-cancelar");
+    if (btnCancelarPrestPdf) {
+      btnCancelarPrestPdf.addEventListener("click", cerrarImportacionPrestacionesPdf);
+    }
     const chkPrestInactivas = document.getElementById("fact-prest-inactivas");
     if (chkPrestInactivas) {
       chkPrestInactivas.checked = state.factMostrarInactivas;
@@ -5955,6 +6475,7 @@
     cargarFichasSalud,
     abrirModalFicha,
     cerrarModalFicha,
+    abrirPdfHistoria,
     // Doctores y obras sociales (catálogo de coberturas)
     doctoresActivos,
     obrasSocialesActivas,

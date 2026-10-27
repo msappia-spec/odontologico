@@ -80,6 +80,47 @@ def test_postgres_usa_add_column_if_not_exists():
     assert "IF NOT EXISTS" not in sentencia_sqlite
 
 
+def test_agrega_los_filiatorios_del_paciente(tmp_path):
+    """Una base anterior al encabezado de la Historia Clínica General se migra."""
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'pacientes.db').as_posix()}", future=True
+    )
+    with engine.begin() as conexion:
+        conexion.exec_driver_sql(
+            "CREATE TABLE pacientes ("
+            "id INTEGER PRIMARY KEY, "
+            "nombre VARCHAR(120) NOT NULL, "
+            "telefono VARCHAR(30) NOT NULL)"
+        )
+        conexion.exec_driver_sql(
+            "INSERT INTO pacientes (nombre, telefono) "
+            "VALUES ('Ana', '+5491100000000')"
+        )
+
+    aplicadas = aplicar_columnas_faltantes(engine)
+
+    esperadas = {
+        "fecha_nacimiento",
+        "estado_civil",
+        "nacionalidad",
+        "domicilio",
+        "profesion",
+        "titular",
+        "lugar_trabajo",
+        "jerarquia",
+    }
+    assert {f"pacientes.{columna}" for columna in esperadas} <= set(aplicadas)
+    columnas = {c["name"] for c in inspect(engine).get_columns("pacientes")}
+    assert esperadas <= columnas
+
+    with engine.connect() as conexion:
+        fila = conexion.exec_driver_sql(
+            "SELECT nombre, fecha_nacimiento, domicilio FROM pacientes"
+        ).one()
+    assert tuple(fila) == ("Ana", None, None)
+    engine.dispose()
+
+
 def test_init_db_aplica_la_migracion_antes_de_sembrar(monkeypatch):
     """``init_db`` invoca la migración aditiva en cada arranque."""
 

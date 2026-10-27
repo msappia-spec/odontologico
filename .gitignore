@@ -39,3 +39,6 @@ htmlcov/
 .vercel/
 .vercel
 .env*
+
+# Script de limpieza con la cadena de produccion embebida: no commitear.
+/borrar.bat

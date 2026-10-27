@@ -15,7 +15,6 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
-from urllib.parse import quote
 
 import httpx
 from sqlalchemy import select
@@ -29,6 +28,19 @@ from app.core.exceptions import (
     TurnoNoEncontradoError,
     WhatsAppEnvioError,
 )
+# Formato de teléfonos, fechas y enlaces wa.me: vive en ``app/core`` para que el
+# servicio de anamnesis también lo use. Se reexporta acá para no romper los
+# imports históricos (``from app.services.whatsapp_service import ...``).
+from app.core.whatsapp_utils import (  # noqa: F401
+    DIAS_SEMANA,
+    MESES,
+    construir_enlace_click_to_chat,
+    formatear_fecha_recordatorio,
+    normalizar_telefono_whatsapp,
+    profesional_con_articulo,
+    solo_digitos,
+)
+
 from app.models.enums import EstadoTurno, EstadoWhatsApp
 from app.models.historia_clinica import HistoriaClinica
 from app.models.paciente import Paciente
@@ -166,24 +178,28 @@ def enviar_mensaje_recordatorio(turno: Turno) -> str:
     return _simular_http_whatsapp(payload)
 
 
-def construir_payload_texto(telefono: str, texto: str) -> dict:
+def construir_payload_texto(
+    telefono: str, texto: str, preview_url: bool = False
+) -> dict:
     """Arma el cuerpo JSON de un mensaje de **texto** saliente (``type`` = text).
 
     Es la forma más barata de contestarle al paciente: las respuestas del FAQ Bot
     salen dentro de la *ventana de 24 horas* que abre su propio mensaje, así que
     no requieren plantilla aprobada por Meta. ``preview_url`` queda en ``False``
-    para que WhatsApp no convierta en enlace la dirección del consultorio.
+    por defecto para que WhatsApp no convierta en enlace la dirección del
+    consultorio; el envío de la ficha de salud pasa ``True`` porque ahí el enlace
+    es justamente lo que el paciente tiene que tocar.
     """
     return {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
         "to": telefono,
         "type": "text",
-        "text": {"preview_url": False, "body": texto},
+        "text": {"preview_url": preview_url, "body": texto},
     }
 
 
-def enviar_mensaje_texto(telefono: str, texto: str) -> str:
+def enviar_mensaje_texto(telefono: str, texto: str, preview_url: bool = False) -> str:
     """Envía (o simula) un mensaje de texto al paciente y devuelve el ``wamid``.
 
     Usa el envío **real** con ``httpx`` (``POST`` a la Graph API de Meta) cuando
@@ -191,10 +207,14 @@ def enviar_mensaje_texto(telefono: str, texto: str) -> str:
     ``WHATSAPP_PHONE_NUMBER_ID``); si no, **simula** el ``POST`` y devuelve un
     ``wamid`` ficticio, igual que los recordatorios. Es la función que usa el
     FAQ Bot (``whatsapp_bot_service``) para entregar sus respuestas.
+
+    :param preview_url: ``True`` para que WhatsApp arme la tarjeta de vista previa
+        del primer enlace del texto. Lo usa el envío de la ficha de salud; el bot
+        lo deja en ``False`` porque repite la dirección del consultorio.
     """
     logger.info("Enviando WhatsApp (texto) a %s", telefono or "SIN_TELEFONO")
 
-    payload = construir_payload_texto(telefono, texto)
+    payload = construir_payload_texto(telefono, texto, preview_url=preview_url)
     if settings.whatsapp_envio_real:
         return _enviar_http_whatsapp(payload)
     return _simular_http_whatsapp(payload)
@@ -415,115 +435,20 @@ PLANTILLA_RECORDATORIO = (
     "mensaje. ¡Muchas gracias!"
 )
 
-#: Se agrega al recordatorio mientras la ficha de salud siga pendiente.
+#: Se agrega al recordatorio mientras la ficha de salud siga pendiente. El
+#: enlace va solo en su propia línea (igual que ``PLANTILLA_ENVIO_FICHA``): así
+#: WhatsApp lo muestra en azul y el paciente puede abrirlo con un toque.
 TEXTO_ANAMNESIS_PENDIENTE = (
-    "Antes de la consulta, completá tu ficha de salud en este enlace: {enlace}"
+    "Antes de la consulta, completá tu ficha de salud desde este enlace:\n"
+    "\n"
+    "{enlace}"
 )
 
-#: URL oficial de Click-to-Chat. Marcadores: número (sólo dígitos) y mensaje.
-URL_CLICK_TO_CHAT = "https://wa.me/{}?text={}"
-
-#: Nombres en español para la fecha "en letras" (sin depender del locale del SO).
-DIAS_SEMANA = (
-    "lunes",
-    "martes",
-    "miércoles",
-    "jueves",
-    "viernes",
-    "sábado",
-    "domingo",
-)
-MESES = (
-    "enero",
-    "febrero",
-    "marzo",
-    "abril",
-    "mayo",
-    "junio",
-    "julio",
-    "agosto",
-    "septiembre",
-    "octubre",
-    "noviembre",
-    "diciembre",
-)
-
-
-def solo_digitos(valor: Optional[str]) -> str:
-    """Devuelve únicamente los dígitos de ``valor`` (``""`` si no hay ninguno)."""
-    return "".join(c for c in str(valor or "") if c.isdigit())
-
-
-def normalizar_telefono_whatsapp(
-    telefono: Optional[str], codigo_pais: Optional[str] = None
-) -> str:
-    """Adapta un teléfono al formato que exige el enlace ``wa.me`` (sólo dígitos).
-
-    Orden de las reglas:
-
-    1. Se conservan sólo los dígitos (se descartan ``+``, espacios, guiones,
-       paréntesis y puntos).
-    2. El prefijo internacional ``00`` se elimina (``0054911...`` -> ``54911...``).
-    3. Se quitan los ceros de larga distancia (``011 2233-4455`` -> ``1122334455``).
-    4. Si ya empieza con el código configurado (``549``) o con ese código sin el
-       ``9`` de móvil (``54``), se devuelve sin cambios.
-    5. En cualquier otro caso se le antepone el código configurado
-       (``WHATSAPP_CODIGO_PAIS``, por defecto ``549``: Argentina móvil).
-
-    Ejemplos con la configuración por defecto::
-
-        "+54 9 11 2233-4455" -> "5491122334455"
-        "(011) 2233-4455"    -> "5491122334455"
-        "5491122334455"      -> "5491122334455"
-        ""                   -> ""
-
-    :param telefono: teléfono tal como está cargado en el sistema.
-    :param codigo_pais: código a aplicar (por defecto ``settings.whatsapp_codigo_pais``).
-    """
-    digitos = solo_digitos(telefono)
-    if not digitos:
-        return ""
-
-    prefijo = solo_digitos(codigo_pais) or solo_digitos(settings.whatsapp_codigo_pais)
-    if not prefijo:
-        return digitos
-
-    if digitos.startswith("00"):
-        digitos = digitos[2:]
-    digitos = digitos.lstrip("0")
-    if not digitos:
-        return ""
-
-    # En Argentina el móvil lleva un "9" después del código de país (549...).
-    pais = prefijo[:-1] if prefijo.startswith("549") else prefijo
-    if digitos.startswith(prefijo) or digitos.startswith(pais):
-        return digitos
-
-    return prefijo + digitos
-
-
-def formatear_fecha_recordatorio(fecha: datetime) -> str:
-    """Devuelve la fecha "en letras" (``viernes 16 de octubre de 2026``)."""
-    return (
-        f"{DIAS_SEMANA[fecha.weekday()]} {fecha.day} de "
-        f"{MESES[fecha.month - 1]} de {fecha.year}"
-    )
-
-
-def profesional_con_articulo(nombre: Optional[str]) -> str:
-    """Agrega el artículo al profesional para que el saludo sea natural.
-
-    ``"Dra. Gómez"`` -> ``"la Dra. Gómez"`` y ``"Dr. House"`` -> ``"el Dr. House"``.
-    Si el nombre no trae tratamiento (``Dr.``/``Dra.``) se devuelve tal cual, para
-    no generar frases como "con el Juan".
-    """
-    limpio = (nombre or "").strip()
-    minus = limpio.lower()
-    if minus.startswith(("dra", "doctora")):
-        return f"la {limpio}"
-    if minus.startswith(("dr", "doctor")):
-        return f"el {limpio}"
-    return limpio
+# Las utilidades de formato (``solo_digitos``, ``normalizar_telefono_whatsapp``,
+# ``formatear_fecha_recordatorio``, ``profesional_con_articulo``, las tablas de
+# días/meses y ``URL_CLICK_TO_CHAT``) viven en :mod:`app.core.whatsapp_utils` y
+# se importan arriba: el servicio de anamnesis también las necesita para armar
+# el mensaje de la ficha, y así no hay dependencia circular entre los servicios.
 
 
 def construir_mensaje_recordatorio(turno: Turno) -> str:
@@ -562,15 +487,13 @@ def construir_enlace_whatsapp(
     """
     if telefono is None:
         telefono = turno.paciente.telefono if turno.paciente else ""
-    numero = normalizar_telefono_whatsapp(telefono)
-    if not numero:
+    texto = mensaje if mensaje is not None else construir_mensaje_recordatorio(turno)
+    enlace = construir_enlace_click_to_chat(telefono, texto)
+    if not enlace:
         logger.warning(
             "Turno id=%s sin teléfono válido: no se genera el enlace wa.me.", turno.id
         )
-        return ""
-
-    texto = mensaje if mensaje is not None else construir_mensaje_recordatorio(turno)
-    return URL_CLICK_TO_CHAT.format(numero, quote(texto, safe=""))
+    return enlace
 
 
 def listar_turnos_pendientes_de_recordatorio(

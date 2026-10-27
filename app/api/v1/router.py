@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     facturacion,
     historias_clinicas,
     obras_sociales,
+    odontogramas,
     pacientes,
     prestaciones,
     tareas,
@@ -28,6 +29,8 @@ api_router.include_router(pacientes.router)
 api_router.include_router(historias_clinicas.router)
 # Módulo 4: ficha de salud pública (token firmado, sin login de paciente).
 api_router.include_router(anamnesis.router)
+# Módulo 4: odontograma gráfico que completa el profesional (GET y PUT).
+api_router.include_router(odontogramas.router)
 api_router.include_router(turnos.router)
 # Módulo 3: prestaciones, aranceles, facturación, caja y liquidaciones.
 api_router.include_router(prestaciones.router)

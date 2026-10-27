@@ -18,7 +18,7 @@ Concentra las reglas de negocio del registro de pacientes, en línea con
 import logging
 import re
 import unicodedata
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -26,10 +26,31 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictoError, RecursoNoEncontradoError
 from app.models.paciente import Paciente
-from app.schemas.paciente import PacienteCreate, PacienteUpdate
+from app.schemas.paciente import (
+    PacienteCreate,
+    PacienteDatosFiliatorios,
+    PacienteUpdate,
+)
 from app.services import obra_social_service
 
 logger = logging.getLogger("app.services.pacientes")
+
+#: Filiatorios que la ficha médica comparte con el paciente (Módulo 4). Se
+#: derivan del esquema para que un campo nuevo se sume solo.
+CAMPOS_FILIATORIOS: tuple[str, ...] = tuple(PacienteDatosFiliatorios.model_fields)
+
+
+def datos_filiatorios(paciente: Optional[Paciente]) -> dict[str, Any]:
+    """Filiatorios vigentes del paciente, listos para un esquema Pydantic.
+
+    La ficha médica los muestra y los escribe; este helper es el único lugar que
+    decide qué campos viajan, así el panel, el enlace público y la vista móvil
+    devuelven siempre los mismos valores.
+    """
+    if paciente is None:
+        return {}
+    return {campo: getattr(paciente, campo, None) for campo in CAMPOS_FILIATORIOS}
+
 
 # Acentos que se pliegan para buscar por nombre (mismo criterio que el buscador
 # del celular: "Suarez" encuentra a "Suárez").

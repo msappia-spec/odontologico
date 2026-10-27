@@ -31,6 +31,8 @@
   </script>
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/anamnesis.css" />
+  <link rel="stylesheet" href="/static/ficha_medica.css" />
+  <script src="/static/ficha_medica.js" defer></script>
   <script src="/static/anamnesis.js" defer></script>
 </head>
 <body class="an-body">
@@ -86,8 +88,10 @@
           <p class="an-eyebrow">Ficha de salud</p>
           <h1 id="an-titulo">Hola, <span id="an-nombre">paciente</span></h1>
           <p class="an-bajada">
-            Antes de tu consulta necesitamos conocer algunos datos importantes para
-            cuidarte. Te lleva menos de 2 minutos.
+            Antes de tu consulta necesitamos tus datos personales y algunos
+            antecedentes importantes para cuidarte. Son las mismas preguntas de la
+            historia clínica del consultorio; te lleva unos minutos y podés
+            corregirlas después.
           </p>
 
           <div class="an-turno">
@@ -115,7 +119,7 @@
             El profesional verá esta información antes de tu consulta.
           </p>
 
-          <dl id="an-resumen-datos" class="an-resumen-datos"></dl>
+          <div id="an-resumen-datos" class="an-resumen-datos"></div>
 
           <button id="an-corregir" class="an-btn an-btn-secundario" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -132,59 +136,13 @@
               <p class="an-eyebrow">Cuestionario</p>
               <h2>Contanos cómo estás de salud</h2>
             </div>
-            <span class="an-tiempo">≈ 2 min</span>
+            <span class="an-tiempo">≈ 7 min</span>
           </div>
 
-          <div class="an-campo">
-            <label for="an-alergias" class="an-label">¿Tenés alergias a medicamentos?</label>
-            <p class="an-hint">Contanos cuáles, aunque sean leves. Si no tenés, dejá el campo vacío.</p>
-            <div class="an-textarea-caja">
-              <textarea id="an-alergias" name="alergias_medicamentos" maxlength="1000" rows="3"
-                placeholder="Ej.: penicilina, ibuprofeno, anestesia…"></textarea>
-              <span class="an-contador" data-contador="an-alergias">0 / 1000</span>
-            </div>
-          </div>
-
-          <fieldset class="an-fieldset">
-            <legend class="an-legend">Marcá lo que corresponda</legend>
-
-            <label class="an-switch-fila" for="an-presion">
-              <span class="an-switch-texto">
-                <strong>Presión arterial alta</strong>
-                <small>Hipertensión diagnosticada o en tratamiento.</small>
-              </span>
-              <input id="an-presion" name="presion_alta" type="checkbox" class="an-switch-input" />
-              <span class="an-switch-ui" aria-hidden="true"></span>
-            </label>
-
-            <label class="an-switch-fila" for="an-cardiacos">
-              <span class="an-switch-texto">
-                <strong>Problemas cardíacos</strong>
-                <small>Arritmias, soplo, válvulas o alguna cirugía del corazón.</small>
-              </span>
-              <input id="an-cardiacos" name="problemas_cardiacos" type="checkbox" class="an-switch-input" />
-              <span class="an-switch-ui" aria-hidden="true"></span>
-            </label>
-
-            <label class="an-switch-fila" for="an-embarazo">
-              <span class="an-switch-texto">
-                <strong>Embarazo</strong>
-                <small>Nos ayuda a elegir estudios y medicación seguros.</small>
-              </span>
-              <input id="an-embarazo" name="embarazo" type="checkbox" class="an-switch-input" />
-              <span class="an-switch-ui" aria-hidden="true"></span>
-            </label>
-          </fieldset>
-
-          <div class="an-campo">
-            <label for="an-medicacion" class="an-label">¿Tomás alguna medicación?</label>
-            <p class="an-hint">Incluí anticoagulantes, aspirina o suplementos. Si no tomás nada, dejalo vacío.</p>
-            <div class="an-textarea-caja">
-              <textarea id="an-medicacion" name="medicacion_actual" maxlength="1000" rows="3"
-                placeholder="Ej.: enalapril 10 mg por día…"></textarea>
-              <span class="an-contador" data-contador="an-medicacion">0 / 1000</span>
-            </div>
-          </div>
+          <!-- Cuestionario generado desde /static/ficha_medica.js: antecedentes
+               familiares, personales e historia odontológica. El examen bucal y
+               el diagnóstico los completa el profesional desde el panel. -->
+          <div id="an-campos" class="an-campos"></div>
 
           <label class="an-consentimiento" for="an-consentimiento">
             <input id="an-consentimiento" type="checkbox" required />

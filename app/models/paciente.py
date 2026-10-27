@@ -1,8 +1,9 @@
 """Modelo ORM ``Paciente``."""
 
+from datetime import date
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import ForeignKey, Index, String
+from sqlalchemy import Date, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base
@@ -30,6 +31,13 @@ class Paciente(Base):
       (``ondelete="SET NULL"``: si algún día se borra físicamente una cobertura,
       el paciente queda sin obra social en lugar de perder la fila), mientras
       que el número de afiliado sigue siendo texto libre.
+    * **Datos filiatorios** de la Historia Clínica General de papel
+      (``Historia-Clinica-GeneralNUEVA.pdf``): ``fecha_nacimiento`` (la edad se
+      calcula, nunca se guarda), ``estado_civil``, ``nacionalidad``,
+      ``domicilio``, ``profesion``, ``titular`` de la obra social,
+      ``lugar_trabajo`` y ``jerarquia``. Son la **única fuente de verdad**: la
+      ficha médica (Módulo 4) los muestra, los carga y los sincroniza acá al
+      guardar, de modo que la secretaría no vuelve a tipear los mismos datos.
     """
 
     __tablename__ = "pacientes"
@@ -49,6 +57,18 @@ class Paciente(Base):
         ForeignKey("obras_sociales.id", ondelete="SET NULL"), nullable=True, index=True
     )
     numero_afiliado: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+
+    # Datos filiatorios de la Historia Clínica General. Todos opcionales: el
+    # paciente puede completarlos desde el enlace de la ficha médica y la
+    # secretaría desde el formulario de pacientes (los dos escriben acá).
+    fecha_nacimiento: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    estado_civil: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    nacionalidad: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    domicilio: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    profesion: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    titular: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    lugar_trabajo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    jerarquia: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
     # Relaciones
     turnos: Mapped[List["Turno"]] = relationship(

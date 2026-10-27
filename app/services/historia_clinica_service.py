@@ -37,6 +37,7 @@ from app.schemas.historia_clinica import (
     EvolucionMedicaRead,
     HistoriaClinicaDetalle,
 )
+from app.services import paciente_service
 
 logger = logging.getLogger("app.services.historia_clinica")
 
@@ -200,9 +201,11 @@ def detalle_historia(db: Session, paciente_id: int) -> HistoriaClinicaDetalle:
 
     antecedentes_salud = None
     if historia is not None and historia.antecedentes_salud is not None:
+        # Los filiatorios viven en el paciente (no en la ficha): se completan acá
+        # para que la vista móvil muestre los mismos datos que el panel.
         antecedentes_salud = AntecedentesSaludRead.model_validate(
             historia.antecedentes_salud
-        )
+        ).model_copy(update=paciente_service.datos_filiatorios(paciente))
 
     return HistoriaClinicaDetalle(
         id=historia.id if historia is not None else None,

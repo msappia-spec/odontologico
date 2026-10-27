@@ -30,6 +30,7 @@ from app.db.base_class import Base
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.antecedentes_salud import AntecedentesSalud
     from app.models.evolucion_medica import EvolucionMedica
+    from app.models.odontograma import Odontograma
     from app.models.paciente import Paciente
 
 
@@ -61,6 +62,14 @@ class HistoriaClinica(Base):
     # (Módulo 4). Es opcional: una ficha puede tener evoluciones y todavía no
     # tener antecedentes cargados.
     antecedentes_salud: Mapped[Optional["AntecedentesSalud"]] = relationship(
+        back_populates="historia_clinica",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    # Odontograma gráfico que completa el profesional después de revisar al
+    # paciente (Módulo 4). También es opcional.
+    odontograma: Mapped[Optional["Odontograma"]] = relationship(
         back_populates="historia_clinica",
         uselist=False,
         cascade="all, delete-orphan",

@@ -18,6 +18,7 @@ from app.models.evolucion_medica import EvolucionMedica
 from app.models.historia_clinica import HistoriaClinica
 from app.models.movimiento_caja import DetalleMovimientoCaja, MovimientoCaja
 from app.models.obra_social import ObraSocial
+from app.models.odontograma import Odontograma, OdontogramaDiente
 from app.models.paciente import Paciente
 from app.models.prestacion import Prestacion
 from app.models.turno import Turno
@@ -34,6 +35,9 @@ __all__ = [
     "HistoriaClinica",
     "MovimientoCaja",
     "ObraSocial",
+    "OpcionMenuWhatsApp",
+    "Odontograma",
+    "OdontogramaDiente",
     "Paciente",
     "Prestacion",
     "Turno",

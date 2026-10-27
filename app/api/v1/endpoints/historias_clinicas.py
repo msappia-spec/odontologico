@@ -14,12 +14,14 @@ Rutas (prefijo ``/api/v1``):
 * ``POST /pacientes/{id}/evoluciones`` — alta de la atención (crea la ficha).
 * ``GET  /pacientes/{id}/evoluciones`` — línea de tiempo (más nueva primero).
 * ``GET  /pacientes/{id}/historia-clinica`` — ficha + línea de tiempo completa.
+* ``GET  /pacientes/{id}/historia-clinica/pdf`` — la Historia Clínica General
+  impresa sobre la plantilla de papel (``application/pdf``).
 * ``GET  /evoluciones/{id}`` — una atención puntual.
 """
 
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -29,7 +31,7 @@ from app.schemas.historia_clinica import (
     EvolucionMedicaRead,
     HistoriaClinicaDetalle,
 )
-from app.services import historia_clinica_service
+from app.services import ficha_pdf_service, historia_clinica_service
 
 # Sin prefijo propio: las rutas de la ficha cuelgan del paciente (``/pacientes/…``)
 # y las de la evolución puntual de ``/evoluciones/…``.
@@ -95,6 +97,50 @@ def obtener_historia_clinica(
     paciente_id: int, db: Session = Depends(get_db)
 ) -> HistoriaClinicaDetalle:
     return historia_clinica_service.detalle_historia(db, paciente_id)
+
+
+@router.get(
+    "/pacientes/{paciente_id}/historia-clinica/pdf",
+    response_class=Response,
+    summary="Imprimir la Historia Clínica General",
+    description=(
+        "Devuelve la ficha médica como **PDF**, impresa sobre la misma "
+        "plantilla de papel del consultorio (Historia Clínica General, dos "
+        "páginas). El paciente y lo que declaró van escritos en los renglones y "
+        "las casillas SI/NO; el odontograma, el detalle del examen bucal y los "
+        "textos que no entran en el formulario salen en una página de anexo. "
+        "Se abre en el visor del navegador (``Content-Disposition: inline``) "
+        "para imprimir o guardar. El profesional del encabezado se puede elegir "
+        "con ``doctor_id``; si se omite, se usa el del odontograma o el de la "
+        "última evolución."
+    ),
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Historia Clínica General lista para imprimir.",
+        }
+    },
+)
+def descargar_historia_clinica_pdf(
+    paciente_id: int,
+    doctor_id: Optional[int] = Query(
+        None,
+        gt=0,
+        description="Profesional que firma la ficha (por defecto, el de la ficha).",
+    ),
+    db: Session = Depends(get_db),
+) -> Response:
+    contenido, nombre = ficha_pdf_service.generar_pdf(
+        db, paciente_id, doctor_id=doctor_id
+    )
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get(

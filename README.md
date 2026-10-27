@@ -3,7 +3,7 @@
 **Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
 **Módulo 2: Historias Clínicas y Evoluciones Médicas** ·
 **Módulo 3: Obras Sociales, Liquidación de Médicos y Facturación Mixta** ·
-**Módulo 4: Ficha de Salud previa (Anamnesis)** —
+**Módulo 4: Ficha médica completa (Historia Clínica General) y odontograma** —
 Backend en **FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
 
 El **Módulo 1** implementa:
@@ -84,7 +84,11 @@ hasta la liquidación mensual de los profesionales.
    `codigo_nomenclador` (único: `uq_prestacion_codigo`), su descripción y su
    `valor_base` (el precio cuando el paciente no tiene cobertura). La baja es
    **lógica** (`activa = false`): sus aranceles y las facturas ya emitidas se
-   conservan.
+   conservan. El botón **Importar aranceles (PDF)** carga el listado oficial del
+   Colegio: primero muestra una vista previa y, al confirmar, crea o actualiza las
+   prácticas por código (`11.02` y `1102` se reconocen como la misma). Volver
+   a importar el mismo PDF no duplica filas y las prácticas sin honorario
+   conservan su valor.
 2. **Aranceles por obra social** (`ArancelObraSocial`): para cada par
    (obra social, prestación) define **cuánto cubre la cobertura**
    (`monto_cubre_os`) y **cuánto queda de coseguro** para el paciente
@@ -149,19 +153,40 @@ hasta la liquidación mensual de los profesionales.
 
 ---
 
-## 🦷 Módulo 4 · Ficha de salud previa (anamnesis)
+## 🦷 Módulo 4 · Ficha médica completa (Historia Clínica General) y odontograma
 
 Antes de la consulta el paciente completa, desde el celular y **sin iniciar
-sesión**, un breve cuestionario de salud. El enlace viaja en el recordatorio de
-WhatsApp y es la única credencial necesaria: un **token HMAC-SHA256** firmado con
-`ANAMNESIS_TOKEN_SECRET` que identifica el turno y el paciente.
+sesión**, el cuestionario de salud del consultorio. El enlace viaja en el
+recordatorio de WhatsApp y es la única credencial necesaria: un **token
+HMAC-SHA256** firmado con `ANAMNESIS_TOKEN_SECRET` que identifica el turno y el
+paciente.
 
 1. **Modelo `AntecedentesSalud`**: una ficha por historia clínica (índice único
-   `uq_antecedentes_historia_clinica`) con alergias, presión alta, problemas
-   cardíacos, medicación actual, embarazo, `completado` y `fecha_completado`.
-   Los textos son opcionales (se guardan limpios o en `NULL`) y los booleanos
-   ausentes equivalen a «no». El paciente puede **corregir** su declaración
-   reenviando el mismo enlace sin duplicar filas.
+   `uq_antecedentes_historia_clinica`) que reproduce la **Historia Clínica
+   General** de papel (`Historia-Clinica-GeneralNUEVA.pdf`). El encabezado
+   **filiatorio** —fecha de nacimiento, estado civil, nacionalidad, domicilio,
+   profesión, titular, lugar de trabajo y jerarquía— se sincroniza en el
+   paciente (ver abajo) y el cuestionario clínico se agrupa en cinco bloques:
+   **familiares** (padre, madre y hermanos), **personales** (enfermedades,
+   medicación, alergias, diabetes, cardiopatía, Chagas, hepatitis, cirugías,
+   hábitos…), **historia odontológica** (consulta previa, dolor, traumatismos y
+   dificultades), **examen bucal** y **diagnóstico/plan**, estos dos últimos sólo
+   desde el panel del profesional. Los textos son opcionales (se guardan limpios
+   o en `NULL`) y los booleanos ausentes equivalen a «no». El paciente puede
+   **corregir** su declaración reenviando el mismo enlace sin duplicar filas. El
+   catálogo de preguntas vive en un único archivo (`ficha_medica.js`) que
+   comparten la página pública, el panel y la vista móvil, así una pregunta nueva
+   aparece en los tres lados y en el resumen.
+
+   El **encabezado filiatorio** del PDF —fecha de nacimiento (con la edad
+   calculada al lado), estado civil, nacionalidad, domicilio, profesión,
+   titular de la obra social, lugar de trabajo y jerarquía— también forma parte
+   de la ficha, pero el backend lo **sincroniza en el registro del paciente**:
+   el dato es el mismo si se carga desde el enlace público, desde el modal de la
+   secretaría o desde el formulario de *Pacientes*, y no hay que tipearlo dos
+   veces. Un campo vacío **nunca borra** lo que ya estaba cargado (para limpiar
+   un dato se usa `PATCH /api/v1/pacientes/{id}`). El formulario público se abre
+   precargado con los filiatorios del paciente aunque la ficha siga pendiente.
 2. **Página pública** `GET /anamnesis/{token}`: muestra el paciente, la fecha y
    el profesional del turno; el formulario o el resumen ya enviado. Se sirve sin
    caché (`Cache-Control: no-store`), sin `Referer` y con `noindex`.
@@ -170,9 +195,11 @@ WhatsApp y es la única credencial necesaria: un **token HMAC-SHA256** firmado c
    ficha, crea la historia si es la primera vez y responde `400` para un token
    alterado o `404` si el turno ya no existe.
 4. **Alerta médica para el odontólogo**: la ficha aparece en el Panel Principal y
-   en `/medico`, con un **banner rojo flotante** y los motivos (`Alergias a
-   medicamentos`, `Presión arterial alta`, `Problemas cardíacos`, `Medicación
-   actual`, `Embarazo`). El detalle de la historia expone `alerta_medica` y
+   en `/medico`, con un **banner rojo flotante** y los motivos de riesgo
+   (alergias, presión alta, problemas cardíacos, medicación, embarazo,
+   anticoagulantes, diabetes, Chagas, epilepsia, hepatitis, cirugías, sangrado
+   excesivo y el resto de los antecedentes del PDF; ver
+   `calcular_motivos_alerta`). El detalle de la historia expone `alerta_medica` y
    `motivos_alerta` calculados, sin campos duplicados en la base.
 5. **Recordatorio de WhatsApp**: mientras la ficha siga pendiente, el mensaje
    Click-to-Chat (y el cuerpo interactivo de la Cloud API) incluye el enlace
@@ -182,13 +209,68 @@ WhatsApp y es la única credencial necesaria: un **token HMAC-SHA256** firmado c
    **completada**, el teléfono del paciente, la fecha de carga y la **alerta
    médica** con sus motivos. Cada fila permite **cargar o editar la ficha desde
    el mostrador** (para el paciente que está presente o responde por teléfono),
-   **abrir la ficha pública** o **copiar el enlace firmado** para reenviarlo por
-   WhatsApp. Los datos salen de `GET /api/v1/anamnesis/panel?dias=30&solo_pendientes=true`
+   **abrir la ficha pública** o **enviarla al paciente** con el botón *Enviar
+   ficha*. Los datos salen de `GET /api/v1/anamnesis/panel?dias=30&solo_pendientes=true`
    (el token se firma en el servidor, nunca en el navegador) y las pendientes
    alimentan el contador del menú. La carga asistida usa
    `PUT /api/v1/anamnesis/panel/{turno_id}`: reutiliza el mismo cuestionario y
    las mismas validaciones, crea la historia clínica si hace falta y recalcula
    la alerta médica.
+7. **Envío manual de la ficha**: el botón *Enviar ficha* de cada fila **abre
+   WhatsApp Web** en una pestaña nueva con el número del paciente y el mensaje ya
+   escrito (paciente, fecha, profesional y enlace firmado), y la secretaría lo
+   envía y lo confirma desde su propio WhatsApp: el sistema no manda nada solo por
+   ese camino. Si el paciente no tiene un teléfono válido se abre el modal para
+   copiar el texto y mandarlo por otro medio. *Más opciones* abre ese modal, con
+   el **enlace firmado**, el **mensaje listo**, el enlace **Click-to-Chat** al
+   teléfono del paciente o a un **destino alternativo** (por ejemplo el celular
+   desde el que llamó) y dos salidas: *Copiar mensaje* para pegarlo en WhatsApp
+   Web o *Enviar por API* para que salga por la Cloud API. El enlace y el texto
+   los arma el servidor:
+   `GET /api/v1/anamnesis/panel/{turno_id}/enlace?telefono=` los devuelve para
+   cualquier turno no cancelado (aunque esté fuera de la ventana del panel) y
+   `POST /api/v1/anamnesis/panel/{turno_id}/enviar` con `canal=manual` sólo
+   prepara la copia, mientras que con `canal=api` manda el mensaje y avisa si el
+   envío quedó **simulado** porque el servidor no tiene credenciales. Ningún
+   canal completa la ficha ni marca el recordatorio del turno: la ficha se
+   completa cuando el paciente envía el formulario. La misma operación está en la
+   consola con `python -m scripts.enviar_ficha` (ver *Scripts de datos*).
+   El texto cierra con el enlace **solo en su propia línea** (con una línea en
+   blanco antes): WhatsApp únicamente lo muestra en azul y lo abre al tocarlo si
+   la URL arranca una línea, no si va pegada a la frase. En el modal el enlace se
+   muestra como link clickeable y, si la URL apunta a `localhost`/`127.0.0.1`, se
+   avisa que WhatsApp no la reconoce y que el celular del paciente no puede
+   alcanzar esa PC: hace falta `PUBLIC_BASE_URL` con el dominio público o un
+   túnel.
+8. **Odontograma gráfico** (botón *Odontograma* de la tarjeta de la ficha, en el
+   panel y en la vista móvil): es un modal **aparte** que el profesional completa
+   **después de revisar al paciente**. Se toca un diente y después se elige el
+   color (también se puede elegir el color primero y tocar varios dientes), en
+   notación FDI y con las referencias del PDF: **rojo** = prestación existente,
+   **azul** = prestación requerida y **X** = diente ausente o a extraer;
+   *Borrar marca* limpia el diente seleccionado. Se guardan además prótesis fija
+   y removible, coronas, cantidad de dientes existentes y observaciones. Un
+   odontograma por historia (`uq_odontograma_historia`) y los dientes se
+   reemplazan en cada guardado (`odontograma_dientes`, único por diente):
+   `GET/PUT /api/v1/pacientes/{id}/odontograma`. La lectura no crea la historia
+   clínica; el `PUT` sí la crea si es la primera vez.
+9. **Impresión de la Historia Clínica General** (botón *Imprimir* de la tarjeta
+   de la ficha en el panel y en `/medico`, y del modal con el que la secretaría
+   carga la ficha): `GET /api/v1/pacientes/{id}/historia-clinica/pdf` devuelve la
+   ficha **en PDF sobre la misma plantilla de papel**
+   (`app/resources/historia_clinica_general.pdf`). Las dos páginas oficiales
+   quedan **iguales**: el sistema sólo escribe encima el paciente, sus
+   filiatorios y las respuestas, y dibuja una **X** en la casilla SI/NO que
+   corresponde (las reconocen por la fuente Wingdings 2 de la plantilla, no por
+   coordenadas fijas). El odontograma, el detalle del examen bucal y los textos
+   que no entran en las cuatro líneas del diagnóstico, del plan o de las
+   observaciones van a una **página de anexo** (el formulario ya tiene el
+   casillero «Continúa en Anexo Nº»). El PDF viaja con
+   `Content-Disposition: inline` para que el navegador lo abra en el visor y se
+   pueda imprimir o guardar; el profesional del encabezado se elige con
+   `?doctor_id=` o, si se omite, se usa el del odontograma o el de la última
+   evolución. Un paciente que todavía no tiene ficha imprime el formulario con
+   sus datos filiatorios y el resto en blanco.
 
 Variables específicas: `PUBLIC_BASE_URL` (dominio absoluto usado en el enlace;
 en Vercel se deduce del despliegue) y `ANAMNESIS_TOKEN_SECRET` (secreto de firma;
@@ -207,6 +289,7 @@ Odontologico/
 │   │   ├── datetime_utils.py       # Utilidades de fecha/hora (UTC naive)
 │   │   ├── exceptions.py           # Excepciones de dominio -> códigos HTTP
 │   │   ├── money.py                # Redondeo y suma de importes (centavos)
+│   │   ├── aranceles_pdf.py        # Módulo 3: lectura del PDF de aranceles del Colegio
 │   │   ├── planilla_aranceles.py   # Módulo 3: planilla de precios (CSV/XLSX) del importador
 │   │   ├── pdf.py                  # Generador de PDF sin dependencias (reportes)
 │   │   └── logging_config.py       # Configuración de logging
@@ -226,6 +309,8 @@ Odontologico/
 │   │   ├── historia_clinica.py     # Módulo 2: ficha clínica del paciente (1 a 1)
 │   │   ├── evolucion_medica.py     # Módulo 2: atención inmutable (bloquea UPDATE/DELETE)
 │   │   ├── archivo_adjunto.py      # Módulo 2: radiografías/estudios de la evolución
+│   │   ├── antecedentes_salud.py   # Módulo 4: ficha médica (preguntas del PDF)
+│   │   ├── odontograma.py          # Módulo 4: odontograma + estado de cada diente
 │   │   ├── prestacion.py           # Módulo 3: catálogo de prácticas facturables
 │   │   ├── arancel_obra_social.py  # Módulo 3: cobertura y coseguro por práctica
 │   │   ├── movimiento_caja.py      # Módulo 3: cierre de la visita + detalle congelado
@@ -235,6 +320,8 @@ Odontologico/
 │   │   ├── obra_social.py          # Catálogo de obras sociales
 │   │   ├── disponibilidad.py       # Rangos semanales y bloques ofrecidos
 │   │   ├── historia_clinica.py     # Módulo 2: alta de evolución y ficha (sólo lectura)
+│   │   ├── antecedentes_salud.py   # Módulo 4: cuestionario, lectura y envío del enlace
+│   │   ├── odontograma.py          # Módulo 4: dientes, estados y totales por color
 │   │   ├── opcion_menu_whatsapp.py # FAQ Bot: alta/edición/baja y vista previa del menú
 │   │   └── prestacion.py, arancel.py, facturacion.py # Módulo 3: precios, caja y liquidaciones
 │   ├── services/                   # Lógica de negocio
@@ -244,6 +331,9 @@ Odontologico/
 │   │   ├── obra_social_service.py  # CRUD del catálogo (nombre único, baja lógica)
 │   │   ├── disponibilidad_service.py # CRUD de la agenda semanal por odontólogo
 │   │   ├── historia_clinica_service.py # Módulo 2: ficha + alta/consulta de evoluciones
+│   │   ├── anamnesis_service.py    # Módulo 4: ficha pública, panel y envío del enlace
+│   │   ├── ficha_pdf_service.py    # Módulo 4: Historia Clínica General en PDF (plantilla)
+│   │   ├── odontograma_service.py  # Módulo 4: lectura y guardado del odontograma
 │   │   ├── prestacion_service.py   # Módulo 3: catálogo de prácticas (código único)
 │   │   ├── arancel_service.py      # Módulo 3: aranceles por cobertura (resolución)
 │   │   ├── facturacion_service.py  # Módulo 3: cierre de visita, caja y liquidación OS
@@ -258,6 +348,8 @@ Odontologico/
 │           ├── doctores.py         # Doctor: CRUD + baja lógica (DELETE)
 │           ├── pacientes.py, turnos.py
 │           ├── historias_clinicas.py # Módulo 2: historia clínica (sólo GET y POST)
+│           ├── anamnesis.py        # Módulo 4: ficha pública y panel de salud
+│           ├── odontogramas.py     # Módulo 4: GET/PUT del odontograma por paciente
 │           ├── obras_sociales.py   # Catálogo de obras sociales: CRUD + baja lógica
 │           ├── prestaciones.py     # Módulo 3: CRUD del catálogo de prácticas
 │           ├── aranceles.py        # Módulo 3: aranceles por cobertura + convenios e importador
@@ -268,13 +360,22 @@ Odontologico/
 │           └── whatsapp_menu.py    # FAQ Bot: CRUD del menú que ve el paciente
 │   ├── web/
 │   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
+│   ├── resources/
+│   │   └── historia_clinica_general.pdf # Plantilla de papel de la Historia Clínica General
 │   └── static/                     # Interfaz web (panel de la secretaría + móvil)
 │       ├── index.html              # Estructura + Tailwind (CDN)
 │       ├── styles.css              # Componentes, animaciones y línea de tiempo clínica
 │       ├── app.js                  # Lógica: fetch contra /api/v1 (+ ficha en sólo lectura)
 │       ├── medico.html             # Vista móvil del odontólogo (agenda + historia clínica)
 │       ├── medico.css              # Ajustes mobile-first (táctil, hojas, timeline clínico)
-│       └── medico.js               # Profesional + agenda + acciones + nueva evolución
+│       ├── medico.js               # Profesional + agenda + acciones + nueva evolución
+│       ├── ficha_medica.js         # Módulo 4: catálogo único de preguntas, filiatorios y resumen
+│       ├── ficha_medica.css        # Estilos del cuestionario (público, panel y móvil)
+│       ├── odontograma.js          # Módulo 4: modal del odontograma (rojo/azul/X)
+│       ├── odontograma.css         # Colores, arcadas y botón del odontograma
+│       ├── anamnesis.html          # Ficha pública del paciente (Módulo 4)
+│       ├── anamnesis.css           # Estilos de la página pública
+│       └── anamnesis.js            # Token del path, GET/POST y resumen
 ├── scripts/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
 │   ├── seed_nomenclador_cba.py          # Nomenclador Córdoba (prestaciones + valor base)
@@ -306,6 +407,7 @@ Odontologico/
 ├── requirements.txt
 ├── pytest.ini
 ├── publicar.bat                    # Doble clic: publica usando el intérprete del .venv
+├── limpiar_vercel.bat              # Doble clic: limpia las tablas de Vercel/Neon
 ├── .env.example
 └── README.md
 ```
@@ -427,6 +529,30 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
 `scripts/`). Si el proyecto ya existía creado como *static*, borrar el
 `vercel.json` viejo y redeployar es lo que fuerza el preset `fastapi`.
 
+### Limpiar las tablas de producción
+
+`limpiar_vercel.bat` (doble clic) vacía las tablas de la PostgreSQL de Neon que
+usa Vercel, sin borrar el esquema. Ofrece dos modos:
+
+- **Datos de trabajo:** pacientes, turnos, historias, evoluciones, anamnesis,
+  adjuntos, caja y disponibilidad específica. Conserva doctores, obras sociales,
+  prestaciones, aranceles, agenda semanal y menú del bot.
+- **Todas las tablas:** las 17 tablas; vuelve a sembrar el menú del FAQ Bot.
+
+El CLI de Vercel no puede exportar `DATABASE_URL` porque está marcada como
+`Secret` (`vercel env pull` la reemplaza por `[SENSITIVE]`). Por eso el `.bat`
+pide la cadena de Neon una sola vez con entrada oculta y la guarda en
+`.env.vercel.local`, que está ignorado por git. Primero muestra un simulacro con
+los conteos y recién borra cuando se escribe `SI`.
+
+```powershell
+.\limpiar_vercel.bat --simulacro   # sólo conteos, no borra
+.\limpiar_vercel.bat               # menú interactivo y confirmación
+```
+
+> Es una operación irreversible. Si esos datos importan, hacé un backup de Neon
+> antes de ejecutarla.
+
 
 ### 1) Importar el proyecto
 
@@ -514,6 +640,34 @@ HTTP de la app desplegada, emparejando por nombre, documento/teléfono y
 odontólogo + fecha del turno, sin tocar lo que ya existe. Controles en
 `tests/test_replicar_datos_api.py`.
 
+### 5) Mandar la ficha de salud sin abrir el panel (`scripts/enviar_ficha.py`)
+
+El enlace de la ficha lo firma **el servidor** con `ANAMNESIS_TOKEN_SECRET`, así
+que desde la consola no se puede armar: el script se lo pide a la app desplegada
+(la misma que escribe en Neon) y no toca la base ni el secreto.
+
+```powershell
+python -m scripts.enviar_ficha --telefono "11 2233-4455"   # imprime enlace + mensaje
+python -m scripts.enviar_ficha --dni 30111222 --api        # lo envía por la Cloud API
+python -m scripts.enviar_ficha --nombre "Ana" --listar     # turnos del paciente, para elegir
+python -m scripts.enviar_ficha --turno 42 --json           # respuesta cruda de la API
+python -m scripts.enviar_ficha --dni 30111222 --destino 3515551234
+```
+
+Busca al paciente por teléfono (con o sin `+54`, espacios o guiones), DNI o
+nombre; si hay varios, pide `--dni` y, si no hay turnos por delante, muestra los
+últimos para elegir con `--turno`. Toma el **turno vigente más próximo** (los
+cancelados quedan afuera) y llama a
+`GET /api/v1/anamnesis/panel/{turno_id}/enlace`; con `--api` usa
+`POST /api/v1/anamnesis/panel/{turno_id}/enviar` con `canal=api` y muestra el
+`wamid` (o el aviso de **envío simulado** si el servidor no tiene credenciales).
+`--url` apunta a otra instancia (por defecto, producción). Código de salida `0`
+si salió bien y `1` ante cualquier error explicado. La fecha y hora que imprime
+son **las mismas que muestra el panel**: la agenda guarda la hora "de pared" del
+consultorio (sin zona) y el mensaje que recibe el paciente usa ese mismo valor,
+así que la consola no la convierte. Controles en `tests/test_enviar_ficha.py` con
+un servidor HTTP falso, sin red.
+
 ---
 
 ## 🖥️ Interfaz web (Panel Principal de la secretaría)
@@ -545,7 +699,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
 | **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos —se pueden cargar **varios por día**, p. ej. lunes 08:00-13:00 y 15:00-19:00—, botón para eliminar cada rango, formulario *desde / hasta* para agregar otro y contador de rangos. Incluye **Restaurar plantilla sugerida** (lun-vie doble turno y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
 | **Doctores** | Formulario de alta estilizado + tabla con la **forma de pago** de cada profesional, la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT` que incluye el desplegable **Tipo de pago** —*Dueño*, *Comisión por porcentaje* o *Sueldo fijo*— y habilita el campo numérico del porcentaje o del sueldo mensual), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
-| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**— y Nº de afiliado) + tabla de pacientes con acción *Editar*. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
+| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**—, Nº de afiliado y **datos filiatorios**: fecha de nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, lugar de trabajo y jerarquía) + tabla de pacientes con acción *Editar*, donde la fecha de nacimiento se muestra con la **edad calculada**. Los filiatorios son los mismos que carga la ficha médica: al guardar la ficha, el panel refresca la tabla de pacientes para mostrar los datos recién sincronizados. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. |
 | **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
@@ -983,6 +1137,12 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `GET`  | `/pacientes/{id}/evoluciones` | **Módulo 2:** línea de tiempo del paciente (de la más nueva a la más vieja) |
 | `GET`  | `/pacientes/{id}/historia-clinica` | **Módulo 2:** ficha completa + línea de tiempo (sólo lectura) |
 | `GET`  | `/evoluciones/{id}` | **Módulo 2:** detalle de una evolución médica |
+| `GET`  | `/anamnesis/panel` | **Módulo 4:** fichas de los turnos próximos (`?dias=1..365&solo_pendientes=`) con estado, alerta y enlace firmado |
+| `PUT`  | `/anamnesis/panel/{turno_id}` | **Módulo 4:** cargar o corregir la ficha completa desde el mostrador (sin token; incluye examen bucal y diagnóstico) |
+| `GET`  | `/anamnesis/panel/{turno_id}/enlace` | **Módulo 4:** enlace firmado + mensaje + `wa.me` de un turno no cancelado (`?telefono=` para otro destino) |
+| `POST` | `/anamnesis/panel/{turno_id}/enviar` | **Módulo 4:** `canal=manual` sólo prepara el mensaje; `canal=api` lo manda por WhatsApp (no marca el recordatorio) |
+| `GET`  | `/pacientes/{id}/odontograma` | **Módulo 4:** odontograma del paciente (dientes pintados, prótesis y totales; `id` en `null` si todavía no se cargó) |
+| `PUT`  | `/pacientes/{id}/odontograma` | **Módulo 4:** guardar el odontograma completo (rojo/azul/X en notación FDI 11-48; `422` con estado inválido, diente repetido o fuera de rango) |
 | `POST` | `/obras-sociales` | Crear obra social (nombre único → `409`) |
 | `GET`  | `/obras-sociales` | Listar el catálogo (`?activas=true/false`, `?nombre=`) |
 | `GET`  | `/obras-sociales/{id}` | Obtener obra social |
@@ -1110,18 +1270,24 @@ curl -X PATCH $API/obras-sociales/1 -H "Content-Type: application/json" \
   -d '{"nombre":"OSDE Binario"}'
 
 # Paciente (nombre y teléfono son obligatorios; el resto es opcional)
+# Los filiatorios son los de la Historia Clínica General; la edad se calcula
+# (no se envía) y la ficha médica escribe en estos mismos campos.
 curl -X POST $API/pacientes -H "Content-Type: application/json" \
   -d '{"nombre":"Juan Pérez","telefono":"+5491122334455","email":"juan@example.com",
-       "dni":"30123456","obra_social_id":1,"numero_afiliado":"610012345678"}'
+       "dni":"30123456","obra_social_id":1,"numero_afiliado":"610012345678",
+       "fecha_nacimiento":"1985-03-12","estado_civil":"Casado/a",
+       "nacionalidad":"Argentina","domicilio":"Av. Colón 123, Córdoba",
+       "profesion":"Docente","titular":"Juan Pérez",
+       "lugar_trabajo":"Escuela N.º 12","jerarquia":"Titular"}'
 
 # La cobertura también se acepta como texto heredado: se resuelve contra el
 # catálogo (vincula la existente o la crea) y nunca se guarda como texto.
 curl -X POST $API/pacientes -H "Content-Type: application/json" \
   -d '{"nombre":"Ana Suárez","telefono":"+5491155667788","obra_social":"OSDE"}'
 
-# Actualizar los datos administrativos de un paciente (null quita la cobertura)
+# Actualizar los datos administrativos o filiatorios (null los limpia)
 curl -X PATCH $API/pacientes/1 -H "Content-Type: application/json" \
-  -d '{"obra_social_id":2,"numero_afiliado":"SM-998877"}'
+  -d '{"obra_social_id":2,"numero_afiliado":"SM-998877","domicilio":null}'
 
 # --- Módulo 2: historia clínica y evoluciones médicas -----------------------
 
@@ -1454,12 +1620,13 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**624 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**704 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
 rango, **disponibilidad semanal por odontólogo** (`test_disponibilidad.py`),
-pacientes (alta, edición y DNI único), **gestión de doctores**
+pacientes (alta, edición, DNI único y **datos filiatorios** con la edad
+calculada), **gestión de doctores**
 (`test_doctores.py`: `PUT` de reemplazo, `PATCH` parcial, baja lógica `DELETE` con
 sus turnos conservados, filtro `?activos=`, `404` al agendar con un profesional
 dado de baja y el modal/botones de la vista), **la forma de pago del
@@ -1467,7 +1634,8 @@ profesional** (`test_doctores_pago.py`: tipo y valor de pago persistidos y
 validados en el alta, el `PUT` del modal y el `PATCH`, la liquidación del mes que
 sale de esa regla y los controles del panel que habilitan el campo numérico),
 **migraciones aditivas al arrancar** (`test_migraciones_esquema.py`: una base
-vieja sin `tipo_pago`/`valor_pago` se completa sin perder filas, el segundo
+vieja sin `tipo_pago`/`valor_pago` se completa sin perder filas, una base sin
+los filiatorios del paciente recibe las columnas nuevas, el segundo
 arranque no repite DDL y PostgreSQL usa `ADD COLUMN IF NOT EXISTS` para tolerar
 instancias concurrentes de Vercel), **catálogo de obras sociales**
 (`test_obras_sociales.py`: CRUD, nombre único `409` sin distinguir mayúsculas,
@@ -1481,6 +1649,18 @@ oculta la SPA, sin rastros de «Dashboard» y con *Panel Principal* primero en e
 menú de operaciones—, estáticos CSS/JS, pestañas de disponibilidad y obras
 sociales, **la agenda del día del Panel Principal en una columna por odontólogo**,
 colores por estado y salud de la API).
+
+La **ficha médica ampliada** se cubre en `tests/test_anamnesis.py`: además del
+token y del camino público, verifica los bloques familiares, personales y
+odontológicos del PDF, la normalización de textos y opciones cerradas, los
+rangos numéricos, los nuevos motivos de alerta y que el enlace público **no**
+pueda firmar el examen bucal ni el diagnóstico (eso sólo lo hace el `PUT`
+interno). El **odontograma** tiene su archivo, `tests/test_odontograma.py`
+(*12 pruebas*): lectura que no crea la historia clínica, los tres estados del
+PDF, reemplazo del conjunto de dientes sin duplicar filas, normalización a
+mayúsculas, creación de la ficha y rechazo (`422`/`404`) de dientes FDI
+inválidos, estados desconocidos, dientes repetidos, paciente u odontólogo
+inexistentes y cantidades fuera de rango.
 
 El **contrato HTTP del panel** se verifica en
 `tests/test_contrato_http_turnos.py`: que `PATCH /api/v1/turnos/{id}` cancele y
@@ -1531,7 +1711,33 @@ pendientes, exclusión de cancelados y presencia en el menú del panel). La
 **carga asistida por la secretaría** se prueba con el `PUT` interno: alta sin
 historia previa, corrección sin duplicar la fila, recálculo de la alerta,
 `404` para un turno inexistente, `409` para uno cancelado, `422` para textos
-demasiado largos y presencia del formulario/modal en el panel.
+demasiado largos, la validación de las opciones cerradas y los rangos, y que el
+formulario del panel se arma con el catálogo compartido (`ficha_medica.js`)
+junto al botón del odontograma. Los **datos filiatorios** se prueban en los dos
+lados: el enlace público y el `PUT` interno los guardan en el registro del
+paciente (no en la tabla de la ficha), el reenvío con los campos vacíos no borra
+lo ya cargado, la lectura —pública y del panel— los devuelve en
+`datos_filiatorios` incluso con la ficha pendiente, y la edad nunca se persiste.
+
+El **envío manual de la ficha** se cubre en `tests/test_enviar_ficha.py`
+(*36 pruebas*): el enlace firmado y el mensaje de
+`GET /anamnesis/panel/{turno_id}/enlace` (también para un turno fuera de la
+ventana del panel y con un destino alternativo), el `POST .../enviar` con
+`canal=manual` (devuelve el enlace, no envía y no marca nada), con `canal=api`
+(sale **simulado** sin credenciales, exige un teléfono válido y guarda el `wamid`
+sólo en ese camino), los `404`/`409`/`422` de turno inexistente, cancelado y canal
+desconocido, los campos nuevos del panel (`mensaje`, `enlace`,
+`enlace_whatsapp`), el **formato del mensaje** (el enlace va solo en la última
+línea, con una línea en blanco antes, tanto en el envío de la ficha como en el
+recordatorio, y el envío por API pide `preview_url`), el botón y el modal de
+envío (ids presentes en `index.html`, el clic que abre WhatsApp Web con el `wa.me`
+de la ficha y el respaldo al modal cuando no hay teléfono, el enlace del modal
+como `<a>` clickeable, el aviso de URL local, `canal=api` y aviso de envío
+simulado en `app.js`, más un control de que `abrirModalEnviarFicha` no vuelva a
+usar una variable inexistente) y la **CLI** contra un servidor
+HTTP falso: búsqueda por teléfono/DNI/nombre, `--listar`, `--json`, `--destino`,
+`--api`, turno cancelado descartado, paciente ambiguo o inexistente y API
+inalcanzable.
 
 La **facturación mixta del Módulo 3** se cubre en `tests/test_facturacion.py`
 (*59 pruebas*): el catálogo de prestaciones (código único `409`, normalización y

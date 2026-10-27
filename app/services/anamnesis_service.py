@@ -16,13 +16,19 @@ Flujo completo:
    con ``PUT /anamnesis/panel/{turno_id}`` cuando el paciente está en el
    mostrador o responde por teléfono. Es el mismo cuestionario y la misma
    validación, sin necesidad de abrir el enlace público.
+5. La secretaría también puede **mandar el enlace a mano**: el panel y la CLI
+   (``python -m scripts.enviar_ficha``) piden el enlace firmado con el mensaje
+   ya redactado y el Click-to-Chat (``wa.me``). Ese envío **no** completa la
+   ficha ni marca el recordatorio: la ficha se completa recién cuando el
+   paciente envía el formulario, y el recordatorio sigue pendiente hasta que
+   salga de verdad.
 
 La respuesta pública nunca expone el ``token`` ni datos de otros turnos.
 """
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -34,8 +40,19 @@ from app.core.anamnesis_token import (
     construir_enlace_anamnesis,
     validar_token_anamnesis,
 )
+from app.core.config import settings
 from app.core.datetime_utils import rango_del_dia, to_naive_utc, utcnow
-from app.core.exceptions import ConflictoError, RecursoNoEncontradoError
+from app.core.exceptions import (
+    ConflictoError,
+    RecursoNoEncontradoError,
+    ValidacionError,
+)
+from app.core.whatsapp_utils import (
+    construir_enlace_click_to_chat,
+    formatear_fecha_recordatorio,
+    normalizar_telefono_whatsapp,
+    profesional_con_articulo,
+)
 from app.models.antecedentes_salud import AntecedentesSalud
 from app.models.doctor import Doctor
 from app.models.enums import EstadoTurno
@@ -47,8 +64,13 @@ from app.schemas.antecedentes_salud import (
     AnamnesisPublicaRead,
     AntecedentesSaludRead,
     DeclaracionSaludCreate,
+    FichaMedicaUpdate,
+    FichaSaludEnlaceRead,
+    FichaSaludEnvioRead,
     FichaSaludPanelRead,
 )
+from app.schemas.paciente import PacienteDatosFiliatorios
+from app.services import paciente_service
 from app.services.historia_clinica_service import (
     obtener_historia,
     obtener_o_crear_historia,
@@ -56,11 +78,28 @@ from app.services.historia_clinica_service import (
 
 logger = logging.getLogger("app.services.anamnesis")
 
+
 #: Mensaje de confirmación que ve el paciente al enviar el formulario.
 MENSAJE_GUARDADO = (
     "¡Gracias! Recibimos tu ficha de salud. El profesional la verá antes de "
     "tu consulta."
 )
+
+#: Texto con el que el panel (o la CLI) le manda el enlace al paciente.
+#:
+#: El enlace va **solo en su propia línea**, separado por una línea en blanco y
+#: sin puntuación pegada: WhatsApp sólo lo muestra en azul (y lo abre al tocarlo)
+#: cuando la URL arranca una línea. Al final de una frase queda como texto gris y
+#: el paciente hace clic sin que pase nada.
+PLANTILLA_ENVIO_FICHA = (
+    "Hola {paciente}, antes de tu consulta del {fecha} a las {hora} con "
+    "{profesional}, completá tu ficha de salud desde este enlace:\n"
+    "\n"
+    "{enlace}"
+)
+
+#: Canales aceptados al mandar la ficha (ver ``FichaSaludEnvioCreate``).
+CANALES_ENVIO_FICHA = ("manual", "api")
 
 
 def _cargar_turno(db: Session, turno_id: int) -> Optional[Turno]:
@@ -144,14 +183,22 @@ def _datos_contexto(turno: Turno) -> dict[str, Any]:
 def _respuesta_publica(
     turno: Turno, antecedentes: Optional[AntecedentesSalud]
 ) -> AnamnesisPublicaRead:
-    """Arma la respuesta de lectura con la declaración (si existe)."""
+    """Arma la respuesta de lectura con la declaración (si existe).
+
+    Los filiatorios se envían siempre (aunque la ficha esté pendiente) para que
+    el formulario público se abra con los datos que el paciente ya tiene
+    cargados y sólo tenga que confirmarlos.
+    """
     declaracion = (
-        AntecedentesSaludRead.model_validate(antecedentes)
+        _leer_ficha(antecedentes, turno.paciente)
         if antecedentes is not None
         else None
     )
     return AnamnesisPublicaRead(
         **_datos_contexto(turno),
+        datos_filiatorios=PacienteDatosFiliatorios(
+            **paciente_service.datos_filiatorios(turno.paciente)
+        ),
         antecedentes_salud=declaracion,
         completado=bool(antecedentes is not None and antecedentes.completado),
     )
@@ -171,21 +218,73 @@ def obtener_formulario_publico(
     return _respuesta_publica(turno, _antecedentes_de_historia(db, historia))
 
 
-def _aplicar_declaracion(
-    antecedentes: AntecedentesSalud, data: DeclaracionSaludCreate
+def _leer_ficha(
+    antecedentes: AntecedentesSalud, paciente: Optional[Paciente]
+) -> AntecedentesSaludRead:
+    """Ficha tal como la leen el panel y el enlace público.
+
+    Los antecedentes salen de su tabla y los **filiatorios del paciente**, que
+    son la única fuente de verdad: así una corrección hecha en el formulario de
+    pacientes aparece también en la ficha médica.
+    """
+    ficha = AntecedentesSaludRead.model_validate(antecedentes)
+    return ficha.model_copy(update=paciente_service.datos_filiatorios(paciente))
+
+
+def _sincronizar_paciente(
+    paciente: Optional[Paciente], filiatorios: dict[str, Any]
 ) -> None:
-    """Copia los campos permitidos del payload público al modelo ORM."""
-    antecedentes.alergias_medicamentos = data.alergias_medicamentos
-    antecedentes.presion_alta = data.presion_alta
-    antecedentes.problemas_cardiacos = data.problemas_cardiacos
-    antecedentes.medicacion_actual = data.medicacion_actual
-    antecedentes.embarazo = data.embarazo
+    """Copia al paciente los filiatorios informados en la ficha.
+
+    Regla de oro: **un campo vacío no borra** un dato ya cargado. El enlace
+    público puede reenviarse con la mitad del formulario en blanco y no debe
+    dejar al paciente sin domicilio ni fecha de nacimiento. Para limpiar un dato
+    se usa el ``PATCH /pacientes/{id}`` (que sí distingue «no enviado» de
+    ``null``).
+    """
+    if paciente is None:
+        return
+    for campo, valor in filiatorios.items():
+        if isinstance(valor, str):
+            valor = valor.strip()
+            if not valor:
+                continue
+        if valor is None:
+            continue
+        setattr(paciente, campo, valor)
+
+
+def _aplicar_declaracion(
+    antecedentes: AntecedentesSalud,
+    data: Union[DeclaracionSaludCreate, FichaMedicaUpdate],
+    paciente: Optional[Paciente] = None,
+) -> None:
+    """Copia los campos del payload al modelo ORM y sincroniza el paciente.
+
+    Se recorre ``model_dump()`` en lugar de asignar campo por campo: el enlace
+    público sólo puede escribir los campos de ``DeclaracionSaludCreate``, y el
+    ``PUT`` interno guarda además el examen bucal y el diagnóstico que trae
+    ``FichaMedicaUpdate``. Así agregar una pregunta nueva no exige tocar este
+    servicio.
+
+    Los **datos filiatorios** se separan antes: no son columnas de la ficha,
+    viajan al registro del paciente.
+    """
+    datos = data.model_dump()
+    filiatorios = {
+        campo: datos.pop(campo) for campo in paciente_service.CAMPOS_FILIATORIOS
+    }
+    for campo, valor in datos.items():
+        setattr(antecedentes, campo, valor)
+    _sincronizar_paciente(paciente, filiatorios)
     antecedentes.completado = True
     antecedentes.fecha_completado = utcnow()
 
 
 def _guardar_declaracion(
-    db: Session, turno: Turno, data: DeclaracionSaludCreate
+    db: Session,
+    turno: Turno,
+    data: Union[DeclaracionSaludCreate, FichaMedicaUpdate],
 ) -> AntecedentesSalud:
     """Crea o corrige la declaración del paciente del turno.
 
@@ -203,7 +302,7 @@ def _guardar_declaracion(
             db.add(antecedentes)
             historia.antecedentes_salud = antecedentes
 
-        _aplicar_declaracion(antecedentes, data)
+        _aplicar_declaracion(antecedentes, data, turno.paciente)
         try:
             db.commit()
         except IntegrityError:
@@ -250,7 +349,7 @@ def guardar_declaracion_publica(
 
 
 def guardar_declaracion_turno(
-    db: Session, turno_id: int, data: DeclaracionSaludCreate
+    db: Session, turno_id: int, data: FichaMedicaUpdate
 ) -> AntecedentesSaludRead:
     """Carga o corrige la ficha desde el panel interno de la secretaría.
 
@@ -261,7 +360,7 @@ def guardar_declaracion_turno(
     """
     turno = _resolver_turno_por_id(db, turno_id)
     antecedentes = _guardar_declaracion(db, turno, data)
-    return AntecedentesSaludRead.model_validate(antecedentes)
+    return _leer_ficha(antecedentes, turno.paciente)
 
 
 def listar_fichas_panel(
@@ -309,19 +408,28 @@ def listar_fichas_panel(
     fichas: list[FichaSaludPanelRead] = []
     for turno, paciente, doctor, antecedentes in filas:
         declaracion = (
-            AntecedentesSaludRead.model_validate(antecedentes)
-            if antecedentes is not None
-            else None
+            _leer_ficha(antecedentes, paciente) if antecedentes is not None else None
         )
         completado = bool(declaracion is not None and declaracion.completado)
         if solo_pendientes and completado:
             continue
+        # El enlace se firma en el servidor (el navegador no tiene la clave) y el
+        # mensaje se arma una sola vez para que el panel pueda copiarlo tal cual.
+        enlace = construir_enlace_anamnesis(turno.id, turno.paciente_id)
+        mensaje = construir_mensaje_ficha(
+            paciente_nombre=paciente.nombre,
+            fecha_hora_inicio=turno.fecha_hora_inicio,
+            profesional=doctor.nombre,
+            enlace=enlace,
+        )
         fichas.append(
             FichaSaludPanelRead(
                 turno_id=turno.id,
                 paciente_id=turno.paciente_id,
                 paciente_nombre=paciente.nombre,
+                paciente_dni=paciente.dni,
                 paciente_telefono=paciente.telefono,
+                telefono_whatsapp=normalizar_telefono_whatsapp(paciente.telefono),
                 doctor_nombre=doctor.nombre,
                 fecha_hora_inicio=turno.fecha_hora_inicio,
                 fecha_hora_fin=turno.fecha_hora_fin,
@@ -340,11 +448,164 @@ def listar_fichas_panel(
                     if completado and declaracion is not None
                     else None
                 ),
+                datos_filiatorios=PacienteDatosFiliatorios(
+                    **paciente_service.datos_filiatorios(paciente)
+                ),
                 antecedentes_salud=declaracion,
-                enlace=construir_enlace_anamnesis(turno.id, turno.paciente_id),
+                enlace=enlace,
+                mensaje=mensaje,
+                enlace_whatsapp=construir_enlace_click_to_chat(
+                    paciente.telefono, mensaje
+                ),
             )
         )
     return fichas
+
+
+def construir_mensaje_ficha(
+    *,
+    paciente_nombre: str,
+    fecha_hora_inicio: datetime,
+    profesional: Optional[str],
+    enlace: str,
+) -> str:
+    """Redacta el mensaje con el que se le manda el enlace al paciente.
+
+    Reutiliza los formateadores del recordatorio (fecha "en letras" y artículo
+    del profesional) para que los dos mensajes suenen igual. El enlace cierra el
+    mensaje en un párrafo propio (ver :data:`PLANTILLA_ENVIO_FICHA`)::
+
+        Hola Ana Pérez, antes de tu consulta del viernes 16 de octubre de 2026
+        a las 10:30 con la Dra. Gómez, completá tu ficha de salud desde este
+        enlace:
+
+        https://mi-consultorio.com/anamnesis/<token>
+    """
+    nombre = (paciente_nombre or "").strip() or "paciente"
+    return PLANTILLA_ENVIO_FICHA.format(
+        paciente=nombre,
+        fecha=formatear_fecha_recordatorio(fecha_hora_inicio),
+        hora=fecha_hora_inicio.strftime("%H:%M"),
+        profesional=profesional_con_articulo(profesional) or "tu profesional",
+        enlace=enlace,
+    )
+
+
+def _declaracion_del_paciente(
+    db: Session, paciente_id: int
+) -> Optional[AntecedentesSalud]:
+    """Declaración vigente del paciente (``None`` si nunca envió la ficha)."""
+    return _antecedentes_de_historia(db, obtener_historia(db, paciente_id))
+
+
+def obtener_enlace_ficha(
+    db: Session, turno_id: int, telefono: Optional[str] = None
+) -> FichaSaludEnlaceRead:
+    """Enlace firmado y mensaje listo para mandar (panel y CLI de secretaría).
+
+    A diferencia de :func:`listar_fichas_panel` no filtra por fecha: la
+    secretaría busca al paciente y necesita el enlace aunque el turno esté
+    fuera de la ventana del panel. Sí rechaza los turnos cancelados, igual que
+    el resto de las operaciones del panel.
+
+    :param telefono: destino alternativo (por ejemplo el celular desde el que
+        llamó el paciente). Si se omite se usa el teléfono de la ficha.
+    :raises RecursoNoEncontradoError: el turno no existe.
+    :raises ConflictoError: el turno está cancelado.
+    """
+    turno = _resolver_turno_por_id(db, turno_id)
+    paciente = turno.paciente
+    declaracion = _declaracion_del_paciente(db, turno.paciente_id)
+    completado = bool(declaracion is not None and declaracion.completado)
+    nombre = (
+        paciente.nombre if paciente is not None else f"Paciente #{turno.paciente_id}"
+    )
+    enlace = construir_enlace_anamnesis(turno.id, turno.paciente_id)
+    doctor = turno.doctor
+    mensaje = construir_mensaje_ficha(
+        paciente_nombre=nombre,
+        fecha_hora_inicio=turno.fecha_hora_inicio,
+        profesional=doctor.nombre if doctor is not None else None,
+        enlace=enlace,
+    )
+    telefono_paciente = paciente.telefono if paciente is not None else ""
+    destino = telefono_paciente if telefono is None else telefono
+    return FichaSaludEnlaceRead(
+        turno_id=turno.id,
+        paciente_id=turno.paciente_id,
+        paciente_nombre=nombre,
+        paciente_dni=paciente.dni if paciente is not None else None,
+        paciente_telefono=telefono_paciente or "",
+        telefono_whatsapp=normalizar_telefono_whatsapp(destino),
+        doctor_nombre=doctor.nombre if doctor is not None else None,
+        fecha_hora_inicio=turno.fecha_hora_inicio,
+        fecha_hora_fin=turno.fecha_hora_fin,
+        estado_turno=turno.estado_turno,
+        completado=completado,
+        fecha_completado=(
+            declaracion.fecha_completado if completado and declaracion else None
+        ),
+        enlace=enlace,
+        mensaje=mensaje,
+        enlace_whatsapp=construir_enlace_click_to_chat(destino, mensaje),
+    )
+
+
+def enviar_ficha(
+    db: Session,
+    turno_id: int,
+    canal: str = "manual",
+    telefono: Optional[str] = None,
+) -> FichaSaludEnvioRead:
+    """Prepara (o manda por la Cloud API) la ficha de salud de un turno.
+
+    * ``manual``: no envía nada. Devuelve el enlace, el texto sugerido y el
+      Click-to-Chat para que la secretaría lo mande desde su propio WhatsApp.
+    * ``api``: usa el mismo transporte que los recordatorios. Si el servidor no
+      tiene credenciales, el envío queda **simulado** (``simulado=True``), igual
+      que en ``POST /whatsapp/recordatorios``.
+
+    En ningún caso se marca el turno como «recordatorio enviado»: ese campo
+    (``turno.estado_whatsapp``) describe el recordatorio del turno, y darlo por
+    enviado sacaría al paciente de la lista de pendientes sin que el
+    recordatorio haya salido. La ficha se completa recién cuando el paciente
+    envía el formulario.
+
+    :raises ValidacionError: ``canal`` desconocido.
+    :raises RecursoNoEncontradoError: el turno no existe.
+    :raises ConflictoError: turno cancelado o sin teléfono válido para ``api``.
+    """
+    if canal not in CANALES_ENVIO_FICHA:
+        raise ValidacionError(
+            f"Canal de envío desconocido: {canal!r}. Usá 'manual' o 'api'."
+        )
+    datos = obtener_enlace_ficha(db, turno_id, telefono=telefono)
+    if canal == "manual":
+        return FichaSaludEnvioRead(**datos.model_dump(), canal="manual")
+
+    if not datos.telefono_whatsapp:
+        raise ConflictoError(
+            "El paciente no tiene un teléfono válido para WhatsApp. Corregí el "
+            "número en su ficha o copiá el enlace para mandarlo a mano."
+        )
+
+    # Import local a propósito: ``whatsapp_service`` importa este módulo a nivel
+    # de módulo (para saber si la ficha sigue pendiente) e importarlo arriba
+    # crearía un ciclo entre los dos servicios.
+    from app.services import whatsapp_service
+
+    mensaje_id = whatsapp_service.enviar_mensaje_texto(
+        datos.telefono_whatsapp,
+        datos.mensaje,
+        preview_url=True,
+    )
+    return FichaSaludEnvioRead(
+        **datos.model_dump(),
+        canal="api",
+        enviado=True,
+        simulado=not settings.whatsapp_envio_real,
+        whatsapp_mensaje_id=mensaje_id,
+    )
 
 
 def necesita_completar_anamnesis(turno: Turno) -> bool:

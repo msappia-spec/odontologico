@@ -69,6 +69,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.db.base import Base
+from app.db.migraciones import aplicar_columnas_faltantes
 
 MODOS = ("reemplazar", "agregar")
 
@@ -87,6 +88,7 @@ class Resultado:
     destino_final: dict[str, int] = field(default_factory=dict)
     secuencias: list[str] = field(default_factory=list)
     tablas_omitidas: list[str] = field(default_factory=list)
+    columnas_agregadas: list[str] = field(default_factory=list)
 
     @property
     def total_insertadas(self) -> int:
@@ -240,6 +242,12 @@ def migrar(
     # no toca nada (no hay columnas faltantes en este proyecto).
     Base.metadata.create_all(engine_destino)
 
+    # Una base local creada con una versión anterior de la app puede no tener
+    # las columnas aditivas nuevas (por ejemplo, la ficha médica ampliada). Se
+    # completan con los mismos ``ALTER TABLE ADD COLUMN`` que corre ``init_db``
+    # en cada arranque; sin esto el ORM pediría columnas inexistentes al leer.
+    resultado.columnas_agregadas = aplicar_columnas_faltantes(engine_origen)
+
     modelos = _modelos_por_tabla()
     tablas_metadata = list(Base.metadata.sorted_tables)  # orden de dependencias (FKs)
     # Una base local creada con una versión anterior de la app puede no tener
@@ -350,6 +358,11 @@ def _imprimir(resultado: Resultado) -> None:
         print(
             "Tablas ausentes en el origen (se omiten): "
             + ", ".join(resultado.tablas_omitidas)
+        )
+    if resultado.columnas_agregadas:
+        print(
+            "Columnas aditivas agregadas en el origen: "
+            + ", ".join(resultado.columnas_agregadas)
         )
     if not resultado.ejecutado:
         print()

@@ -1,8 +1,11 @@
 """Pruebas del registro de pacientes con sus datos administrativos.
 
 Cubren los campos incorporados al modelo (``dni`` único, ``obra_social`` y
-``numero_afiliado``), su normalización y la actualización parcial (``PATCH``).
+``numero_afiliado``), los **datos filiatorios** de la Historia Clínica General
+(con la edad calculada) y la actualización parcial (``PATCH``).
 """
+
+from datetime import date
 
 API = "/api/v1"
 
@@ -160,3 +163,88 @@ def test_actualizar_con_dni_duplicado_devuelve_409(client):
 def test_actualizar_paciente_inexistente_devuelve_404(client):
     r = client.patch(f"{API}/pacientes/987654", json={"obra_social": "OSDE"})
     assert r.status_code == 404
+
+
+def test_guarda_los_datos_filiatorios_y_calcula_la_edad(client):
+    """Los filiatorios de la Historia Clínica General viajan en el paciente."""
+    hoy = date.today()
+    nacimiento = date(hoy.year - 40, hoy.month, hoy.day)
+    edad_esperada = hoy.year - nacimiento.year - (
+        (hoy.month, hoy.day) < (nacimiento.month, nacimiento.day)
+    )
+
+    r = client.post(
+        f"{API}/pacientes",
+        json=_payload(
+            fecha_nacimiento=nacimiento.isoformat(),
+            estado_civil="  Casado/a  ",
+            nacionalidad="Argentina",
+            domicilio="Av. Colón 123, Córdoba",
+            profesion="Docente",
+            titular="Juan Pérez",
+            lugar_trabajo="Escuela N.º 12",
+            jerarquia="Titular",
+        ),
+    )
+
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["fecha_nacimiento"] == nacimiento.isoformat()
+    assert data["estado_civil"] == "Casado/a"  # se limpian los espacios
+    assert data["nacionalidad"] == "Argentina"
+    assert data["domicilio"] == "Av. Colón 123, Córdoba"
+    assert data["profesion"] == "Docente"
+    assert data["titular"] == "Juan Pérez"
+    assert data["lugar_trabajo"] == "Escuela N.º 12"
+    assert data["jerarquia"] == "Titular"
+    assert data["edad"] == edad_esperada
+
+
+def test_los_filiatorios_vacios_quedan_en_null_y_la_fecha_se_valida(client):
+    r = client.post(
+        f"{API}/pacientes",
+        json=_payload(
+            fecha_nacimiento="",
+            estado_civil="   ",
+            domicilio="",
+            jerarquia="",
+            email=None,
+        ),
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["fecha_nacimiento"] is None
+    assert data["estado_civil"] is None
+    assert data["domicilio"] is None
+    assert data["jerarquia"] is None
+    assert data["edad"] is None
+
+    futura = client.post(
+        f"{API}/pacientes",
+        json=_payload(fecha_nacimiento="2999-01-01", dni=None, email=None),
+    )
+    assert futura.status_code == 422
+
+    mal_escrita = client.post(
+        f"{API}/pacientes",
+        json=_payload(fecha_nacimiento="12/03/1985", dni=None, email=None),
+    )
+    assert mal_escrita.status_code == 422
+
+
+def test_patch_permite_corregir_y_limpiar_los_filiatorios(client):
+    creado = client.post(
+        f"{API}/pacientes",
+        json=_payload(fecha_nacimiento="1985-03-12", domicilio="Calle Falsa 123"),
+    ).json()
+
+    r = client.patch(
+        f"{API}/pacientes/{creado['id']}",
+        json={"domicilio": "Av. Siempre Viva 742", "fecha_nacimiento": None},
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["domicilio"] == "Av. Siempre Viva 742"
+    assert r.json()["fecha_nacimiento"] is None
+    assert r.json()["edad"] is None
+

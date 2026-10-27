@@ -17,7 +17,6 @@
   "use strict";
 
   var API = "/api/v1/anamnesis/";
-  var MAX_TEXTO = 1000;
 
   var state = {
     token: "",
@@ -149,43 +148,39 @@
   }
 
   /* ------------------------------ Resumen -------------------------------- */
-  function crearFila(etiqueta, valor, tipo) {
-    var fila = document.createElement("div");
-    fila.className = "an-resumen-fila";
-
-    var termino = document.createElement("dt");
-    termino.textContent = etiqueta;
-
-    var detalle = document.createElement("dd");
-    if (tipo === "booleano") {
-      var chip = document.createElement("span");
-      chip.className = "an-chip " + (valor ? "an-chip-si" : "an-chip-no");
-      chip.textContent = valor ? "Sí" : "No";
-      detalle.appendChild(chip);
-    } else if (valor) {
-      detalle.textContent = valor;
-    } else {
-      detalle.textContent = "Sin datos";
-      detalle.classList.add("an-vacio");
-    }
-
-    fila.appendChild(termino);
-    fila.appendChild(detalle);
-    return fila;
+  /* El detalle lo arma ``FICHA_MEDICA.renderResumen`` (mismo catálogo que el
+     formulario): así una pregunta nueva aparece en los dos lados. */
+  /* Los filiatorios viven en el registro del paciente y el backend los manda
+     aparte (``datos_filiatorios``); la ficha guardada también los trae. Se
+     fusionan para que el formulario y el resumen muestren siempre lo último. */
+  function datosDeLaFicha() {
+    var datos = state.datos || {};
+    var fusion = {};
+    [datos.datos_filiatorios || {}, datos.antecedentes_salud || {}].forEach(
+      function (fuente) {
+        Object.keys(fuente).forEach(function (clave) {
+          fusion[clave] = fuente[clave];
+        });
+      }
+    );
+    return fusion;
   }
 
-  function pintarResumen(antecedentes) {
-    var a = antecedentes || {};
-    var lista = $("an-resumen-datos");
-    lista.replaceChildren();
+  function pintarResumen(datos) {
+    var a = datosDeLaFicha();
+    var contenedor = $("an-resumen-datos");
+    contenedor.replaceChildren();
 
-    lista.appendChild(crearFila("Alergias a medicamentos", a.alergias_medicamentos, "texto"));
-    lista.appendChild(crearFila("Presión arterial alta", Boolean(a.presion_alta), "booleano"));
-    lista.appendChild(crearFila("Problemas cardíacos", Boolean(a.problemas_cardiacos), "booleano"));
-    lista.appendChild(crearFila("Medicación actual", a.medicacion_actual, "texto"));
-    lista.appendChild(crearFila("Embarazo", Boolean(a.embarazo), "booleano"));
+    if (window.FICHA_MEDICA) {
+      FICHA_MEDICA.renderResumen(contenedor, a, { soloPaciente: true });
+    }
+
     if (a.fecha_completado) {
-      lista.appendChild(crearFila("Última actualización", fechaHora(a.fecha_completado), "texto"));
+      var actualizado = document.createElement("p");
+      actualizado.className = "an-resumen-actualizado";
+      actualizado.textContent =
+        "Última actualización: " + fechaHora(a.fecha_completado);
+      contenedor.appendChild(actualizado);
     }
 
     var previa = document.querySelector(".an-resumen-nota");
@@ -196,7 +191,7 @@
       nota.className = "an-resumen-nota";
       nota.textContent =
         "Marcaste antecedentes importantes: el profesional los revisará antes de la consulta.";
-      lista.parentNode.insertBefore(nota, $("an-corregir"));
+      contenedor.parentNode.insertBefore(nota, $("an-corregir"));
     }
   }
 
@@ -212,7 +207,7 @@
       ? (datos.mensaje || "Recibimos tu ficha. El profesional la verá antes de tu consulta.")
       : "Ya nos contaste cómo estás de salud. Si algo cambió, podés corregirlo.";
 
-    pintarResumen(datos.antecedentes_salud);
+    pintarResumen(datos);
 
     if (esNuevo) {
       var titulo = $("an-resumen-titulo");
@@ -245,43 +240,25 @@
     $("an-resumen").hidden = true;
     $("an-form").hidden = false;
     limpiarErrorFormulario();
-    cargarRespuestas(state.datos && state.datos.antecedentes_salud);
+    cargarRespuestas();
 
     if (enfocar) {
       $("an-form").scrollIntoView({ behavior: "smooth", block: "start" });
-      $("an-alergias").focus({ preventScroll: true });
+      var primero = $("an-campos").querySelector("[data-campo]");
+      if (primero) primero.focus({ preventScroll: true });
     }
   }
 
-  function ponerContador(id) {
-    var campo = $(id);
-    var contador = document.querySelector('[data-contador="' + id + '"]');
-    if (!campo || !contador) return;
-    var cantidad = campo.value.length;
-    contador.textContent = cantidad + " / " + MAX_TEXTO;
-    contador.classList.toggle("an-contador-limite", cantidad >= MAX_TEXTO * 0.9);
-  }
-
-  function cargarRespuestas(antecedentes) {
-    var a = antecedentes || {};
-    $("an-alergias").value = a.alergias_medicamentos || "";
-    $("an-medicacion").value = a.medicacion_actual || "";
-    $("an-presion").checked = Boolean(a.presion_alta);
-    $("an-cardiacos").checked = Boolean(a.problemas_cardiacos);
-    $("an-embarazo").checked = Boolean(a.embarazo);
-    ponerContador("an-alergias");
-    ponerContador("an-medicacion");
+  function cargarRespuestas() {
+    if (window.FICHA_MEDICA) {
+      FICHA_MEDICA.escribirFormulario($("an-campos"), datosDeLaFicha());
+    }
   }
 
   /* -------------------------------- Envío -------------------------------- */
   function construirPayload() {
-    return {
-      alergias_medicamentos: $("an-alergias").value.trim() || null,
-      presion_alta: $("an-presion").checked,
-      problemas_cardiacos: $("an-cardiacos").checked,
-      medicacion_actual: $("an-medicacion").value.trim() || null,
-      embarazo: $("an-embarazo").checked,
-    };
+    if (!window.FICHA_MEDICA) return {};
+    return FICHA_MEDICA.leerFormulario($("an-campos"));
   }
 
   function botonCargando(activo) {
@@ -328,13 +305,6 @@
 
   /* -------------------------- Eventos e inicio --------------------------- */
   function conectarEventos() {
-    ["an-alergias", "an-medicacion"].forEach(function (id) {
-      var campo = $(id);
-      if (campo) {
-        campo.addEventListener("input", function () { ponerContador(id); });
-      }
-    });
-
     $("an-form").addEventListener("submit", enviar);
     $("an-corregir").addEventListener("click", function () {
       mostrarFormulario(true);
@@ -347,6 +317,9 @@
 
   async function iniciar() {
     state.token = obtenerToken();
+    if (window.FICHA_MEDICA) {
+      FICHA_MEDICA.renderFormulario($("an-campos"), null, { soloPaciente: true });
+    }
     conectarEventos();
 
     if (!state.token) {

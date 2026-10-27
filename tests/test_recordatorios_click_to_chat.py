@@ -117,6 +117,10 @@ def test_construir_mensaje_y_enlace_no_rompen_la_url(db_session, doctor, pacient
     assert cuerpo.endswith("¡Muchas gracias!")
     assert bloque_salud.startswith("Antes de la consulta, completá tu ficha de salud")
     assert "/anamnesis/" in bloque_salud
+    # El enlace cierra el mensaje en su propia línea: WhatsApp sólo lo muestra en
+    # azul (y lo abre) cuando la URL no está pegada a la frase.
+    assert bloque_salud.splitlines()[-1].startswith("http")
+    assert bloque_salud.splitlines()[-2] == ""
 
     enlace = whatsapp_service.construir_enlace_whatsapp(turno)
     assert enlace.startswith("https://wa.me/5491122334455?text=Hola%20Paciente%20Demo%2C")

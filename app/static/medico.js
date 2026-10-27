@@ -702,19 +702,39 @@
     return `${fechaLarga(parteFecha(iso))} · ${parteHora(iso)} hs`;
   }
 
-  function saludTexto(valor, vacio) {
-    const limpio = String(valor || "").trim();
-    return limpio ? esc(limpio) : `<span class="salud-sin-dato">${esc(vacio || "No informado")}</span>`;
+  /* Historia Clínica General en PDF: el backend la imprime sobre la plantilla
+     de papel y el visor del teléfono permite imprimirla o guardarla. */
+  function abrirPdfHistoria(pacienteId) {
+    if (!pacienteId) return;
+    const enlace = document.createElement("a");
+    enlace.href =
+      `${API}/pacientes/${encodeURIComponent(pacienteId)}/historia-clinica/pdf`;
+    enlace.target = "_blank";
+    enlace.rel = "noopener";
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
   }
 
-  function saludBooleano(valor) {
-    return valor
-      ? `<span class="salud-booleano salud-booleano-si">Sí</span>`
-      : `<span class="salud-booleano">No</span>`;
-  }
-
+  /* El detalle de la ficha lo arma el catálogo compartido
+     (``FICHA_MEDICA.renderResumen``), igual que en el Panel Principal. */
   function antecedentesSaludHTML(detalle) {
     const a = detalle && detalle.antecedentes_salud;
+    const pacienteId = detalle && detalle.paciente_id;
+    const botonOdonto = pacienteId
+      ? `<button type="button" class="salud-btn-odonto"` +
+        ` data-odontograma="${esc(pacienteId)}"` +
+        ` data-odontograma-nombre="${esc((detalle && detalle.paciente_nombre) || "")}">` +
+        `Odontograma</button>`
+      : "";
+    /* La Historia Clínica General se imprime sobre la plantilla de papel. */
+    const botonPdf = pacienteId
+      ? `<button type="button" class="salud-btn-pdf"` +
+        ` data-ficha-pdf="${esc(pacienteId)}"` +
+        ` title="Imprimir la Historia Clínica General">` +
+        `Imprimir</button>`
+      : "";
+
     if (!a) {
       return (
         `<section class="salud-card salud-card-pendiente">` +
@@ -727,7 +747,11 @@
         `<p class="salud-titulo">Ficha de salud</p>` +
         `<p class="salud-sub">Anamnesis pendiente del paciente.</p>` +
         `</div>` +
+        `<div class="salud-acciones">` +
         `<span class="badge badge-slate">Pendiente</span>` +
+        botonOdonto +
+        botonPdf +
+        `</div>` +
         `</div>` +
         `<p class="salud-pendiente">Se completa desde el enlace que el paciente recibe por WhatsApp. Cuando la envíe, sus antecedentes aparecen acá.</p>` +
         `</section>`
@@ -753,20 +777,13 @@
       `<p class="salud-titulo">Ficha de salud</p>` +
       actualizada +
       `</div>` +
+      `<div class="salud-acciones">` +
       `<span class="badge ${alerta ? "badge-red" : "badge-green"}">${alerta ? "Alerta médica" : "Sin alertas"}</span>` +
+      botonOdonto +
+      botonPdf +
       `</div>` +
-      `<div class="salud-grid">` +
-      `<div class="salud-dato salud-dato-ancho"><p class="salud-dato-titulo">Alergias a medicamentos</p>` +
-      `<p class="salud-dato-texto">${saludTexto(a.alergias_medicamentos, "Sin alergias informadas")}</p></div>` +
-      `<div class="salud-dato"><p class="salud-dato-titulo">Presión arterial alta</p>` +
-      `<p class="salud-dato-texto">${saludBooleano(a.presion_alta)}</p></div>` +
-      `<div class="salud-dato"><p class="salud-dato-titulo">Problemas cardíacos</p>` +
-      `<p class="salud-dato-texto">${saludBooleano(a.problemas_cardiacos)}</p></div>` +
-      `<div class="salud-dato salud-dato-ancho"><p class="salud-dato-titulo">Medicación actual</p>` +
-      `<p class="salud-dato-texto">${saludTexto(a.medicacion_actual, "No informada")}</p></div>` +
-      `<div class="salud-dato"><p class="salud-dato-titulo">Embarazo</p>` +
-      `<p class="salud-dato-texto">${saludBooleano(a.embarazo)}</p></div>` +
       `</div>` +
+      `<div class="salud-resumen" data-resumen-salud></div>` +
       (alerta
         ? `<p class="salud-alerta-nota"><strong>Revisar antes de atender:</strong> ${esc(motivos.join(" · "))}</p>`
         : "") +
@@ -781,7 +798,16 @@
 
   function renderAntecedentes(detalle) {
     const cont = $("hist-antecedentes");
-    if (cont) cont.innerHTML = antecedentesSaludHTML(detalle);
+    if (cont) {
+      cont.innerHTML = antecedentesSaludHTML(detalle);
+      const resumen = cont.querySelector("[data-resumen-salud]");
+      if (resumen && window.FICHA_MEDICA) {
+        FICHA_MEDICA.renderResumen(
+          resumen,
+          (detalle && detalle.antecedentes_salud) || {}
+        );
+      }
+    }
 
     const banner = $("hist-alerta");
     if (!banner) return;
@@ -1449,6 +1475,10 @@
       /* Hoja de la historia clínica: la ficha elegida abre su línea de tiempo. */
       const fichaHistoria = objetivo.closest("[data-hist-paciente]");
       if (fichaHistoria) { abrirHistoria(fichaHistoria.dataset.histPaciente); return; }
+
+      /* Impresión de la Historia Clínica General del paciente abierto. */
+      const fichaPdf = objetivo.closest("[data-ficha-pdf]");
+      if (fichaPdf) { abrirPdfHistoria(fichaPdf.dataset.fichaPdf); return; }
 
       const alta = objetivo.closest("[data-alta-nuevo]");
       if (alta) { mostrarAltaPacienteNuevo($("nuevo-buscar").value.trim()); return; }

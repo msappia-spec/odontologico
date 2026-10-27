@@ -59,6 +59,7 @@ El servidor hay que volver a levantarlo con esta orden (siempre desde `c:\Sistem
 
 - **Dónde se carga:** sólo desde el **celular del odontólogo** (`/medico`), con el botón de la ficha del encabezado. La **secretaría consulta** el historial en modo **sólo lectura** desde el Panel Principal: la tarjeta *Historias clínicas* y el botón *Historia* de cada fila de la tabla de pacientes.
 - **Ficha automática:** el paciente no necesita tener nada cargado: con la **primera evolución** se crea su ficha y se numera sola (`HC-000123`).
+- **Imprimir la Historia Clínica General:** el botón **Imprimir** de la tarjeta de la ficha (en el celular y en el panel) abre el PDF con la **misma plantilla de papel** del consultorio: los datos del paciente, las respuestas y las casillas SI/NO marcadas, más el odontograma en un anexo. Se imprime desde el visor del navegador o se guarda para adjuntar a la carpeta.
 - **⚠️ Las evoluciones NO se pueden editar ni borrar** (normativa de salud): no hay botón de edición, no existe endpoint `PUT`/`PATCH`/`DELETE` y el ORM bloquea cualquier intento. Si un texto salió mal se corrige con una **evolución nueva** que lo aclare: el historial queda completo y auditable.
 - **Radiografías:** se guardan como **enlace** al archivo (`url_archivo`) con su tipo (`RADIOGRAFIA`, `FOTO`, `ESTUDIO`…), así la base no se llena de imágenes.
 - **Bases ya creadas:** para que aparezcan las tablas nuevas sin borrar nada (una sola vez, con el servidor detenido):

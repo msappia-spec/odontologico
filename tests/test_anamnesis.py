@@ -20,7 +20,7 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import func, select
@@ -37,6 +37,7 @@ from app.core.datetime_utils import utcnow
 from app.models.antecedentes_salud import AntecedentesSalud
 from app.models.enums import EstadoTurno
 from app.models.historia_clinica import HistoriaClinica
+from app.models.paciente import Paciente
 from app.models.turno import Turno
 from app.schemas.antecedentes_salud import DeclaracionSaludCreate
 from app.services import anamnesis_service, whatsapp_service
@@ -473,7 +474,8 @@ def test_recordatorio_agrega_el_enlace_solo_mientras_falta_la_ficha(
 
     pendiente = whatsapp_service.construir_mensaje_recordatorio(turno)
     assert "Antes de la consulta, completá tu ficha de salud" in pendiente
-    enlace = pendiente.split("enlace: ", 1)[1].strip()
+    # El enlace va solo en la última línea (WhatsApp lo pinta en azul así).
+    enlace = pendiente.rsplit("\n\n", 1)[1].strip()
     assert enlace.startswith(f"{settings.url_publica}/anamnesis/")
     datos = validar_token_anamnesis(enlace.rsplit("/", 1)[1])
     assert (datos.turno_id, datos.paciente_id) == (turno.id, paciente.id)
@@ -693,19 +695,376 @@ def test_el_panel_tiene_el_formulario_interno_para_cargar_la_ficha(client):
     for fragmento in (
         'id="modal-ficha-salud"',
         'id="form-ficha-salud"',
-        'id="ficha-alergias"',
-        'id="ficha-presion"',
-        'id="ficha-cardiacos"',
-        'id="ficha-medicacion"',
-        'id="ficha-embarazo"',
+        'id="ficha-campos"',
         'id="ficha-consentimiento"',
         'id="modal-ficha-save"',
+        "/static/ficha_medica.js",
+        "/static/odontograma.js",
     ):
         assert fragmento in html
 
     app_js = client.get("/static/app.js").text
     assert "function abrirModalFicha(" in app_js
     assert "function guardarFichaSalud(" in app_js
+    assert "FICHA_MEDICA.renderFormulario" in app_js
+    assert "FICHA_MEDICA.leerFormulario" in app_js
+    assert "data-odontograma=" in app_js
     assert 'data-ficha-editar="${esc(f.turno_id)}"' in app_js
     assert "`/anamnesis/panel/${turnoId}`" in app_js
     assert 'method: "PUT"' in app_js
+
+    ficha_js = client.get("/static/ficha_medica.js").text
+    assert "renderFormulario" in ficha_js
+    assert "padre_vive" in ficha_js
+    assert "diagnostico_presuntivo" in ficha_js
+
+    odonto_js = client.get("/static/odontograma.js").text
+    assert "EXISTENTE" in odonto_js
+    assert "REQUERIDO" in odonto_js
+    assert "AUSENTE" in odonto_js
+    assert "/odontograma" in odonto_js
+
+
+# ---------------------------------------------------------------------------
+# 7) Ficha médica ampliada (Historia Clínica General del consultorio)
+# ---------------------------------------------------------------------------
+
+
+def _payload_historia_general():
+    """Cuestionario completo con los bloques del PDF de papel."""
+    return {
+        "padre_vive": True,
+        "padre_patologias": "Hipertensión",
+        "madre_vive": False,
+        "madre_patologias": "   ",
+        "hermanos": True,
+        "hermanos_sanos": True,
+        "enfermedad_actual": True,
+        "enfermedad_actual_detalle": "  Asma  ",
+        "tratamiento_medico": True,
+        "tratamiento_medico_detalle": "Broncodilatadores",
+        "medicamentos_ultimos_5_anios": "Amoxicilina",
+        "deporte": True,
+        "deporte_malestar": False,
+        "alergia_anestesia": True,
+        "alergia_penicilina": True,
+        "alergia_otros": "Látex",
+        "cicatriza_bien": True,
+        "sangra_mucho": True,
+        "diabetes": True,
+        "diabetes_controlada": True,
+        "diabetes_tratamiento": "Metformina",
+        "anticoagulantes": True,
+        "anticoagulantes_frecuencia": "1 por día",
+        "hepatitis": True,
+        "hepatitis_tipo": "b",
+        "epilepsia": True,
+        "epilepsia_medicacion": "Ácido valproico",
+        "operaciones": True,
+        "operaciones_detalle": "Apendicectomía",
+        "operaciones_cuando": "2010",
+        "fuma": False,
+        "embarazo": True,
+        "embarazo_meses": 4,
+        "dolor": True,
+        "dolor_intensidad": "intenso",
+        "dolor_duracion": "continuo",
+        "dolor_desencadenante": "espontaneo",
+        "dolor_estimulo": "frio",
+        "dolor_localizacion": "irradiado",
+        "dolor_zona": "Hacia el oído",
+        "traumatismo_dental": True,
+        "traumatismo_cuando": "2024",
+        "dificultad_abrir_boca": True,
+        "medico_clinico": "Dra. Pérez",
+        "centro_derivacion": "Hospital Córdoba",
+    }
+
+
+def test_post_guarda_la_ficha_medica_completa(client, db_session, doctor, paciente):
+    """El enlace público acepta familiares, personales y odontológicos."""
+    turno = _crear_turno(db_session, doctor, paciente)
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+
+    r = client.post(f"{API}/anamnesis/{token}", json=_payload_historia_general())
+
+    assert r.status_code == 200, r.text
+    a = r.json()["antecedentes_salud"]
+    assert a["padre_vive"] is True
+    assert a["padre_patologias"] == "Hipertensión"
+    assert a["madre_patologias"] is None
+    assert a["enfermedad_actual_detalle"] == "Asma"
+    assert a["hepatitis_tipo"] == "B"
+    assert a["dolor_intensidad"] == "INTENSO"
+    assert a["dolor_estimulo"] == "FRIO"
+    assert a["embarazo_meses"] == 4
+    assert a["centro_derivacion"] == "Hospital Córdoba"
+    assert a["completado"] is True
+
+    db_session.expire_all()
+    antecedentes = db_session.execute(select(AntecedentesSalud)).scalars().one()
+    assert antecedentes.padre_vive is True
+    assert antecedentes.hepatitis_tipo == "B"
+    assert antecedentes.embarazo_meses == 4
+
+
+def test_los_motivos_de_alerta_incluyen_los_antecedentes_nuevos(
+    client, db_session, doctor, paciente
+):
+    """Diabetes, anticoagulantes, epilepsia y cirugías también alertan."""
+    turno = _crear_turno(db_session, doctor, paciente)
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+
+    r = client.post(f"{API}/anamnesis/{token}", json=_payload_historia_general())
+
+    assert r.status_code == 200, r.text
+    assert r.json()["antecedentes_salud"]["motivos_alerta"] == [
+        "Embarazo",
+        "Alergia a la anestesia",
+        "Alergia a la penicilina",
+        "Aspirina o anticoagulantes",
+        "Diabetes",
+        "Epilepsia o convulsiones",
+        "Hepatitis",
+        "Cirugías previas",
+        "Sangrado excesivo",
+    ]
+
+
+def test_el_enlace_publico_no_puede_firmar_el_examen_bucal(
+    client, db_session, doctor, paciente
+):
+    """El paciente no puede cargar el examen bucal ni el diagnóstico."""
+    turno = _crear_turno(db_session, doctor, paciente)
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+
+    r = client.post(
+        f"{API}/anamnesis/{token}",
+        json={
+            "labios_anormal": True,
+            "higiene_bucal": "BUENO",
+            "diagnostico_presuntivo": "Caries",
+            "plan_tratamiento": "Obturación",
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    a = r.json()["antecedentes_salud"]
+    assert a["labios_anormal"] is False
+    assert a["higiene_bucal"] is None
+    assert a["diagnostico_presuntivo"] is None
+    assert a["plan_tratamiento"] is None
+
+
+def test_el_panel_guarda_el_examen_bucal_y_el_diagnostico(
+    client, db_session, doctor, paciente
+):
+    """El ``PUT`` interno acepta los bloques que completa el profesional."""
+    turno = _crear_turno(db_session, doctor, paciente)
+
+    r = client.put(
+        f"{API}/anamnesis/panel/{turno.id}",
+        json={
+            **_payload_completo(),
+            "labios_anormal": True,
+            "higiene_bucal": "deficiente",
+            "momentos_azucar": 3,
+            "diagnostico_presuntivo": "Caries oclusal 36",
+            "plan_tratamiento": "Obturación",
+            "fecha_plan": "2026-11-02",
+            "observaciones": "Control en 6 meses",
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    datos = r.json()
+    assert datos["labios_anormal"] is True
+    assert datos["higiene_bucal"] == "DEFICIENTE"
+    assert datos["momentos_azucar"] == 3
+    assert datos["diagnostico_presuntivo"] == "Caries oclusal 36"
+    assert datos["fecha_plan"] == "2026-11-02"
+    assert datos["observaciones"] == "Control en 6 meses"
+
+
+def test_valida_las_opciones_y_los_rangos_de_la_ficha(
+    client, db_session, doctor, paciente
+):
+    """Las opciones cerradas y los números fuera de rango responden 422."""
+    turno = _crear_turno(db_session, doctor, paciente)
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+
+    assert (
+        client.post(f"{API}/anamnesis/{token}", json={"hepatitis_tipo": "D"})
+    ).status_code == 422
+    assert (
+        client.post(f"{API}/anamnesis/{token}", json={"embarazo_meses": 13})
+    ).status_code == 422
+    assert (
+        client.post(
+            f"{API}/anamnesis/{token}", json={"dolor_intensidad": "MUCHO"}
+        )
+    ).status_code == 422
+    assert (
+        client.put(
+            f"{API}/anamnesis/panel/{turno.id}",
+            json={"higiene_bucal": "EXCELENTE"},
+        )
+    ).status_code == 422
+
+
+def test_la_pagina_publica_usa_el_cuestionario_compartido(
+    client, db_session, doctor, paciente
+):
+    """El formulario público se arma con ficha_medica.js (mismas preguntas)."""
+    turno = _crear_turno(db_session, doctor, paciente)
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+
+    html = client.get(f"/anamnesis/{token}").text
+    assert 'id="an-campos"' in html
+    assert "/static/ficha_medica.js" in html
+    assert "/static/ficha_medica.css" in html
+    assert 'id="an-alergias"' not in html
+
+    js = client.get("/static/ficha_medica.js").text
+    assert "SECCIONES" in js
+    assert "padre_vive" in js
+    assert "diagnostico_presuntivo" in js
+    assert "soloPaciente" in js
+
+
+# ---------------------------------------------------------------------------
+# 7) Datos filiatorios: la ficha médica y el paciente comparten la información
+# ---------------------------------------------------------------------------
+
+
+def _filiatorios(**overrides):
+    """Filiatorios de ejemplo, como los manda el catálogo compartido."""
+    datos = {
+        "fecha_nacimiento": "1985-03-12",
+        "estado_civil": "  Casado/a ",
+        "nacionalidad": "Argentina",
+        "domicilio": "Av. Colón 123, Córdoba",
+        "profesion": "Docente",
+        "titular": "Juan Pérez",
+        "lugar_trabajo": "Escuela N.º 12",
+        "jerarquia": "Titular",
+    }
+    datos.update(overrides)
+    return datos
+
+
+def test_el_enlace_publico_guarda_los_filiatorios_en_el_paciente(
+    client, db_session, doctor, paciente
+):
+    """Los filiatorios no son columnas de la ficha: se sincronizan en Paciente."""
+    turno = _crear_turno(db_session, doctor, paciente)
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+
+    r = client.post(
+        f"{API}/anamnesis/{token}", json={**_payload_completo(), **_filiatorios()}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # Se devuelven por los dos caminos: el bloque propio y la ficha completa.
+    assert body["datos_filiatorios"]["domicilio"] == "Av. Colón 123, Córdoba"
+    assert body["antecedentes_salud"]["fecha_nacimiento"] == "1985-03-12"
+    assert body["antecedentes_salud"]["estado_civil"] == "Casado/a"
+
+    db_session.expire_all()
+    actualizado = db_session.get(Paciente, paciente.id)
+    assert actualizado.fecha_nacimiento.isoformat() == "1985-03-12"
+    assert actualizado.estado_civil == "Casado/a"  # normalizado
+    assert actualizado.nacionalidad == "Argentina"
+    assert actualizado.domicilio == "Av. Colón 123, Córdoba"
+    assert actualizado.profesion == "Docente"
+    assert actualizado.titular == "Juan Pérez"
+    assert actualizado.lugar_trabajo == "Escuela N.º 12"
+    assert actualizado.jerarquia == "Titular"
+
+    # Los filiatorios no se guardaron como columnas de la declaración.
+    antecedentes = db_session.execute(select(AntecedentesSalud)).scalars().one()
+    assert not hasattr(antecedentes, "domicilio")
+    assert not hasattr(antecedentes, "fecha_nacimiento")
+
+
+def test_reenviar_la_ficha_con_filiatorios_vacios_no_borra_los_del_paciente(
+    client, db_session, doctor, paciente
+):
+    """El enlace público no puede vaciar los datos administrativos."""
+    paciente.domicilio = "Calle Falsa 123"
+    paciente.fecha_nacimiento = date(1980, 1, 2)
+    db_session.commit()
+
+    turno = _crear_turno(db_session, doctor, paciente)
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+    r = client.post(
+        f"{API}/anamnesis/{token}",
+        json={
+            **_payload_completo(),
+            **_filiatorios(
+                fecha_nacimiento="",
+                domicilio="   ",
+                estado_civil="",
+                profesion="",
+                titular="",
+                lugar_trabajo="",
+                jerarquia="",
+                nacionalidad="",
+            ),
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    db_session.expire_all()
+    actualizado = db_session.get(Paciente, paciente.id)
+    assert actualizado.domicilio == "Calle Falsa 123"
+    assert actualizado.fecha_nacimiento == date(1980, 1, 2)
+    assert r.json()["datos_filiatorios"]["domicilio"] == "Calle Falsa 123"
+
+
+def test_el_panel_carga_los_filiatorios_y_los_expone_aunque_este_pendiente(
+    client, db_session, doctor, paciente
+):
+    """El PUT interno los sincroniza y el listado los manda para precargar."""
+    turno = _crear_turno(db_session, doctor, paciente)
+    pendiente = client.get(f"{API}/anamnesis/panel").json()[0]
+    assert pendiente["completado"] is False
+    assert pendiente["antecedentes_salud"] is None
+    assert pendiente["datos_filiatorios"]["domicilio"] is None
+
+    r = client.put(
+        f"{API}/anamnesis/panel/{turno.id}",
+        json={**_payload_completo(), **_filiatorios()},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["domicilio"] == "Av. Colón 123, Córdoba"
+
+    db_session.expire_all()
+    assert db_session.get(Paciente, paciente.id).domicilio == "Av. Colón 123, Córdoba"
+
+    completada = client.get(f"{API}/anamnesis/panel").json()[0]
+    assert completada["completado"] is True
+    assert completada["datos_filiatorios"]["domicilio"] == "Av. Colón 123, Córdoba"
+    assert completada["antecedentes_salud"]["estado_civil"] == "Casado/a"
+
+    # La lectura pública también viene precargada con los filiatorios.
+    token = firmar_token_anamnesis(turno.id, paciente.id)
+    publica = client.get(f"{API}/anamnesis/{token}").json()
+    assert publica["datos_filiatorios"]["titular"] == "Juan Pérez"
+    assert publica["antecedentes_salud"]["domicilio"] == "Av. Colón 123, Córdoba"
+
+    # La vista móvil (detalle de la historia) usa el mismo resumen: los
+    # filiatorios salen del paciente, no de la tabla de la ficha.
+    detalle = client.get(f"{API}/pacientes/{paciente.id}/historia-clinica").json()
+    assert detalle["antecedentes_salud"]["domicilio"] == "Av. Colón 123, Córdoba"
+    assert detalle["antecedentes_salud"]["estado_civil"] == "Casado/a"
+    assert detalle["antecedentes_salud"]["fecha_nacimiento"] == "1985-03-12"
+
+
+def test_el_cuestionario_compartido_incluye_los_filiatorios(client):
+    """El formulario público y el modal interno muestran la misma sección."""
+    js = client.get("/static/ficha_medica.js").text
+    assert 'id: "filiatorios"' in js
+    assert "fecha_nacimiento" in js
+    assert "calcularEdad" in js

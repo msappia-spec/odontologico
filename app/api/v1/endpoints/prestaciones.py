@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.prestacion import Prestacion
 from app.schemas.prestacion import (
+    ImportarPrestacionesPdfRead,
+    ImportarPrestacionesPdfRequest,
     PrestacionCreate,
     PrestacionRead,
     PrestacionUpdate,
@@ -67,6 +69,28 @@ def listar_prestaciones(
     return list(
         prestacion_service.listar_prestaciones(db, activas=activas, buscar=buscar)
     )
+
+
+@router.post(
+    "/importar-pdf",
+    response_model=ImportarPrestacionesPdfRead,
+    summary="Importar el catálogo desde el PDF de aranceles",
+    description=(
+        "Procesa el **PDF de aranceles del Colegio de Odontólogos** y crea o "
+        "actualiza las prácticas del catálogo por su código de nomenclador. El "
+        "PDF viaja en ``contenido_base64``. Cada código se compara sin puntos ni "
+        "mayúsculas (``11.02`` y ``1102`` son la misma práctica), así que volver "
+        "a importar el mismo PDF no duplica filas: las que ya coinciden vuelven "
+        "como ``SIN_CAMBIOS``. Las prácticas sin honorario se crean con valor "
+        "``0`` (o conservan el que tenían) y se informan en ``sin_precio``. Con "
+        "``simular=true`` no escribe nada y sirve de vista previa. Responde "
+        "**422** si el archivo no es un PDF legible o no trae prácticas."
+    ),
+)
+def importar_prestaciones_pdf(
+    payload: ImportarPrestacionesPdfRequest, db: Session = Depends(get_db)
+) -> ImportarPrestacionesPdfRead:
+    return prestacion_service.importar_prestaciones_pdf(db, payload)
 
 
 @router.get(

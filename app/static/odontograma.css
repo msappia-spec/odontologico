@@ -1,0 +1,433 @@
+/* ==========================================================================
+   Odontograma · estilos (Módulo 4)
+   --------------------------------------------------------------------------
+   Colores de la Historia Clínica General:
+   rojo = prestación existente, azul = prestación requerida, X = ausente o a
+   extraer. Se carga en el Panel Principal y en la vista móvil.
+   ========================================================================== */
+
+.odo-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1rem;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.odo-backdrop.hide {
+  display: none;
+}
+
+.odo-card {
+  width: min(940px, 100%);
+  margin: auto;
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 30px 70px -30px rgba(15, 23, 42, 0.6);
+  padding: 1.1rem 1.2rem 1.2rem;
+  box-sizing: border-box;
+}
+
+.odo-cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.odo-eyebrow {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0d8578;
+}
+
+.odo-titulo {
+  margin: 0.1rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.odo-sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.odo-cerrar {
+  border: 0;
+  background: #f1f5f9;
+  color: #334155;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.odo-cerrar:hover {
+  background: #e2e8f0;
+}
+
+.odo-paleta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.85rem 0 0.3rem;
+}
+
+.odo-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+}
+
+.odo-color:hover {
+  border-color: #94a3b8;
+}
+
+.odo-color-activo {
+  border-color: #0d8578;
+  box-shadow: 0 0 0 2px #a9e9df inset;
+  color: #0f172a;
+}
+
+.odo-punto {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  display: inline-block;
+  text-align: center;
+  line-height: 0.85rem;
+  font-size: 0.65rem;
+}
+
+.odo-punto.odo-existente {
+  background: #dc2626;
+}
+
+.odo-punto.odo-requerido {
+  background: #2563eb;
+}
+
+.odo-punto-x {
+  color: #0f172a;
+  font-weight: 900;
+}
+
+.odo-punto-blanco {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+}
+
+.odo-ayuda {
+  margin: 0.2rem 0 0.7rem;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.odo-arcadas {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.odo-arcada {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+  padding: 0.45rem 0.55rem 0.6rem;
+}
+
+.odo-arcada-titulo {
+  margin: 0 0 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.odo-fila {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+}
+
+.odo-separador {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 0.3rem 0;
+}
+
+.odo-diente {
+  position: relative;
+  flex: none;
+  width: 2.1rem;
+  height: 2.7rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.12s ease;
+}
+
+.odo-diente:hover {
+  transform: translateY(-1px);
+  border-color: #94a3b8;
+}
+
+.odo-diente:focus-visible {
+  outline: 2px solid #0d8578;
+  outline-offset: 1px;
+}
+
+.odo-diente-activo {
+  outline: 3px solid #0d8578;
+  outline-offset: 1px;
+}
+
+.odo-diente.odo-existente {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+.odo-diente.odo-requerido {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.odo-diente.odo-ausente {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #94a3b8;
+}
+
+.odo-marca {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: #ef4444;
+}
+
+.odo-diente.odo-ausente .odo-marca {
+  display: flex;
+}
+
+.odo-diente.odo-ausente .odo-numero {
+  opacity: 0.35;
+}
+
+.odo-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+@media (min-width: 640px) {
+  .odo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.odo-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.odo-campo-ancho {
+  margin-top: 0.55rem;
+}
+
+.odo-control {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: #0f172a;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.odo-control:focus {
+  outline: 2px solid #17a394;
+  outline-offset: 1px;
+  border-color: #17a394;
+}
+
+.odo-totales {
+  margin: 0.7rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.odo-error {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.6rem;
+}
+
+.odo-error.hide {
+  display: none;
+}
+
+.odo-acciones {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+  margin-top: 0.9rem;
+}
+
+.odo-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.odo-btn:hover {
+  background: #f8fafc;
+}
+
+.odo-btn-primario {
+  background: #0d8578;
+  border-color: #0d8578;
+  color: #fff;
+}
+
+.odo-btn-primario:hover {
+  background: #106a61;
+}
+
+.odo-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ------------------ Botón «Odontograma» de la ficha de salud -------------- */
+/* Lo insertan las tarjetas de app.js y medico.js junto al badge de alerta. */
+.salud-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.salud-btn-odonto,
+.salud-btn-pdf {
+  border: 1px solid #0d8578;
+  background: #fff;
+  color: #106a61;
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.salud-btn-odonto:hover,
+.salud-btn-pdf:hover {
+  background: #eefbf8;
+}
+
+.odo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 0.7rem;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.78rem;
+  box-shadow: 0 18px 40px -20px rgba(15, 23, 42, 0.9);
+  max-width: min(90vw, 26rem);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.odo-toast strong {
+  font-size: 0.8rem;
+}
+
+.odo-toast-salir {
+  opacity: 0;
+  transform: translate(-50%, 0.6rem);
+}
+
+body.odo-con-modal {
+  overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .odo-diente {
+    width: 1.75rem;
+    height: 2.3rem;
+    font-size: 0.6rem;
+  }
+
+  .odo-card {
+    padding: 0.9rem;
+  }
+
+  .odo-acciones {
+    flex-direction: column-reverse;
+  }
+
+  .odo-btn {
+    width: 100%;
+  }
+}
