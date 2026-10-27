@@ -243,7 +243,7 @@ def test_con_credenciales_el_envio_es_un_post_real_a_la_graph_api(monkeypatch):
 
     assert wamid == "wamid.REAL.1"
     assert len(llamadas) == 1
-    assert llamadas[0]["url"] == "https://graph.facebook.com/v21.0/1234567890/messages"
+    assert llamadas[0]["url"] == "https://graph.facebook.com/v26.0/1234567890/messages"
     assert llamadas[0]["headers"]["Authorization"] == "Bearer token-de-prueba"
     assert llamadas[0]["json"]["to"] == TELEFONO
     assert llamadas[0]["json"]["text"]["body"] == "Hola"

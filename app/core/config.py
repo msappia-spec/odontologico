@@ -21,7 +21,9 @@ SQLITE_SERVERLESS_URL = "sqlite:////tmp/odontologico.db"
 #: Base de la Graph API de Meta (WhatsApp Cloud API). Se usa cuando no se define
 #: ``WHATSAPP_API_URL``: así, con sólo el token y el id del número, el envío real
 #: queda habilitado sin tener que pegar la URL de la API a mano.
-URL_WHATSAPP_POR_DEFECTO = "https://graph.facebook.com/v21.0"
+# La versión debe mantenerse alineada con la configurada en Meta Developers.
+# v21 dejó de estar disponible; el proyecto de producción usa v26.
+URL_WHATSAPP_POR_DEFECTO = "https://graph.facebook.com/v26.0"
 
 
 class Settings(BaseSettings):

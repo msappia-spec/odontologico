@@ -2536,7 +2536,7 @@ Para acceder desde el celular en la misma Wi-Fi, usar la IP de la PC y
 | `DATABASE_URL_DESTINO` | vacío | Destino opcional de `migrar_sqlite_a_postgres`. |
 | `CORS_ORIGINS` | `["*"]` | Orígenes permitidos; acepta lista JSON. |
 | `CORS_ALLOW_CREDENTIALS` | `false` | Cookies/credenciales CORS. |
-| `WHATSAPP_API_URL` | `https://graph.facebook.com/v21.0` | Base de la Graph API. |
+| `WHATSAPP_API_URL` | `https://graph.facebook.com/v26.0` | Base de la Graph API. |
 | `WHATSAPP_PHONE_NUMBER_ID` | vacío | Phone Number ID de Meta (sólo dígitos). |
 | `WHATSAPP_TOKEN` | vacío | Alias corto del access token. |
 | `WHATSAPP_ACCESS_TOKEN` | vacío | Access token; tiene prioridad sobre `WHATSAPP_TOKEN`. |
