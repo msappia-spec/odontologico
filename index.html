@@ -1,0 +1,335 @@
+!DOCTYPE html
+html lang=es
+head
+    meta charset=UTF-8
+    meta name=viewport content=width=device-width, initial-scale=1.0
+    titleFranciosi Odontología  Alta Córdobatitle
+    !-- Fuentes elegantes de Google Fonts --
+    link rel=preconnect href=httpsgoogleapis.com
+    link rel=preconnect href=httpsgstatic.com crossorigin
+    link href=httpsgoogleapis.comcss2family=Montserratwght@300;400;500;600&family=Playfair+Displayital,wght@0,400;0,500;1,400&display=swap rel=stylesheet
+    
+    style
+        root {
+            --color-principal #d4a396;  Tono rosa nude del logo 
+            --color-oscuro #4a4a4a;
+            --color-claro #fcf9f8;
+            --fuente-titulos 'Playfair Display', serif;
+            --fuente-texto 'Montserrat', sans-serif;
+        }
+
+         {
+            margin 0;
+            padding 0;
+            box-sizing border-box;
+        }
+
+        body {
+            font-family var(--fuente-texto);
+            color var(--color-oscuro);
+            background-color #ffffff;
+            line-height 1.6;
+        }
+
+         Navbar  Encabezado 
+        header {
+            display flex;
+            justify-content space-between;
+            align-items center;
+            padding 15px 5%;
+            background-color #ffffff;
+            box-shadow 0 2px 10px rgba(0,0,0,0.03);
+            position sticky;
+            top 0;
+            z-index 100;
+        }
+
+        .btn-acceder {
+            background-color var(--color-principal);
+            color #ffffff;
+            padding 10px 24px;
+            border-radius 50px;
+            text-decoration none;
+            font-weight 500;
+            font-size 0.9rem;
+            letter-spacing 1px;
+            transition all 0.3s ease;
+            box-shadow 0 4px 15px rgba(212, 163, 150, 0.3);
+            order 1;  Forzar orden a la izquierda 
+        }
+
+        .btn-accederhover {
+            background-color #c49285;
+            transform translateY(-2px);
+        }
+
+        .logo-container {
+            display flex;
+            align-items center;
+            order 2;  Forzar orden a la derecha 
+        }
+
+        .logo-img {
+            height 65px;
+            width auto;
+        }
+
+         Sección Principal (Hero) 
+        .hero {
+            padding 80px 5% 60px 5%;
+            text-align center;
+            background linear-gradient(180deg, var(--color-claro) 0%, #ffffff 100%);
+        }
+
+        .hero h1 {
+            font-family var(--fuente-titulos);
+            font-size 2.8rem;
+            color var(--color-oscuro);
+            margin-bottom 20px;
+            font-weight 400;
+        }
+
+        .hero p {
+            font-size 1.1rem;
+            max-width 600px;
+            margin 0 auto 40px auto;
+            color #777;
+            font-weight 300;
+        }
+
+         Sección Especialidades 
+        .seccion {
+            padding 60px 5%;
+            max-width 1200px;
+            margin 0 auto;
+        }
+
+        .titulo-seccion {
+            font-family var(--fuente-titulos);
+            text-align center;
+            font-size 2.2rem;
+            margin-bottom 40px;
+            position relative;
+            padding-bottom 15px;
+        }
+
+        .titulo-seccionafter {
+            content '';
+            position absolute;
+            bottom 0;
+            left 50%;
+            transform translateX(-50%);
+            width 50px;
+            height 2px;
+            background-color var(--color-principal);
+        }
+
+        .grid-especialidades {
+            display grid;
+            grid-template-columns repeat(auto-fit, minmax(280px, 1fr));
+            gap 30px;
+        }
+
+        .tarjeta {
+            background-color var(--color-claro);
+            padding 40px 30px;
+            border-radius 12px;
+            text-align center;
+            transition transform 0.3s ease;
+        }
+
+        .tarjetahover {
+            transform translateY(-5px);
+        }
+
+        .tarjeta-icono {
+            font-size 2.5rem;
+            color var(--color-principal);
+            margin-bottom 15px;
+        }
+
+        .tarjeta h3 {
+            font-family var(--fuente-titulos);
+            font-size 1.4rem;
+            margin-bottom 12px;
+            font-weight 500;
+        }
+
+        .tarjeta p {
+            font-size 0.95rem;
+            color #666;
+            font-weight 300;
+        }
+
+         Sección Staff Médico 
+        .staff-bg {
+            background-color var(--color-claro);
+            padding 80px 5%;
+        }
+
+        .grid-staff {
+            display flex;
+            flex-wrap wrap;
+            justify-content center;
+            gap 40px;
+            max-width 1200px;
+            margin 0 auto;
+        }
+
+        .medico-item {
+            background #ffffff;
+            padding 30px;
+            border-radius 8px;
+            min-width 280px;
+            text-align center;
+            box-shadow 0 4px 20px rgba(0,0,0,0.02);
+        }
+
+        .medico-avatar {
+            width 80px;
+            height 80px;
+            background-color #f3ece9;
+            border-radius 50%;
+            display flex;
+            align-items center;
+            justify-content center;
+            margin 0 auto 20px auto;
+            color var(--color-principal);
+            font-size 1.8rem;
+            font-family var(--fuente-titulos);
+        }
+
+        .medico-item h3 {
+            font-size 1.15rem;
+            font-weight 500;
+            margin-bottom 5px;
+        }
+
+        .medico-item p {
+            font-size 0.9rem;
+            color var(--color-principal);
+            text-transform uppercase;
+            letter-spacing 1px;
+            font-weight 500;
+        }
+
+         Sección Contacto e Información 
+        .contacto-container {
+            display grid;
+            grid-template-columns repeat(auto-fit, minmax(300px, 1fr));
+            gap 50px;
+            align-items center;
+        }
+
+        .info-bloque {
+            margin-bottom 25px;
+        }
+
+        .info-bloque h4 {
+            font-weight 500;
+            margin-bottom 5px;
+            color var(--color-oscuro);
+        }
+
+        .info-bloque p {
+            color #666;
+            font-weight 300;
+        }
+
+         Footer 
+        footer {
+            background-color #222;
+            color #999;
+            text-align center;
+            padding 30px;
+            font-size 0.85rem;
+            border-top 1px solid #333;
+        }
+
+         Responsivo 
+        @media (max-width 768px) {
+            .hero h1 { font-size 2rem; }
+            header { padding 12px 5%; }
+            .logo-img { height 50px; }
+            .btn-acceder { padding 8px 18px; font-size 0.8rem; }
+        }
+    style
+head
+body
+
+    !-- Encabezado con Botón de Acceso a la Izquierda y Logo a la Derecha --
+    header
+        a href=httpsvercel.app class=btn-accederACCESOa
+        div class=logo-container
+            img src=logo.png alt=Franciosi Odontología class=logo-img
+        div
+    header
+
+    !-- Bienvenida --
+    section class=hero
+        h1Tu sonrisa en manos de especialistash1
+        pTres consultorios completamente equipados en el corazón de Alta Córdoba dedicados a brindar una atención integral y confortable.p
+        a href=httpsvercel.app class=btn-acceder style=display inline-block; margin-top 10px;SOLICITAR TURNO ONLINEa
+    section
+
+    !-- Especialidades --
+    section class=seccion
+        h2 class=titulo-seccionNuestras Especialidadesh2
+        div class=grid-especialidades
+            
+            div class=tarjeta
+                div class=tarjeta-icono✦div
+                h3Ortodonciah3
+                pTratamientos especializados y adaptados tanto para niños en crecimiento como para adultos.p
+            div
+
+            div class=tarjeta
+                div class=tarjeta-icono✦div
+                h3Implantesh3
+                pRehabilitación oral avanzada con tecnología moderna para recuperar la funcionalidad y estética.p
+            div
+
+            div class=tarjeta
+                div class=tarjeta-icono✦div
+                h3Odontología Generalh3
+                pCuidado integral preventivo, restauraciones y mantenimiento de la salud bucal de toda la familia.p
+            div
+
+        div
+    section
+
+    !-- Staff Médico --
+    section class=staff-bg
+        h2 class=titulo-seccionNuestro Equipo Médicoh2
+        div class=grid-staff
+            
+            div class=medico-item
+                div class=medico-avatarCFdiv
+                h3Dra. Cecilia Mariana Franciosih3
+                pOdontóloga Especialistap
+            div
+
+            div class=medico-item
+                div class=medico-avatarFFdiv
+                h3Dra. Fabiana Franciosih3
+                pOdontóloga Especialistap
+            div
+
+            div class=medico-item
+                div class=medico-avatarFUdiv
+                h3Dra. Florencia Uboldih3
+                pOdontóloga Especialistap
+            div
+
+        div
+    section
+
+    !-- Ubicación y Datos --
+    section class=seccion
+        div class=contacto-container
+            div
+                h2 class=titulo-seccion style=text-align left; padding-bottom 15px; margin-bottom 30px; max-width fit-content;Ubicación del Consultorioh2
+                
+                div class=info-bloque
+                    h4Dirección Principalh4
+                    pJUAN DEL CAMPILLO 747, Planta Baja, Dpto Bp
