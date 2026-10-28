@@ -183,10 +183,17 @@ def _enviar_http_whatsapp(payload: dict) -> str:
         codigo = error_meta.get("code", "sin código")
         subcodigo = error_meta.get("error_subcode")
         mensaje = error_meta.get("message") or respuesta_error.text or str(exc)
+        tipo_error = error_meta.get("type")
+        detalle_error = (error_meta.get("error_data") or {}).get("details")
+        fbtrace_id = error_meta.get("fbtrace_id")
         detalle_subcodigo = f", subcode={subcodigo}" if subcodigo is not None else ""
+        detalle_tipo = f", type={tipo_error}" if tipo_error else ""
+        detalle_meta = f", details={detalle_error}" if detalle_error else ""
+        detalle_traza = f", fbtrace_id={fbtrace_id}" if fbtrace_id else ""
         raise WhatsAppEnvioError(
             f"Meta rechazó el mensaje (HTTP {respuesta_error.status_code}, "
-            f"code={codigo}{detalle_subcodigo}): {mensaje}"
+            f"code={codigo}{detalle_subcodigo}{detalle_tipo}{detalle_meta}"
+            f"{detalle_traza}): {mensaje}"
         ) from exc
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         raise WhatsAppEnvioError(f"Fallo el envío a WhatsApp: {exc}") from exc
