@@ -1,341 +1,286 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Franciosi Odontología | Alta Córdoba</title>
-    <!-- Fuentes elegantes de Google Fonts -->
-    <link rel="preconnect" href="https://googleapis.com">
-    <link rel="preconnect" href="https://gstatic.com" crossorigin>
-    <link href="https://googleapis.com/css2?family=Montserrat:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
-    
-    <style>
-        :root {
-            --color-principal: #d4a396; /* Tono rosa nude */
-            --color-oscuro: #4a4a4a;
-            --color-claro: #fcf9f8;
-            --fuente-titulos: 'Playfair Display', serif;
-            --fuente-texto: 'Montserrat', sans-serif;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: var(--fuente-texto);
-            color: var(--color-oscuro);
-            background-color: #ffffff;
-            line-height: 1.6;
-        }
-
-        /* Navbar / Encabezado */
-        header {
-            display: grid;
-            grid-template-columns: 1fr auto 1fr;
-            align-items: center;
-            padding: 15px 5%;
-            background-color: #ffffff;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .contenedor-btn {
-            justify-self: start;
-        }
-
-        .btn-acceder {
-            background-color: var(--color-principal);
-            color: #ffffff;
-            padding: 10px 24px;
-            border-radius: 50px;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.9rem;
-            letter-spacing: 1px;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(212, 163, 150, 0.3);
-        }
-
-        .btn-acceder:hover {
-            background-color: #c49285;
-            transform: translateY(-2px);
-        }
-
-        /* Bloque central: Nombre Comercial + Logo */
-        .bloque-marca-centro {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 8px;
-            text-align: center;
-        }
-
-        /* Logo configurado exactamente a 2.5 x 2.5 cm */
-        .logo-img {
-            width: 2.5cm;
-            height: 2.5cm;
-            object-fit: contain;
-        }
-
-        .logo-texto-centro {
-            font-family: var(--fuente-titulos);
-            font-size: 1.9rem;
-            color: var(--color-principal);
-            font-weight: 500;
-            letter-spacing: 1px;
-            white-space: nowrap;
-        }
-
-        /* Sección Principal (Hero) */
-        .hero {
-            padding: 100px 5% 80px 5%;
-            text-align: center;
-            background: linear-gradient(180deg, var(--color-claro) 0%, #ffffff 100%);
-        }
-
-        .hero h1 {
-            font-family: var(--fuente-titulos);
-            font-size: 2.8rem;
-            color: var(--color-oscuro);
-            margin-bottom: 20px;
-            font-weight: 400;
-        }
-
-        .hero p {
-            font-size: 1.1rem;
-            max-width: 600px;
-            margin: 0 auto;
-            color: #777;
-            font-weight: 300;
-        }
-
-        /* Sección Especialidades */
-        .seccion {
-            padding: 60px 5%;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .titulo-seccion {
-            font-family: var(--fuente-titulos);
-            text-align: center;
-            font-size: 2.2rem;
-            margin-bottom: 40px;
-            position: relative;
-            padding-bottom: 15px;
-        }
-
-        .titulo-seccion::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 50px;
-            height: 2px;
-            background-color: var(--color-principal);
-        }
-
-        .grid-especialidades {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 30px;
-        }
-
-        .tarjeta {
-            background-color: var(--color-claro);
-            padding: 40px 30px;
-            border-radius: 12px;
-            text-align: center;
-            transition: transform 0.3s ease;
-        }
-
-        .tarjeta:hover {
-            transform: translateY(-5px);
-        }
-
-        .tarjeta-icono {
-            font-size: 2.5rem;
-            color: var(--color-principal);
-            margin-bottom: 15px;
-        }
-
-        .tarjeta h3 {
-            font-family: var(--fuente-titulos);
-            font-size: 1.4rem;
-            margin-bottom: 12px;
-            font-weight: 500;
-        }
-
-        .tarjeta p {
-            font-size: 0.95rem;
-            color: #666;
-            font-weight: 300;
-        }
-
-        /* Sección Staff Médico */
-        .staff-bg {
-            background-color: var(--color-claro);
-            padding: 80px 5%;
-        }
-
-        .grid-staff {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 40px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .medico-item {
-            background: #ffffff;
-            padding: 30px;
-            border-radius: 8px;
-            min-width: 280px;
-            text-align: center;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.02);
-        }
-
-        .medico-avatar {
-            width: 80px;
-            height: 80px;
-            background-color: #f3ece9;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 20px auto;
-            color: var(--color-principal);
-            font-size: 1.8rem;
-            font-family: var(--fuente-titulos);
-        }
-
-        .medico-item h3 {
-            font-size: 1.15rem;
-            font-weight: 500;
-            margin-bottom: 5px;
-        }
-
-        .medico-item p {
-            font-size: 0.9rem;
-            color: var(--color-principal);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 500;
-        }
-
-        /* Sección Contacto e Información */
-        .contacto-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 50px;
-            align-items: center;
-        }
-
-        .info-bloque {
-            margin-bottom: 25px;
-        }
-
-        .info-bloque h4 {
-            font-weight: 500;
-            margin-bottom: 5px;
-            color: var(--color-oscuro);
-        }
-
-        .info-bloque p {
-            color: #666;
-            font-weight: 300;
-        }
-
-        /* Footer */
-        footer {
-            background-color: #222;
-            color: #999;
-            text-align: center;
-            padding: 30px;
-            font-size: 0.85rem;
-            border-top: 1px solid #333;
-        }
-
-        /* Responsivo */
-        @media (max-width: 768px) {
-            header { 
-                grid-template-columns: 1fr;
-                gap: 15px;
-                padding: 15px 5%;
-            }
-            .contenedor-btn { justify-self: center; order: 2; }
-            .bloque-marca-centro { justify-self: center; order: 1; }
-            .logo-texto-centro { font-size: 1.5rem; }
-            .logo-img { width: 2cm; height: 2cm; }
-            .hero h1 { font-size: 2rem; }
-            .hero { padding: 60px 5% 40px 5%; }
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f8f4f2">
+  <meta name="description" content="Franciosi Odontología. Ortodoncia para niños y adultos, implantes y odontología general en Alta Córdoba.">
+  <title>Franciosi Odontología | Alta Córdoba</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --rose: #c6a09d;
+      --rose-dark: #9d7775;
+      --ink: #302b2b;
+      --muted: #716767;
+      --cream: #faf7f5;
+      --white: #fff;
+      --line: rgba(157,119,117,.22);
+      --shadow: 0 22px 65px rgba(78,52,51,.10);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); background: var(--cream); font-family: "DM Sans", sans-serif; }
+    a { color: inherit; text-decoration: none; }
+    .topline { height: 5px; background: linear-gradient(90deg, #b88f8c, #e6ceca, #b88f8c); }
+    header { position: relative; z-index: 2; }
+    .nav { width: min(1160px, calc(100% - 48px)); margin: auto; min-height: 96px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand img { width: 65px; height: 65px; object-fit: contain; border-radius: 50%; }
+    .brand-label { font: 700 14px "Manrope", sans-serif; letter-spacing: .15em; text-transform: uppercase; }
+    .brand-label span { display: block; margin-top: 4px; font-size: 10px; font-weight: 500; letter-spacing: .24em; color: var(--rose-dark); }
+    .nav-links { display: flex; align-items: center; gap: 30px; color: #5e5555; font-size: 13px; }
+    .nav-links a:not(.nav-cta):hover { color: var(--rose-dark); }
+    .nav-cta, .button { display: inline-flex; justify-content: center; align-items: center; gap: 10px; border-radius: 999px; padding: 14px 23px; background: var(--ink); color: white; font-size: 13px; font-weight: 600; transition: transform .2s, background .2s, box-shadow .2s; }
+    .nav-cta:hover, .button:hover { background: var(--rose-dark); transform: translateY(-2px); box-shadow: 0 12px 25px rgba(157,119,117,.22); }
+    .hero { overflow: hidden; position: relative; padding: 54px 24px 76px; }
+    .hero::before { content:""; position:absolute; width:500px; height:500px; border:1px solid rgba(198,160,157,.28); border-radius:50%; top:-225px; right:-90px; }
+    .hero::after { content:""; position:absolute; width:330px; height:330px; border:1px solid rgba(198,160,157,.22); border-radius:50%; top:-140px; right:-5px; }
+    .hero-inner { width: min(1160px, 100%); margin: auto; display: grid; grid-template-columns: 1.08fr .92fr; align-items: center; gap: 60px; position: relative; z-index: 1; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: .19em; color: var(--rose-dark); font-size: 11px; font-weight: 700; }
+    .eyebrow::before { content:""; width: 30px; height: 1px; background: var(--rose); }
+    h1, h2, h3 { font-family: "Manrope", sans-serif; }
+    h1 { font-size: clamp(42px, 5.2vw, 70px); line-height: 1.08; letter-spacing: -.055em; margin: 23px 0 22px; font-weight: 600; }
+    h1 em { color: var(--rose-dark); font-style: normal; }
+    .hero-copy { color: var(--muted); max-width: 510px; font-size: 16px; line-height: 1.85; margin: 0 0 30px; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    .button.secondary:hover { color: white; border-color: var(--rose-dark); }
+    .hero-note { display:flex; align-items:center; gap:12px; margin-top: 32px; color: #776c6b; font-size: 12px; }
+    .note-icon { width: 34px; height: 34px; display:grid; place-items:center; border:1px solid var(--line); border-radius:50%; color:var(--rose-dark); }
+    .hero-art { min-height: 475px; position: relative; display: flex; align-items: center; justify-content: center; }
+    .art-backdrop { position:absolute; width: min(100%, 440px); height: 440px; border-radius: 48% 48% 42% 42%; background: linear-gradient(145deg, #f0e2df, #e4cfcb); transform: rotate(5deg); }
+    .art-card { position: relative; width: min(88%, 370px); min-height: 410px; padding: 35px 27px; background: rgba(255,255,255,.84); border: 1px solid rgba(255,255,255,.9); border-radius: 180px 180px 28px 28px; box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .art-card img { width: 220px; max-width: 100%; mix-blend-mode: multiply; }
+    .art-divider { width: 45px; height: 1px; background: var(--rose); margin: 15px 0; }
+    .art-card p { margin: 0; color: var(--muted); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; }
+    .floating-tag { position:absolute; right: 0; bottom: 40px; background: white; padding: 15px 19px; border-radius: 14px; box-shadow: var(--shadow); font-size: 12px; line-height: 1.6; }
+    .floating-tag strong { display:block; font-family:"Manrope",sans-serif; font-size:14px; }
+    .floating-tag span { color:var(--muted); }
+    .quick-info { background: #fff; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .quick-inner { width:min(1160px, calc(100% - 48px)); margin:auto; display:grid; grid-template-columns: repeat(3,1fr); }
+    .quick-item { padding: 25px 28px; display:flex; gap:15px; align-items:center; }
+    .quick-item + .quick-item { border-left:1px solid var(--line); }
+    .quick-icon { flex:0 0 42px; width:42px; height:42px; display:grid; place-items:center; background:var(--cream); border-radius:50%; color:var(--rose-dark); }
+    .quick-item strong { display:block; font:600 13px "Manrope",sans-serif; margin-bottom:4px; }
+    .quick-item span { color:var(--muted); font-size:12px; line-height:1.5; }
+    section.content { padding: 95px 24px; }
+    .section-inner { width:min(1100px,100%); margin:auto; }
+    .section-heading { text-align:center; max-width:660px; margin:0 auto 48px; }
+    .section-heading h2 { font-size: clamp(30px, 4vw, 44px); letter-spacing:-.045em; font-weight:600; margin:15px 0; }
+    .section-heading p { color:var(--muted); line-height:1.8; font-size:14px; margin:0; }
+    .services { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+    .service { background:#fff; border:1px solid rgba(198,160,157,.22); border-radius:20px; padding:30px 27px; min-height:225px; transition:transform .25s, box-shadow .25s; }
+    .service:hover { transform:translateY(-5px); box-shadow:var(--shadow); }
+    .service-number { color:var(--rose-dark); font-size:11px; letter-spacing:.16em; font-weight:700; }
+    .service-icon { width:52px; height:52px; margin:22px 0 18px; display:grid; place-items:center; background:#f8efed; border-radius:16px; color:var(--rose-dark); }
+    .service h3 { font-size:19px; margin:0 0 10px; letter-spacing:-.025em; }
+    .service p { color:var(--muted); font-size:13px; line-height:1.75; margin:0; }
+    .team-section { background:#f0e5e2; }
+    .team-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+    .doctor { padding:30px 24px; text-align:center; background:rgba(255,255,255,.72); border:1px solid rgba(255,255,255,.9); border-radius:20px; }
+    .doctor-mark { width:65px; height:65px; margin:0 auto 18px; border-radius:50%; display:grid; place-items:center; background:#fff; color:var(--rose-dark); font:500 21px "Manrope",sans-serif; border:1px solid var(--line); }
+    .doctor h3 { margin:0 0 8px; font-size:17px; }
+    .doctor p { margin:0; font-size:12px; color:var(--muted); }
+    .contact-grid { display:grid; grid-template-columns:.9fr 1.1fr; gap:25px; align-items:stretch; }
+    .contact-copy { padding:35px 10px 35px 0; }
+    .contact-copy h2 { font-size:clamp(30px,4vw,43px); line-height:1.15; letter-spacing:-.045em; margin:17px 0; }
+    .contact-copy > p { color:var(--muted); line-height:1.8; font-size:14px; }
+    .contact-card { background:#fff; border:1px solid var(--line); border-radius:22px; padding:30px; box-shadow:0 15px 45px rgba(78,52,51,.05); }
+    .contact-line { display:flex; gap:15px; align-items:flex-start; padding:15px 0; }
+    .contact-line + .contact-line { border-top:1px solid #f0e7e5; }
+    .contact-line .quick-icon { width:40px; height:40px; flex-basis:40px; }
+    .contact-line strong { display:block; font-size:13px; margin:2px 0 6px; }
+    .contact-line p { color:var(--muted); font-size:13px; line-height:1.65; margin:0; }
+    .contact-card .button { width:100%; margin-top:15px; }
+    footer { background:#302b2b; color:#fff; padding:28px 24px; }
+    .footer-inner { width:min(1160px,100%); margin:auto; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    .footer-brand { display:flex; align-items:center; gap:12px; font:600 12px "Manrope",sans-serif; letter-spacing:.13em; text-transform:uppercase; }
+    .footer-brand img { width:42px; height:42px; object-fit:contain; background:#fff; border-radius:50%; }
+    footer p { margin:0; font-size:11px; color:#cfc2c1; }
+    @media (max-width: 850px) {
+      .nav { width:calc(100% - 32px); min-height:80px; }
+      .nav-links { gap:15px; }
+      .nav-links a:not(.nav-cta) { display:none; }
+      .hero { padding-top:35px; }
+      .hero-inner { grid-template-columns:1fr; gap:20px; }
+      .hero-copy { max-width:620px; }
+      .hero-art { min-height:420px; }
+      .art-backdrop { height:380px; width:380px; max-width:90%; }
+      .art-card { min-height:350px; }
+      .art-card img { width:185px; }
+      .floating-tag { right:5%; bottom:18px; }
+      .quick-inner { width:100%; }
+      .quick-item { padding:20px 14px; gap:10px; }
+      .quick-icon { width:36px; height:36px; flex-basis:36px; }
+      .services, .team-grid { grid-template-columns:1fr; }
+      .service { min-height:0; }
+      section.content { padding:70px 20px; }
+      .contact-grid { grid-template-columns:1fr; }
+      .contact-copy { padding:0; }
+    }
+    @media (max-width: 560px) {
+      .brand img { width:50px; height:50px; }
+      .brand-label { font-size:12px; }
+      .nav-cta { padding:12px 15px; font-size:12px; }
+      .hero { padding-left:20px; padding-right:20px; }
+      h1 { font-size:44px; }
+      .hero-copy { font-size:14px; }
+      .hero-art { min-height:355px; }
+      .art-backdrop { height:310px; width:310px; }
+      .art-card { width:82%; min-height:300px; padding:25px 15px; }
+      .art-card img { width:150px; }
+      .art-card p { font-size:10px; }
+      .floating-tag { bottom:0; right:0; padding:12px 14px; }
+      .quick-inner { grid-template-columns:1fr; padding:8px 20px; }
+      .quick-item { padding:13px 0; }
+      .quick-item + .quick-item { border-left:0; border-top:1px solid var(--line); }
+      .quick-item span br { display:none; }
+      .section-heading { margin-bottom:32px; }
+      .contact-card { padding:22px; }
+      .footer-inner { flex-direction:column; text-align:center; }
+    }
+  </style>
 </head>
 <body>
+  <div class="topline"></div>
+  <header>
+    <nav class="nav" aria-label="Navegación principal">
+      <a class="brand" href="#inicio" aria-label="Franciosi Odontología, inicio">
+        <img src="data:image/png;base64,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" alt="Logo Franciosi Odontología">
+        <div class="brand-label">Franciosi<span>Odontología</span></div>
+      </a>
+      <div class="nav-links">
+        <a href="#servicios">Especialidades</a>
+        <a href="#equipo">Nuestro equipo</a>
+        <a href="#contacto">Ubicación</a>
+        <a class="nav-cta" href="https://msappia-spec.github.io/odontologico/" target="_blank" rel="noopener noreferrer">Acceso pacientes <span aria-hidden="true">↗</span></a>
+      </div>
+    </nav>
+  </header>
 
-    <!-- Encabezado con Botón a la Izquierda y Bloque de Marca al Centro (Logo + Nombre) -->
-    <header>
-        <div class="contenedor-btn">
-            <a href="https://vercel.app" class="btn-acceder">ACCESO</a>
+  <main>
+    <section class="hero" id="inicio">
+      <div class="hero-inner">
+        <div>
+          <div class="eyebrow">Cuidado dental con calidez</div>
+          <h1>Tu sonrisa,<br><em>en buenas manos.</em></h1>
+          <p class="hero-copy">En Franciosi Odontología combinamos experiencia, atención cercana y una mirada integral para cuidar la salud y la sonrisa de toda la familia.</p>
+          <div class="hero-actions">
+            <a class="button" href="#contacto">Conocé el consultorio <span aria-hidden="true">→</span></a>
+            <a class="button secondary" href="#servicios">Ver especialidades</a>
+          </div>
+          <div class="hero-note"><span class="note-icon" aria-hidden="true">✦</span><span>Atención para niños y adultos en Alta Córdoba.</span></div>
         </div>
-        <div class="bloque-marca-centro">
-            <img src="logo.png" alt="Logo Franciosi Odontología" class="logo-img">
-            <div class="logo-texto-centro">
-                Franciosi Odontología
-            </div>
+        <div class="hero-art" aria-label="Identidad visual de Franciosi Odontología">
+          <div class="art-backdrop"></div>
+          <div class="art-card">
+            <img src="data:image/png;base64,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" alt="Franciosi Odontología">
+            <div class="art-divider"></div>
+            <p>Una sonrisa saludable<br>empieza con confianza</p>
+          </div>
+          <div class="floating-tag"><strong>3 profesionales</strong><span>Un mismo compromiso<br>con tu salud bucal</span></div>
         </div>
-        <div></div> <!-- Espacio estructural derecho para equilibrar la grilla -->
-    </header>
-
-    <!-- Bienvenida -->
-    <section class="hero">
-        <h1>Tu sonrisa en manos de especialistas</h1>
-        <p>Tres consultorios completamente equipados en el corazón de Alta Córdoba dedicados a brindar una atención integral y confortable.</p>
+      </div>
     </section>
 
-    <!-- Especialidades -->
-    <section class="seccion">
-        <h2 class="titulo-seccion">Nuestras Especialidades</h2>
-        <div class="grid-especialidades">
-            
-            <div class="tarjeta">
-                <div class="tarjeta-icono">✦</div>
-                <h3>Ortodoncia</h3>
-                <p>Tratamientos especializados y adaptados tanto para niños en crecimiento como para adultos.</p>
-            </div>
-
-            <div class="tarjeta">
-                <div class="tarjeta-icono">✦</div>
-                <h3>Implantes</h3>
-                <p>Rehabilitación oral avanzada con tecnología moderna para recuperar la funcionalidad y estética.</p>
-            </div>
-
-            <div class="tarjeta">
-                <div class="tarjeta-icono">✦</div>
-                <h3>Odontología General</h3>
-                <p>Cuidado integral preventivo, restauraciones y mantenimiento de la salud bucal de toda la familia.</p>
-            </div>
-
+    <div class="quick-info">
+      <div class="quick-inner">
+        <div class="quick-item">
+          <div class="quick-icon" aria-hidden="true">⌁</div>
+          <div><strong>Ortodoncia</strong><span>Niños, adolescentes y adultos</span></div>
         </div>
+        <div class="quick-item">
+          <div class="quick-icon" aria-hidden="true">✧</div>
+          <div><strong>Implantes</strong><span>Soluciones para recuperar sonrisas</span></div>
+        </div>
+        <div class="quick-item">
+          <div class="quick-icon" aria-hidden="true">♡</div>
+          <div><strong>Odontología integral</strong><span>Cuidado para cada etapa de la vida</span></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="content" id="servicios">
+      <div class="section-inner">
+        <div class="section-heading">
+          <div class="eyebrow">Nuestros servicios</div>
+          <h2>Todo lo que tu sonrisa necesita</h2>
+          <p>Atención odontológica pensada para acompañarte con profesionalismo, dedicación y un trato humano.</p>
+        </div>
+        <div class="services">
+          <article class="service">
+            <div class="service-number">01 / ORTODONCIA</div>
+            <div class="service-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 8.5c2.2-2.2 4.5-2.2 8-2.2s5.8 0 8 2.2v5c-2.2 2.2-4.5 2.2-8 2.2s-5.8 0-8-2.2z"/><path d="M8 6.5v9M12 6.3v9.4M16 6.5v9"/></svg></div>
+            <h3>Ortodoncia</h3>
+            <p>Tratamientos para niños y adultos, orientados a mejorar la alineación dental, la mordida y la armonía de la sonrisa.</p>
+          </article>
+          <article class="service">
+            <div class="service-number">02 / IMPLANTES</div>
+            <div class="service-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3.5c-2.2 0-3.8 1.6-3.8 4.2 0 2.1 1.2 3.4 2.1 5.2.7 1.4.7 4.1 1.6 5.9.4.8 1.1.8 1.5-.1l1.1-3.1c.3-.8 1.7-.8 2 0l1.1 3.1c.4.9 1.1.9 1.5.1.9-1.8.9-4.5 1.6-5.9.9-1.8 2.1-3.1 2.1-5.2 0-2.6-1.6-4.2-3.8-4.2-1.5 0-2.5.7-3.5.7s-2-.7-3.5-.7z"/><path d="M9 7h6M9.5 10h5"/></svg></div>
+            <h3>Implantes</h3>
+            <p>Alternativas para reemplazar piezas dentales, recuperar funcionalidad y volver a sonreír con confianza.</p>
+          </article>
+          <article class="service">
+            <div class="service-number">03 / ODONTOLOGÍA GENERAL</div>
+            <div class="service-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 21s-7.5-4.6-7.5-11A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10C19.5 16.4 12 21 12 21z"/><path d="M8.5 12h7M12 8.5v7"/></svg></div>
+            <h3>Odontología general</h3>
+            <p>Prevención, controles y tratamientos para cuidar la salud bucal de manera integral en cada etapa de la vida.</p>
+          </article>
+        </div>
+      </div>
     </section>
 
-    <!-- Staff Médico -->
-    <section class="staff-bg">
-        <h2 class="titulo-seccion">Nuestro Equipo Médico</h2>
-        <div class="grid-staff">
-            
-            <div class="medico-item">
-                <div class="medico-avatar">CF</div>
-                <h3>Dra. Cecilia Mariana Franciosi</h3>
-                <p>Odontóloga Especialista</p>
-            </div>
+    <section class="content team-section" id="equipo">
+      <div class="section-inner">
+        <div class="section-heading">
+          <div class="eyebrow">Nuestro equipo</div>
+          <h2>Tres profesionales, una atención cercana</h2>
+          <p>Te acompañamos con dedicación y una atención personalizada para que te sientas en confianza desde la primera visita.</p>
+        </div>
+        <div class="team-grid">
+          <article class="doctor"><div class="doctor-mark">CF</div><h3>Cecilia Mariana Franciosi</h3><p>Odontología · Ortodoncia</p></article>
+          <article class="doctor"><div class="doctor-mark">FF</div><h3>Fabiana Franciosi</h3><p>Odontología · Ortodoncia</p></article>
+          <article class="doctor"><div class="doctor-mark">FU</div><h3>Florencia Uboldi</h3><p>Odontología · Atención integral</p></article>
+        </div>
+      </div>
+    </section>
 
-            <div class="medico-item">
+    <section class="content" id="contacto">
+      <div class="section-inner contact-grid">
+        <div class="contact-copy">
+          <div class="eyebrow">Estamos cerca tuyo</div>
+          <h2>Tu próxima sonrisa empieza acá.</h2>
+          <p>Te esperamos en nuestro consultorio de Alta Córdoba. Encontrá nuestra dirección y accedé a la plataforma de pacientes desde esta página.</p>
+          <a class="button" href="https://msappia-spec.github.io/odontologico/" target="_blank" rel="noopener noreferrer">Ingresar al sistema <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="contact-card">
+          <div class="contact-line">
+            <div class="quick-icon" aria-hidden="true">⌖</div>
+            <div><strong>Dirección</strong><p>Juan del Campillo 747, Piso P.B., Dpto. B<br>Barrio Alta Córdoba, CP 5001<br>Córdoba, Argentina</p></div>
+          </div>
+          <div class="contact-line">
+            <div class="quick-icon" aria-hidden="true">⌂</div>
+            <div><strong>Consultorios</strong><p>Tres consultorios odontológicos<br>Atención para niños y adultos</p></div>
+          </div>
+          <div class="contact-line">
+            <div class="quick-icon" aria-hidden="true">✧</div>
+            <div><strong>Especialidades</strong><p>Ortodoncia · Implantes · Odontología general</p></div>
+          </div>
+          <a class="button" href="https://www.google.com/maps/search/?api=1&query=Juan+del+Campillo+747%2C+C%C3%B3rdoba%2C+Argentina" target="_blank" rel="noopener noreferrer">Cómo llegar con Google Maps <span aria-hidden="true">↗</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand"><img src="data:image/png;base64,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" alt=""><span>Franciosi Odontología</span></div>
+      <p>© <span id="year">2026</span> Franciosi Odontología · Alta Córdoba, Córdoba</p>
+    </div>
+  </footer>
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>
