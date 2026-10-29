@@ -36,7 +36,7 @@
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            padding: 20px 5%;
+            padding: 15px 5%;
             background-color: #ffffff;
             box-shadow: 0 2px 10px rgba(0,0,0,0.03);
             position: sticky;
@@ -66,14 +66,28 @@
             transform: translateY(-2px);
         }
 
-        /* Título del Consultorio como Logo Centralizado */
+        /* Bloque central: Nombre Comercial + Logo */
+        .bloque-marca-centro {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            text-align: center;
+        }
+
+        /* Logo configurado exactamente a 2.5 x 2.5 cm */
+        .logo-img {
+            width: 2.5cm;
+            height: 2.5cm;
+            object-fit: contain;
+        }
+
         .logo-texto-centro {
             font-family: var(--fuente-titulos);
             font-size: 1.9rem;
             color: var(--color-principal);
             font-weight: 500;
             letter-spacing: 1px;
-            text-align: center;
             white-space: nowrap;
         }
 
@@ -257,7 +271,9 @@
                 padding: 15px 5%;
             }
             .contenedor-btn { justify-self: center; order: 2; }
-            .logo-texto-centro { font-size: 1.5rem; justify-self: center; order: 1; }
+            .bloque-marca-centro { justify-self: center; order: 1; }
+            .logo-texto-centro { font-size: 1.5rem; }
+            .logo-img { width: 2cm; height: 2cm; }
             .hero h1 { font-size: 2rem; }
             .hero { padding: 60px 5% 40px 5%; }
         }
@@ -265,13 +281,16 @@
 </head>
 <body>
 
-    <!-- Encabezado con Botón a la Izquierda y Nombre Comercial al Centro -->
+    <!-- Encabezado con Botón a la Izquierda y Bloque de Marca al Centro (Logo + Nombre) -->
     <header>
         <div class="contenedor-btn">
             <a href="https://vercel.app" class="btn-acceder">ACCESO</a>
         </div>
-        <div class="logo-texto-centro">
-            Franciosi Odontología
+        <div class="bloque-marca-centro">
+            <img src="logo.png" alt="Logo Franciosi Odontología" class="logo-img">
+            <div class="logo-texto-centro">
+                Franciosi Odontología
+            </div>
         </div>
         <div></div> <!-- Espacio estructural derecho para equilibrar la grilla -->
     </header>
@@ -320,21 +339,3 @@
             </div>
 
             <div class="medico-item">
-                <div class="medico-avatar">FF</div>
-                <h3>Dra. Fabiana Franciosi</h3>
-                <p>Odontóloga Especialista</p>
-            </div>
-
-            <div class="medico-item">
-                <div class="medico-avatar">FU</div>
-                <h3>Dra. Florencia Uboldi</h3>
-                <p>Odontóloga Especialista</p>
-            </div>
-
-        </div>
-    </section>
-
-    <!-- Ubicación y Datos -->
-    <section class="seccion">
-        <div class="contacto-container">
-            <div>
