@@ -11,7 +11,7 @@
     
     <style>
         :root {
-            --color-principal: #d4a396; /* Tono rosa nude del logo */
+            --color-principal: #d4a396; /* Tono rosa nude */
             --color-oscuro: #4a4a4a;
             --color-claro: #fcf9f8;
             --fuente-titulos: 'Playfair Display', serif;
@@ -33,15 +33,19 @@
 
         /* Navbar / Encabezado */
         header {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            padding: 15px 5%;
+            padding: 20px 5%;
             background-color: #ffffff;
             box-shadow: 0 2px 10px rgba(0,0,0,0.03);
             position: sticky;
             top: 0;
             z-index: 100;
+        }
+
+        .contenedor-btn {
+            justify-self: start;
         }
 
         .btn-acceder {
@@ -55,7 +59,6 @@
             letter-spacing: 1px;
             transition: all 0.3s ease;
             box-shadow: 0 4px 15px rgba(212, 163, 150, 0.3);
-            order: 1; /* Forzar orden a la izquierda */
         }
 
         .btn-acceder:hover {
@@ -63,15 +66,15 @@
             transform: translateY(-2px);
         }
 
-        .logo-container {
-            display: flex;
-            align-items: center;
-            order: 2; /* Forzar orden a la derecha */
-        }
-
-        .logo-img {
-            height: 65px;
-            width: auto;
+        /* Título del Consultorio como Logo Centralizado */
+        .logo-texto-centro {
+            font-family: var(--fuente-titulos);
+            font-size: 1.9rem;
+            color: var(--color-principal);
+            font-weight: 500;
+            letter-spacing: 1px;
+            text-align: center;
+            white-space: nowrap;
         }
 
         /* Sección Principal (Hero) */
@@ -248,21 +251,29 @@
 
         /* Responsivo */
         @media (max-width: 768px) {
+            header { 
+                grid-template-columns: 1fr;
+                gap: 15px;
+                padding: 15px 5%;
+            }
+            .contenedor-btn { justify-self: center; order: 2; }
+            .logo-texto-centro { font-size: 1.5rem; justify-self: center; order: 1; }
             .hero h1 { font-size: 2rem; }
-            header { padding: 12px 5%; }
-            .logo-img { height: 50px; }
-            .btn-acceder { padding: 8px 18px; font-size: 0.8rem; }
+            .hero { padding: 60px 5% 40px 5%; }
         }
     </style>
 </head>
 <body>
 
-    <!-- Encabezado con Botón de Acceso a la Izquierda y Logo a la Derecha -->
+    <!-- Encabezado con Botón a la Izquierda y Nombre Comercial al Centro -->
     <header>
-        <a href="https://odontologico-omega.vercel.app/" class="btn-acceder">ACCESO</a>
-        <div class="logo-container">
-            <img src="logo.png" alt="Franciosi Odontología" class="logo-img">
+        <div class="contenedor-btn">
+            <a href="https://vercel.app" class="btn-acceder">ACCESO</a>
         </div>
+        <div class="logo-texto-centro">
+            Franciosi Odontología
+        </div>
+        <div></div> <!-- Espacio estructural derecho para equilibrar la grilla -->
     </header>
 
     <!-- Bienvenida -->
@@ -327,13 +338,3 @@
     <section class="seccion">
         <div class="contacto-container">
             <div>
-                <h2 class="titulo-seccion" style="text-align: left; padding-bottom: 15px; margin-bottom: 30px; max-width: fit-content;">Ubicación del Consultorio</h2>
-                
-                <div class="info-bloque">
-                    <h4>Dirección Principal</h4>
-                    <p>JUAN DEL CAMPILLO 747, Planta Baja, Dpto: B</p>
-                    <p>Barrio Alta Córdoba, CP 5001</p>
-                    <p>Córdoba, Argentina.</p>
-                </div>
-
-                <div class="info-bloque">
