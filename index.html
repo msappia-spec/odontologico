@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -56,7 +55,7 @@
             letter-spacing: 1px;
             transition: all 0.3s ease;
             box-shadow: 0 4px 15px rgba(212, 163, 150, 0.3);
-            order: 1;
+            order: 1; /* Forzar orden a la izquierda */
         }
 
         .btn-acceder:hover {
@@ -67,7 +66,7 @@
         .logo-container {
             display: flex;
             align-items: center;
-            order: 2;
+            order: 2; /* Forzar orden a la derecha */
         }
 
         .logo-img {
@@ -77,7 +76,7 @@
 
         /* Sección Principal (Hero) */
         .hero {
-            padding: 80px 5% 60px 5%;
+            padding: 100px 5% 80px 5%;
             text-align: center;
             background: linear-gradient(180deg, var(--color-claro) 0%, #ffffff 100%);
         }
@@ -93,7 +92,7 @@
         .hero p {
             font-size: 1.1rem;
             max-width: 600px;
-            margin: 0 auto 40px auto;
+            margin: 0 auto;
             color: #777;
             font-weight: 300;
         }
@@ -260,7 +259,7 @@
 
     <!-- Encabezado con Botón de Acceso a la Izquierda y Logo a la Derecha -->
     <header>
-        <a href="https://vercel.app" class="btn-acceder">ACCESO</a>
+        <a href="https://odontologico-omega.vercel.app/" class="btn-acceder">ACCESO</a>
         <div class="logo-container">
             <img src="logo.png" alt="Franciosi Odontología" class="logo-img">
         </div>
@@ -270,7 +269,6 @@
     <section class="hero">
         <h1>Tu sonrisa en manos de especialistas</h1>
         <p>Tres consultorios completamente equipados en el corazón de Alta Córdoba dedicados a brindar una atención integral y confortable.</p>
-        <a href="https://vercel.app" class="btn-acceder" style="display: inline-block; margin-top: 10px;">SOLICITAR TURNO ONLINE</a>
     </section>
 
     <!-- Especialidades -->
@@ -335,3 +333,7 @@
                     <h4>Dirección Principal</h4>
                     <p>JUAN DEL CAMPILLO 747, Planta Baja, Dpto: B</p>
                     <p>Barrio Alta Córdoba, CP 5001</p>
+                    <p>Córdoba, Argentina.</p>
+                </div>
+
+                <div class="info-bloque">
