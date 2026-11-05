@@ -84,6 +84,10 @@
           <span class="flex-1">Facturación y Caja</span>
           <span id="nav-fact-pendientes" class="nav-badge hide">0</span>
         </a>
+        <a class="nav-link" data-view="cuenta-corriente">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 2v20M12 7h5M12 11h5"/></svg>
+          <span class="flex-1">Cuenta corriente</span>
+        </a>
         <p class="px-3 pt-4 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Registros</p>
         <a class="nav-link" data-view="doctores">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3v0"/><path d="M10 10.6V16a2 2 0 0 0 2 2"/><circle cx="12" cy="7" r="4"/><path d="M9 21v-2a4 4 0 0 1 4-4"/></svg>
@@ -449,9 +453,10 @@
             </div>
 
             <p class="text-xs text-slate-500 mt-3">
-              Cada odontólogo define sus rangos de atención y puede tener varios tramos el mismo día
-              (por ejemplo, lunes de 09:00 a 13:00 y de 15:00 a 19:00). El calendario sólo ofrece
-              bloques que caigan dentro de esos rangos y descuenta los turnos ya agendados.
+              Cada día ofrece dos tramos fijos que se agregan con un clic: <strong>Mañana</strong>
+              de 08:00 a 13:00 y <strong>Tarde</strong> de 15:30 a 18:00 (se pueden tener los dos el
+              mismo día). Si hace falta otro horario, se carga desde «Otro horario». El calendario
+              sólo ofrece bloques que caigan dentro de esos rangos y descuenta los turnos ya agendados.
             </p>
 
             <div class="flex flex-wrap items-center gap-2 mt-4">
@@ -1338,8 +1343,175 @@
                   Elegir otro archivo
                 </button>
               </div>
+        <!-- ============== VISTA: CUENTA CORRIENTE (Módulo 5) ============== -->
+        <section id="view-cuenta-corriente" class="anim-fade space-y-5 hide">
+
+          <!-- Encabezado: paciente consultado, saldos y acciones de la vista -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center flex-none">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 2v20M12 7h5M12 11h5"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-extrabold tracking-tight text-slate-900">Cuenta corriente</h2>
+                <p class="text-xs text-slate-500">
+                  Saldo deudor del paciente, historial de movimientos y planes de cuotas de los tratamientos financiados.
+                </p>
+              </div>
+              <button type="button" id="cc-refrescar" class="btn btn-soft btn-sm" title="Volver a consultar el saldo del paciente">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Actualizar
+              </button>
+            </div>
+
+            <div class="flex flex-wrap items-end gap-3 mt-4">
+              <div class="min-w-[240px] flex-1">
+                <label class="field-label" for="cc-paciente">Paciente</label>
+                <select id="cc-paciente" class="field"></select>
+              </div>
+              <p class="text-[11px] text-slate-400 flex-1">
+                El saldo se reconstruye sumando el libro mayor: en positivo es deuda del paciente y en negativo,
+                saldo a favor. Un paciente sin movimientos aparece en cero y la cuenta se abre con el primer
+                plan de cuotas o pago.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Saldo deudor</p>
+                <p id="cc-kpi-saldo" class="fact-kpi-valor">&mdash;</p>
+              </div>
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Total debitado</p>
+                <p id="cc-kpi-debitos" class="fact-kpi-valor">&mdash;</p>
+              </div>
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Total cobrado</p>
+                <p id="cc-kpi-creditos" class="fact-kpi-valor">&mdash;</p>
+              </div>
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Planes de cuotas</p>
+                <p id="cc-kpi-planes" class="fact-kpi-valor">&mdash;</p>
+              </div>
+            </div>
+            <p id="cc-nota" class="mt-3 text-[11px] text-slate-400"></p>
+          </div>
+
+          <!-- Planes de cuotas del paciente -->
+          <div class="card overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold text-slate-900">Planes de cuotas</h2>
+                <p class="text-[11px] text-slate-400">
+                  Un plan se cierra solo cuando la cuenta queda saldada; a mano se pasa a cobranza o se reactiva.
+                </p>
+              </div>
+              <span id="cc-planes-contador" class="badge badge-brand">0</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Plan</th><th class="text-right">Total del tratamiento</th>
+                    <th class="text-right">Entrega inicial</th><th>Estado</th>
+                    <th class="text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="cc-planes"></tbody>
+              </table>
             </div>
           </div>
+          <!-- Movimientos del libro mayor -->
+          <div class="card overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold text-slate-900">Movimientos</h2>
+                <p class="text-[11px] text-slate-400">
+                  Débitos (deuda) y créditos (pagos), del más nuevo al más viejo. El historial no se edita:
+                  cada cobro entra como un crédito nuevo.
+                </p>
+              </div>
+              <span id="cc-mov-contador" class="badge badge-brand">0</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th><th>Movimiento</th><th>Concepto</th>
+                    <th class="text-right">Importe</th>
+                  </tr>
+                </thead>
+                <tbody id="cc-movimientos"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Formularios: abrir un plan de cuotas y registrar un pago -->
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <form id="cc-plan-form" class="card p-4 sm:p-5 space-y-3" autocomplete="off">
+              <div>
+                <h2 class="font-bold text-slate-900">Abrir un plan de cuotas</h2>
+                <p class="text-[11px] text-slate-400">
+                  El total se debita en la cuenta y se reparte entre la entrega inicial y las cuotas mensuales.
+                </p>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="field-label" for="cc-plan-monto">Total del tratamiento</label>
+                  <input type="number" id="cc-plan-monto" class="field" min="0.01" step="0.01" placeholder="500000" required />
+                </div>
+                <div>
+                  <label class="field-label" for="cc-plan-cuotas">Cuotas mensuales</label>
+                  <input type="number" id="cc-plan-cuotas" class="field" min="1" max="120" step="1" value="3" required />
+                </div>
+                <div>
+                  <label class="field-label" for="cc-plan-entrega">Entrega inicial (%)</label>
+                  <input type="number" id="cc-plan-entrega" class="field" min="0.01" max="99.99" step="0.01" value="50" required />
+                </div>
+                <div>
+                  <label class="field-label" for="cc-plan-descripcion">Tratamiento (opcional)</label>
+                  <input type="text" id="cc-plan-descripcion" class="field" maxlength="120" placeholder="Ortodoncia, 18 meses" />
+                </div>
+              </div>
+              <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                <input id="cc-plan-cobrar-entrega" type="checkbox"
+                       class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" checked />
+                <span class="text-sm text-slate-600">Cobrar la entrega inicial en este momento</span>
+              </label>
+              <button type="submit" id="cc-plan-guardar" class="btn btn-primary w-full">Abrir el plan</button>
+            </form>
+
+            <form id="cc-pago-form" class="card p-4 sm:p-5 space-y-3" autocomplete="off">
+              <div>
+                <h2 class="font-bold text-slate-900">Registrar un pago</h2>
+                <p class="text-[11px] text-slate-400">
+                  Un pago es un crédito nuevo. Pagar de más se acepta: el excedente queda como saldo a favor.
+                </p>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="field-label" for="cc-pago-monto">Importe</label>
+                  <input type="number" id="cc-pago-monto" class="field" min="0.01" step="0.01" placeholder="83333.33" required />
+                </div>
+                <div>
+                  <label class="field-label" for="cc-pago-plan">Imputar al plan</label>
+                  <select id="cc-pago-plan" class="field">
+                    <option value="">Saldo general de la cuenta</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label" for="cc-pago-concepto">Concepto (opcional)</label>
+                  <input type="text" id="cc-pago-concepto" class="field" maxlength="120" placeholder="Cuota 2 · transferencia" />
+                </div>
+                <div>
+                  <label class="field-label" for="cc-pago-fecha">Fecha del cobro</label>
+                  <input type="date" id="cc-pago-fecha" class="field" />
+                </div>
+              </div>
+              <button type="submit" id="cc-pago-guardar" class="btn btn-primary w-full">Registrar el pago</button>
+            </form>
+          </div>
+        </section>
 
     </div>
   </div>
@@ -1890,5 +2062,46 @@
   <script src="/static/odontograma.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/calendar.js"></script>
+
+  <script>
+    // Guardián de versión del panel.
+    //
+    // ``cambiarVista`` ignora las pestañas que no conoce, así que si el navegador
+    // sirviera un ``app.js`` anterior desde su propia caché el click en una
+    // pestaña nueva no haría **nada** y no habría ninguna pista en pantalla. Aquí
+    // se comparan los enlaces del menú que trae esta página con las vistas que
+    // conoce el JS cargado: si falta alguna, se avisa con un botón para recargar
+    // en lugar de dejar un menú que parece roto.
+    (function () {
+      function comprobarVersion() {
+        const app = window.OdontoApp || {};
+        const vistas = Array.from(document.querySelectorAll(".nav-link[data-view]"))
+          .map((a) => a.dataset.view);
+        const faltan = vistas.filter((v) => !app.VISTAS || !(v in app.VISTAS));
+        if (!faltan.length || document.getElementById("aviso-version")) return;
+
+        const aviso = document.createElement("div");
+        aviso.id = "aviso-version";
+        aviso.dataset.vistasFaltantes = faltan.join(",");
+        aviso.className =
+          "fixed bottom-4 left-1/2 z-[70] w-[min(92vw,32rem)] -translate-x-1/2 rounded-xl bg-amber-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl";
+        aviso.innerHTML =
+          '<p>El navegador está usando una versión anterior del panel: por eso las pestañas nuevas no responden al click.</p>' +
+          '<button type="button" id="aviso-version-recargar" class="mt-2 rounded-lg bg-white/20 px-3 py-1.5 font-bold">Recargar el panel</button>' +
+          '<p class="mt-2 text-xs font-normal text-amber-50">Si el aviso vuelve a aparecer, recargá con Ctrl+Shift+R.</p>';
+        document.body.appendChild(aviso);
+        document
+          .getElementById("aviso-version-recargar")
+          .addEventListener("click", function () {
+            location.reload();
+          });
+      }
+
+      // ``app.js`` va antes que este bloque, así que al terminar la carga ya
+      // expuso ``window.OdontoApp``.
+      if (document.readyState === "complete") setTimeout(comprobarVersion, 0);
+      else window.addEventListener("load", function () { setTimeout(comprobarVersion, 300); });
+    })();
+  </script>
 </body>
 </html>

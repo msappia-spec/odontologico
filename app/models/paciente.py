@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
+    from app.models.cuenta_corriente import CuentaCorriente
     from app.models.historia_clinica import HistoriaClinica
     from app.models.obra_social import ObraSocial
     from app.models.turno import Turno
@@ -90,6 +91,16 @@ class Paciente(Base):
         back_populates="paciente",
         uselist=False,
         cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    # Cuenta corriente del paciente (Módulo 5). Es **una sola** por paciente y se
+    # abre sola en el primer movimiento financiero (ver
+    # app.services.finanzas_service). Sin ``cascade``: la contabilidad es un
+    # registro transaccional con valor de comprobante y no se borra junto con el
+    # paciente (la FK es ``ondelete="RESTRICT"``).
+    cuenta_corriente: Mapped[Optional["CuentaCorriente"]] = relationship(
+        back_populates="paciente",
+        uselist=False,
         passive_deletes=True,
     )
 

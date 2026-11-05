@@ -27,17 +27,25 @@ ELIMINACION_DATOS_FILE = STATIC_DIR / "eliminacion_datos.html"
 # ``include_in_schema=False``: son páginas, no endpoints de la API.
 router = APIRouter(tags=["Interfaz web"], include_in_schema=False)
 
+# Las páginas del panel se sirven con ``no-cache``: el navegador las revalida en
+# cada carga contra el ``ETag``/``Last-Modified`` (respuesta 304 si nada cambió).
+# Sin esto el navegador guardaba ``index.html`` y ``app.js`` por su cuenta y,
+# después de una actualización, el menú mostraba la pestaña nueva pero el click
+# no hacía nada, porque el JS cacheado no la conocía. El HTML del panel es chico
+# y la validación devuelve 304, así que el costo es despreciable.
+SIN_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
 
 @router.get("/")
 def dashboard() -> FileResponse:
     """Devuelve la página principal (dashboard) de la secretaría."""
-    return FileResponse(INDEX_FILE, media_type="text/html")
+    return FileResponse(INDEX_FILE, media_type="text/html", headers=SIN_CACHE)
 
 
 @router.get("/medico")
 def agenda_odontologo() -> FileResponse:
     """Devuelve la vista móvil del odontólogo (su agenda diaria)."""
-    return FileResponse(MEDICO_FILE, media_type="text/html")
+    return FileResponse(MEDICO_FILE, media_type="text/html", headers=SIN_CACHE)
 
 
 @router.get("/anamnesis/{token}")
@@ -63,10 +71,12 @@ def ficha_de_salud(token: str) -> FileResponse:
 @router.get("/privacidad")
 def politica_de_privacidad() -> FileResponse:
     """Política pública requerida por Meta para la integración de WhatsApp."""
-    return FileResponse(PRIVACIDAD_FILE, media_type="text/html")
+    return FileResponse(PRIVACIDAD_FILE, media_type="text/html", headers=SIN_CACHE)
 
 
 @router.get("/eliminacion-datos")
 def instrucciones_eliminacion_datos() -> FileResponse:
     """Canal público para solicitudes de eliminación de datos personales."""
-    return FileResponse(ELIMINACION_DATOS_FILE, media_type="text/html")
+    return FileResponse(
+        ELIMINACION_DATOS_FILE, media_type="text/html", headers=SIN_CACHE
+    )

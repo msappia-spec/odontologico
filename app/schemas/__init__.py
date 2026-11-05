@@ -48,6 +48,16 @@ from app.schemas.facturacion import (
     PrestacionFacturadaCreate,
     ResumenCajaRead,
 )
+from app.schemas.finanzas import (
+    AbrirPlanCuotasRequest,
+    CuentaCorrienteRead,
+    PagoRegistradoRead,
+    PlanCuotasAbiertoRead,
+    PlanCuotasEstadoUpdate,
+    PlanCuotasRead,
+    RegistrarPagoRequest,
+    TransaccionCCRead,
+)
 from app.schemas.historia_clinica import (
     ArchivoAdjuntoCreate,
     ArchivoAdjuntoRead,
@@ -75,6 +85,7 @@ from app.schemas.whatsapp import (
 )
 
 __all__ = [
+    "AbrirPlanCuotasRequest",
     "AnamnesisGuardadaRead",
     "AnamnesisPublicaRead",
     "AntecedentesSaludRead",
@@ -85,6 +96,7 @@ __all__ = [
     "ArchivoAdjuntoRead",
     "BloqueDisponible",
     "CobrarMovimientoRequest",
+    "CuentaCorrienteRead",
     "DebitarMovimientoRequest",
     "DeclaracionSaludCreate",
     "DetalleMovimientoCajaRead",
@@ -110,6 +122,10 @@ __all__ = [
     "LiquidacionProfesionalesRead",
     "MovimientoCajaRead",
     "OrigenDisponibilidad",
+    "PagoRegistradoRead",
+    "PlanCuotasAbiertoRead",
+    "PlanCuotasEstadoUpdate",
+    "PlanCuotasRead",
     "PresentacionObraSocialRead",
     "PresupuestoCobroRead",
     "PrestacionCreate",
@@ -127,6 +143,8 @@ __all__ = [
     "PacienteCreate",
     "PacienteRead",
     "PacienteUpdate",
+    "RegistrarPagoRequest",
+    "TransaccionCCRead",
     "TurnoCreate",
     "TurnoRead",
     "TurnoUpdate",

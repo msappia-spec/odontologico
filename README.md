@@ -1,9 +1,10 @@
-# Franciosi Odontología — Módulos 1, 2, 3 y 4
+# Franciosi Odontología — Módulos 1, 2, 3, 4 y 5
 
 **Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
 **Módulo 2: Historias Clínicas y Evoluciones Médicas** ·
 **Módulo 3: Obras Sociales, Liquidación de Médicos y Facturación Mixta** ·
-**Módulo 4: Ficha médica completa (Historia Clínica General) y odontograma** —
+**Módulo 4: Ficha médica completa (Historia Clínica General) y odontograma** ·
+**Módulo 5: Cuenta corriente, planes de cuotas y pagos** —
 Backend en **FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
 
 El **Módulo 1** implementa:
@@ -278,6 +279,54 @@ si se omite se reutiliza `WHATSAPP_VERIFY_TOKEN`).
 
 ---
 
+## 💰 Módulo 5 · Cuenta corriente, planes de cuotas y pagos
+
+Todo lo que el paciente debe —y todo lo que pagó— vive en un **libro mayor**
+contable: la deuda son movimientos `DEBITO` y los pagos movimientos `CREDITO`.
+El saldo **nunca se incrementa a mano**: `finanzas_service` lo recalcula sumando
+el libro (`suma(DEBITO) - suma(CREDITO)`) dentro de la misma transacción, así una
+carga manual o un reintento no descuadran la cuenta.
+
+1. **Cuenta corriente por paciente** (`cuentas_corrientes`): una cuenta por
+   paciente, defendida por el índice único `uq_cuenta_corriente_paciente`. Se
+   abre con el primer movimiento (alta de plan o pago a cuenta); un `GET` **nunca
+   escribe**. `GET /api/v1/finanzas/cuenta-corriente/paciente/{id}` devuelve el
+   saldo (positivo = deuda, negativo = a favor), los totales de débitos y
+   créditos, el historial de movimientos de lo más nuevo a lo más viejo y los
+   planes del paciente. Un paciente sin movimientos responde `existe_cuenta:
+   false` y no crea la fila; un paciente inexistente, `404`.
+2. **Plan de cuotas** (`POST /api/v1/finanzas/plan-cuotas`): el total del
+   tratamiento se registra como deuda (`DEBITO`) y el servicio calcula la
+   **entrega inicial** (50 % por defecto, ajustable con
+   `porcentaje_entrega_inicial`) y el valor de cada cuota sobre el saldo
+   financiado. Con `pago_entrega_inicial: true` (el valor por defecto) la entrega
+   se cobra en el acto (`CREDITO` en la misma transacción); con `false` queda
+   como deuda a cobrar. `ajuste_ultima_cuota` muestra los centavos que absorbe la
+   última cuota (por ejemplo `-0.01`) para que la suma cierre exacta. Una entrega
+   que cubre el total responde **422**: no hay nada que financiar.
+3. **Pagos** (`POST /api/v1/finanzas/pagar`): cada cobro es un `CREDITO` nuevo,
+   imputado a una cuota (`plan_cuotas_id`, validando que el plan sea de ese
+   paciente → `422` si no) o a cuenta general. La respuesta trae el saldo
+   resultante y `saldo_a_favor` si el paciente pagó de más; cuando el saldo llega
+   a cero los planes pasan solos a `FINALIZADO`.
+4. **Estados del plan** (`PATCH /api/v1/finanzas/plan-cuotas/{id}/estado`):
+   `ACTIVO` ↔ `RECOBRABLE` (deuda derivada a cobranza). `FINALIZADO` lo pone sólo
+   el sistema: pedirlo a mano responde **422**, y tocar un plan de una cuenta ya
+   saldada responde **409**.
+5. **Dinero sin centavos perdidos**: las tres tablas usan `NUMERIC(10, 2)` y
+   `Decimal` de punta a punta (el resto de la facturación sigue en `Float`). El
+   JSON publica números y el redondeo ocurre siempre en el servidor.
+6. **Atomicidad**: cuenta, movimientos, plan, saldo y estados se escriben en una
+   sola transacción; si algo falla (p. ej. un `paciente_id` que no corresponde al
+   plan) el `rollback` no deja deuda, pago ni plan a medio registrar.
+
+> La pestaña **Cuenta corriente** del panel (grupo *Operación*) opera el módulo
+> completo: se elige el paciente, se ve su saldo y su libro mayor, se abren
+> planes de cuotas y se registran pagos. Los mismos endpoints siguen disponibles
+> por API (Swagger en `/docs` o `curl`) en la tabla de la sección **Endpoints**.
+
+---
+
 ## 📁 Estructura del proyecto
 
 ```
@@ -314,6 +363,7 @@ Odontologico/
 │   │   ├── prestacion.py           # Módulo 3: catálogo de prácticas facturables
 │   │   ├── arancel_obra_social.py  # Módulo 3: cobertura y coseguro por práctica
 │   │   ├── movimiento_caja.py      # Módulo 3: cierre de la visita + detalle congelado
+│   │   ├── cuenta_corriente.py     # Módulo 5: cuenta, libro mayor (transacciones_cc) y planes
 │   │   └── opcion_menu_whatsapp.py # FAQ Bot: menú configurable desde el panel
 │   ├── schemas/                    # Esquemas Pydantic v2 (I/O de la API)
 │   │   ├── doctor.py, paciente.py, turno.py, whatsapp.py
@@ -323,6 +373,7 @@ Odontologico/
 │   │   ├── antecedentes_salud.py   # Módulo 4: cuestionario, lectura y envío del enlace
 │   │   ├── odontograma.py          # Módulo 4: dientes, estados y totales por color
 │   │   ├── opcion_menu_whatsapp.py # FAQ Bot: alta/edición/baja y vista previa del menú
+│   │   ├── finanzas.py             # Módulo 5: cuenta corriente, plan de cuotas y pagos
 │   │   └── prestacion.py, arancel.py, facturacion.py # Módulo 3: precios, caja y liquidaciones
 │   ├── services/                   # Lógica de negocio
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
@@ -339,6 +390,7 @@ Odontologico/
 │   │   ├── facturacion_service.py  # Módulo 3: cierre de visita, caja y liquidación OS
 │   │   ├── liquidacion_service.py  # Módulo 3: producción y honorarios por profesional
 │   │   ├── reporte_pdf_service.py  # Módulo 3: los dos cierres de mes en PDF
+│   │   ├── finanzas_service.py     # Módulo 5: libro mayor, planes de cuotas y pagos
 │   │   ├── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
 │   │   ├── whatsapp_menu_service.py # FAQ Bot: CRUD, defaults y restauración del menú
 │   │   └── whatsapp_bot_service.py # FAQ Bot: árbol de decisión de las respuestas
@@ -354,6 +406,7 @@ Odontologico/
 │           ├── prestaciones.py     # Módulo 3: CRUD del catálogo de prácticas
 │           ├── aranceles.py        # Módulo 3: aranceles por cobertura + convenios e importador
 │           ├── facturacion.py      # Módulo 3: facturar, caja y liquidaciones
+│           ├── finanzas.py         # Módulo 5: cuenta corriente, planes de cuotas y pagos
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
 │           ├── whatsapp.py         # Webhook (bot + botones) + recordatorios
@@ -535,9 +588,10 @@ La CLI respeta `.vercelignore` (no sube `.venv/`, la base `.db`, `tests/` ni
 usa Vercel, sin borrar el esquema. Ofrece dos modos:
 
 - **Datos de trabajo:** pacientes, turnos, historias, evoluciones, anamnesis,
-  adjuntos, caja y disponibilidad específica. Conserva doctores, obras sociales,
-  prestaciones, aranceles, agenda semanal y menú del bot.
-- **Todas las tablas:** las 17 tablas; vuelve a sembrar el menú del FAQ Bot.
+  adjuntos, caja, cuenta corriente (planes y movimientos) y disponibilidad
+  específica. Conserva doctores, obras sociales, prestaciones, aranceles, agenda
+  semanal y menú del bot.
+- **Todas las tablas:** las 20 tablas; vuelve a sembrar el menú del FAQ Bot.
 
 El CLI de Vercel no puede exportar `DATABASE_URL` porque está marcada como
 `Secret` (`vercel env pull` la reemplaza por `[SENSITIVE]`). Por eso el `.bat`
@@ -699,13 +753,15 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Panel Principal** | KPIs (turnos de hoy, confirmados, pendientes, cancelados), **agenda del día en una columna por odontólogo** (cada columna trae el avatar, la especialidad y el cupo de turnos del profesional, con las tarjetas compactas del día y sus acciones *Confirmar asistencia* / *Editar* / *Cancelar* / *Reactivar*), próximos turnos, envío de recordatorios y tarjeta *Recordatorios por WhatsApp* con el contador de pendientes (lleva a esa pestaña). |
 | **Calendario** | Grilla mensual de turnos con **color por estado** (`CONFIRMADO` en verde, `PENDIENTE` con el color del odontólogo y `CANCELADO` en gris atenuado), *tooltip* con el detalle del turno, **filtro por odontólogo** (*Todos los odontólogos* + un botón por profesional) y panel del día con turnos ocupados y horarios disponibles. Los horarios disponibles salen de la **agenda semanal configurada por profesional**, no de una lista fija. Al hacer clic en un **horario disponible con un odontólogo filtrado**, el modal se abre con ese profesional ya seleccionado y **bloqueado** (con un aviso en pantalla), para que el turno no se agende por error en otra agenda. |
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
-| **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos —se pueden cargar **varios por día**, p. ej. lunes 08:00-13:00 y 15:00-19:00—, botón para eliminar cada rango, formulario *desde / hasta* para agregar otro y contador de rangos. Incluye **Restaurar plantilla sugerida** (lun-vie doble turno y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
+| **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos y un botón para eliminar cada uno. Cada día ofrece **dos tramos fijos de un clic**: **Mañana 08:00-13:00** y **Tarde 15:30-18:00** (se pueden tener los dos el mismo día) y el alta manual *desde / hasta* queda plegada en «Otro horario». Incluye **Restaurar plantilla sugerida** (lun-vie con los dos tramos y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
 | **Doctores** | Formulario de alta estilizado + tabla con la **forma de pago** de cada profesional, la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT` que incluye el desplegable **Tipo de pago** —*Dueño*, *Comisión por porcentaje* o *Sueldo fijo*— y habilita el campo numérico del porcentaje o del sueldo mensual), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
 | **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**—, Nº de afiliado y **datos filiatorios**: fecha de nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, lugar de trabajo y jerarquía) + tabla de pacientes con acción *Editar*, donde la fecha de nacimiento se muestra con la **edad calculada**. Los filiatorios son los mismos que carga la ficha médica: al guardar la ficha, el panel refresca la tabla de pacientes para mostrar los datos recién sincronizados. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. |
 | **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
 | **Facturación y Caja** | **Módulo 3.** Cinco pestañas: *Caja del día* (KPIs de efectivo y saldo de obras sociales + movimientos del día con acciones *Cobrar* / *Debitar*), *Liquidación de obras sociales* (cobertura + mes, totales del período, botón **Generar presentación del período**, tildado de órdenes pagadas o debitadas, cierre en lote y **exportación a CSV** o **PDF para la cobertura**), *Liquidación de médicos* (elegís el profesional y el mes: **tabla de subtotales** con la producción, el efectivo, lo presentado a las obras sociales, los honorarios por profesional y los totales del consultorio al pie —según la forma de pago configurada en *Doctores*— más exportación a CSV o **PDF de la liquidación**, que respeta el profesional elegido), *Prestaciones y aranceles* (catálogo de prácticas y tabla de aranceles por cobertura) y *Convenios* (**todo el nomenclador de Córdoba** para la cobertura elegida, con el campo **Monto que cubre la OS**, el **coseguro sugerido** calculado en vivo, los totales de la grilla, guardado en lote y el **importador masivo**: *Descargar Plantilla Excel de Ejemplo* —dos columnas: `codigo` y `precio_cobertura`, en `.csv` o `.xlsx`— + recuadro de **arrastrar y soltar** con vista previa por fila y confirmación). El **formulario de cobro** —que se abre con el botón *Cobrar una visita* o desde la tarjeta de un turno— tiene un **buscador rápido** por código del nomenclador o nombre, muestra por cada práctica su **arancel**, lo que **cubre la obra social** y el **coseguro**, avisa que el saldo queda **PENDIENTE para la liquidación de la cobertura** y calcula el cartel **«Cobrar Coseguro en mostrador: $X.XXX»** con el total de las prácticas; se confirma con **Confirmar y cerrar atención**, que registra el movimiento de caja y finaliza el turno. |
+
+| **Cuenta corriente** | **Módulo 5.** Elegís el paciente y ves su **saldo deudor** (KPIs de saldo, total debitado, total cobrado y cantidad de planes) con una nota que lo explica en palabras —*el paciente debe*, *saldo a favor* o *cuenta saldada*—, la **tabla de planes de cuotas** (valor de cada cuota, total del tratamiento, entrega inicial y estado `ACTIVO` / `EN COBRANZA` / `FINALIZADO`, con las acciones *Registrar pago* —precarga el importe de una cuota en el formulario—, *A cobranza* y *Reactivar*) y el **libro mayor** con todos los débitos (deuda) y créditos (pagos) del paciente, del más nuevo al más viejo. Los dos formularios de la vista **abren un plan** (`POST /finanzas/plan-cuotas`: total, cuotas, entrega inicial del 50 % y la opción de cobrarla en el acto) y **registran un pago** (`POST /finanzas/pagar`, imputable a un plan o a cuenta general, con fecha y concepto). El saldo lo calcula siempre el servidor: la vista no lo edita y el plan se cierra solo cuando la cuenta queda saldada. |
 
 ### Colores por estado del turno
 
@@ -889,6 +945,20 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 | **ArancelObraSocial** | `id`, `obra_social_id`, `prestacion_id`, `monto_cubre_os`, `monto_coseguro_paciente` |
 | **MovimientoCaja** | `id`, `turno_id`, `doctor_id`, `fecha`, `monto_efectivo`, `monto_pendiente_os`, `monto_cobrado_os`, `estado_pago`, `observaciones` |
 | **DetalleMovimientoCaja** | `id`, `movimiento_caja_id`, `prestacion_id`, `codigo_nomenclador`, `descripcion`, `cantidad`, `monto_cubre_os`, `monto_coseguro_paciente` |
+| **DisponibilidadEspecifica** | `id`, `doctor_id`, `fecha`, `hora_inicio`, `hora_fin`, `tipo` |
+| **HistoriaClinica** | `id`, `paciente_id` (UQ), `numero_ficha` (UQ) |
+| **EvolucionMedica** | `id`, `historia_clinica_id`, `doctor_id`, `fecha_atencion`, `motivo_consulta`, `diagnostico`, `tratamiento_efectuado`, `observaciones` (inmutable) |
+| **ArchivoAdjunto** | `id`, `evolucion_id`, `url_archivo`, `tipo_archivo`, `fecha_subida` |
+| **AntecedentesSalud** | `id`, `historia_clinica_id` (UQ) + cuestionario completo de la Historia Clínica General (familiares, personales, odontológicos, examen bucal y plan) |
+| **Odontograma** | `id`, `historia_clinica_id` (UQ), `doctor_id`, `protesis_fija`, `protesis_removible`, `coronas`, `dientes_existentes`, `observaciones`, `actualizado_en` |
+| **OdontogramaDiente** | `id`, `odontograma_id`, `diente` (UQ con el odontograma), `estado`, `notas` |
+| **OpcionMenuWhatsApp** | `id`, `numero`, `titulo`, `tipo`, `respuesta`, `activa`, `orden` |
+| **CuentaCorriente** | `id` (UUID), `paciente_id`, `saldo_actual`, `ultima_actualizacion` |
+| **TransaccionCC** | `id` (UUID), `cuenta_corriente_id`, `tipo_movimiento`, `monto`, `descripcion`, `fecha` |
+| **PlanCuotas** | `id` (UUID), `cuenta_corriente_id`, `monto_total_tratamiento`, `monto_entrega_inicial`, `cantidad_cuotas`, `monto_por_cuota`, `estado` (+ `monto_financiado` y `ajuste_ultima_cuota`, propiedades calculadas) |
+
+> La tabla resume los **20 modelos** (una clase ORM por tabla). El detalle campo
+> por campo, con tipos, índices y constraints, está en **`DOCUMENTACION.md` §6.4**.
 
 **Enumeraciones**
 
@@ -896,6 +966,10 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 - `EstadoWhatsApp`: `PENDIENTE_ENVIO`, `ENVIADO`, `FALLIDO`, `RESPONDIDO`
 - `TipoPagoDoctor`: `DUENO`, `COMISION`, `SUELDO` (cómo se liquida la producción)
 - `EstadoPagoMovimiento`: `PENDIENTE`, `EN_PROCESO_LIQUIDACION`, `COBRADO`, `DEBITADO_OS`
+- `TipoOpcionMenu`: `TEXTO`, `PRECIO`, `OBRAS_SOCIALES`, `UBICACION`, `SECRETARIA` (FAQ Bot)
+- `TipoDisponibilidadEspecifica`: `HABILITADO`, `BLOQUEADO` (excepciones de agenda)
+- `TipoMovimientoCC` (**Módulo 5**): `DEBITO` (suma deuda), `CREDITO` (la reduce)
+- `EstadoPlanCuotas` (**Módulo 5**): `ACTIVO`, `FINALIZADO`, `RECOBRABLE`
 
 **Restricciones de integridad del turno**
 
@@ -1065,6 +1139,16 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > El encabezado del script incluye el `ALTER TABLE` y el DDL equivalente para
 > PostgreSQL.
 >
+> **Cuenta corriente (Módulo 5).** Las tres tablas nuevas
+> (`cuentas_corrientes`, `transacciones_cc` y `planes_cuotas`) son **puramente
+> aditivas**: no agregan columnas a tablas existentes y no tienen script de
+> migración propio. `Base.metadata.create_all`, que corre al arrancar la app, las
+> crea en SQLite y en PostgreSQL; en una base ya poblada alcanza con reiniciar el
+> proceso. Los dos enums del módulo se guardan como `VARCHAR` con su `CHECK`
+> nombrado (`tipo_movimiento_cc`, `estado_plan_cuotas`) porque los modelos usan
+> `native_enum=False` + `create_constraint=True`; en PostgreSQL **no** hace falta
+> `CREATE TYPE` y tampoco hay tipos que limpiar si se reversa el cambio.
+>
 > **En PostgreSQL/Vercel este paso ya es automático:** `init_db()` llama a
 > `aplicar_columnas_faltantes` (`app/db/migraciones.py`) en cada arranque y
 > agrega esas columnas si faltan, sin borrar datos ni exigir acceso manual a la
@@ -1197,6 +1281,10 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `GET`  | `/liquidaciones/profesionales` | **Liquidación del mes** por odontólogo (`?anio=&mes=&doctor_id=`) |
 | `GET`  | `/liquidaciones/obras-sociales/pdf` | La **presentación en PDF** para la cobertura (`application/pdf`, descarga) |
 | `GET`  | `/liquidaciones/profesionales/pdf` | La **liquidación en PDF** para el profesional (`application/pdf`, descarga) |
+| `GET`  | `/finanzas/cuenta-corriente/paciente/{id}` | **Módulo 5:** saldo, totales de débitos/créditos y libro mayor del paciente (`existe_cuenta: false` si no tuvo movimientos; `404` si el paciente no existe) |
+| `POST` | `/finanzas/plan-cuotas` | **Módulo 5:** abrir un tratamiento financiado (total, entrega inicial del 50 % y cuotas; `422` si la entrega cubre el total) |
+| `POST` | `/finanzas/pagar` | **Módulo 5:** registrar un pago (`CREDITO`), imputable a un plan; devuelve el saldo y el `saldo_a_favor` |
+| `PATCH`| `/finanzas/plan-cuotas/{id}/estado` | **Módulo 5:** `ACTIVO` ↔ `RECOBRABLE` (cobranza); `FINALIZADO` a mano → `422`; cuenta saldada → `409` |
 
 > **Métodos soportados.** Cada ruta acepta únicamente los métodos de esta tabla;
 > cualquier otro responde `405 Method Not Allowed` (p. ej. `PUT` o `DELETE` sobre
@@ -1233,6 +1321,16 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 > dependencias** al despliegue, y se alimentan con los **mismos servicios** que
 > la pantalla: los importes no se recalculan. El archivo se entrega como
 > descarga (`Content-Disposition`); una cobertura inexistente responde **404**.
+>
+> **Reglas de la cuenta corriente (Módulo 5).** El saldo **no se edita**: se
+> corrige con un movimiento nuevo (`DEBITO`/`CREDITO`) y `finanzas_service` lo
+> recalcula desde el libro mayor en la misma transacción. Un `GET` de la cuenta
+> nunca crea filas (`existe_cuenta: false`), la cuenta es **una por paciente**
+> (`uq_cuenta_corriente_paciente`, el segundo alta simultánea responde `409`) y
+> los importes viajan en `NUMERIC(10, 2)` / `Decimal` (el JSON los publica como
+> número). `FINALIZADO` sólo lo pone el sistema al saldar la cuenta; la secretaría
+> mueve el plan entre `ACTIVO` y `RECOBRABLE` (cobranza). Las escrituras son
+> atómicas: si algo falla no queda deuda ni pago a medio registrar.
 >
 > **CORS.** `app/main.py` registra `CORSMiddleware` con
 > `allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]` (la lista
@@ -1622,7 +1720,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**704 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**752 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
@@ -1803,6 +1901,24 @@ tabla de profesionales, la tabla de subtotales de la liquidación de médicos, e
 buscador rápido del formulario de cobro y el **PDF** que respeta el profesional
 elegido.
 
+La **cuenta corriente, los planes de cuotas y los pagos del Módulo 5** se cubren
+en `tests/test_finanzas.py` (*26 pruebas*): la consulta que **no escribe** (un
+paciente sin movimientos devuelve `existe_cuenta: false` y la tabla sigue vacía,
+un paciente inexistente responde `404`) y el historial del más nuevo al más viejo
+con sus totales; la apertura del plan (deuda completa, entrega inicial del 50 %,
+saldo financiado y el **ajuste al centavo** —`500 / 3 = 166.67` → `-0.01`—, más
+`422` cuando la entrega cubre el total); los pagos (crédito nuevo, saldo
+recalculado desde el libro mayor, saldo a favor al pagar de más y planes que
+pasan solos a `FINALIZADO`); la **atomicidad** (un `paciente_id` cruzado deja
+`rollback` completo: ni cuenta, ni movimientos, ni plan) y los **estados** del
+plan (`RECOBRABLE` ↔ `ACTIVO`, `422` al intentar `FINALIZADO` a mano y `409` con
+la cuenta saldada). Además verifica el **esquema**: el DDL de las tres tablas
+compila con el dialecto de PostgreSQL, los enums viajan como `VARCHAR` y los
+importes son `NUMERIC(10, 2)` con su `Decimal` intacto. Los dos enums llevan su
+`CHECK` nombrado (`tipo_movimiento_cc`, `estado_plan_cuotas`): una prueba lo
+comprueba en la metadata y otra intenta un `INSERT` directo con un tipo
+inventado y espera el `IntegrityError` de la base.
+
 Los **reportes en PDF del Módulo 3** se cubren en `tests/test_reportes_pdf.py`
 (*21 pruebas*): el generador `app/core/pdf.py` (firma del archivo, tabla `xref`
 con el offset **real** de cada objeto, `/Length` de cada contenido —si el stream
@@ -1827,8 +1943,10 @@ columnas.
   comportamiento idéntico en SQLite y PostgreSQL.
 - **Excepciones de dominio** (`AppError`) traducidas a HTTP por un manejador
   global, manteniendo los endpoints limpios.
-- **Portabilidad** `Enum(native_enum=False)`: usa `VARCHAR` + `CHECK` en lugar de
-  tipos ENUM nativos, válido para SQLite y PostgreSQL.
+- **Portabilidad** `Enum(native_enum=False)`: usa `VARCHAR` en lugar de tipos
+  ENUM nativos, válido para SQLite y PostgreSQL (sin `CREATE TYPE` al migrar de
+  motor). Sólo los enums del Módulo 5 agregan `CHECK` (`create_constraint=True`);
+  en los demás la validación queda en Pydantic y en el ORM.
 - **PostgreSQL**: descomentar `psycopg[binary]` en `requirements.txt` y ajustar
   `DATABASE_URL="postgresql+psycopg://usuario:password@host:5432/db"`.
 - **Interfaz web sin build**: HTML + Tailwind por CDN + `fetch` (vanilla JS).
@@ -1861,6 +1979,13 @@ columnas.
   (decisión del módulo) pero se suman y redondean a dos decimales con
   `app.core.money` (`Decimal` + `ROUND_HALF_UP`), evitando los típicos
   `0.30000000000000004` en un total de caja.
+- **La cuenta corriente es un libro mayor (Módulo 5)**: en vez de un campo
+  «debe/haber» editable, cada deuda y cada pago son filas *append-only* de
+  `transacciones_cc` (`DEBITO`/`CREDITO`) y el saldo se **recalcula** sumando el
+  libro dentro de la misma transacción. Por eso este módulo sí usa
+  `NUMERIC(10, 2)` con `Decimal` de punta a punta: acá el centavo es un
+  comprobante, no un total de pantalla. El JSON publica números para no romper el
+  contrato del panel.
 - **Presentación determinística**: el número de presentación del período
   (`PRES-OS3-202611`) se **deriva** de la cobertura y el mes en lugar de guardarse
   en una tabla propia. La presentación se reconstruye desde los movimientos (una

@@ -2,7 +2,7 @@
 
 > **Documento de arquitectura, módulos y base de datos**
 >
-> Relevamiento: **26/10/2026** · Versión de la aplicación: **1.0.0**
+> Relevamiento: **05/11/2026** · Versión de la aplicación: **1.0.0**
 >
 > Alcance: código fuente completo del repositorio `c:\Sistema\Odontologico`
 > (backend FastAPI, frontend estático, scripts, migraciones y pruebas).
@@ -16,7 +16,7 @@
 ## 0. Resumen ejecutivo
 
 **Franciosi Odontología** es un sistema de gestión para un consultorio
-odontológico. Cubre cuatro módulos funcionales:
+odontológico. Cubre cinco módulos funcionales:
 
 | Módulo | Función |
 |---|---|
@@ -24,15 +24,17 @@ odontológico. Cubre cuatro módulos funcionales:
 | **2. Historia clínica** | Ficha única por paciente, evoluciones inmutables y archivos adjuntos. |
 | **3. Facturación y caja** | Prestaciones, aranceles por obra social, cierre de visitas, caja, liquidaciones y PDF. |
 | **4. Anamnesis** | Ficha pública de salud previa a la consulta, con token HMAC. |
+| **5. Cuenta corriente y financiación** | Saldo del paciente, libro mayor de débitos/créditos, planes de cuotas con entrega inicial y pagos. |
 
 **Stack:** Python 3.14, FastAPI 0.143, SQLAlchemy 2.1, Pydantic 2.14,
 SQLite (desarrollo) / PostgreSQL (producción), frontend HTML + CSS + JavaScript
 vanilla, despliegue en Vercel.
 
-**Base de datos:** 17 tablas, 17 entidades ORM principales y 6 enumeraciones de
-dominio. No hay tablas de usuarios, auditoría, pagos ni archivos binarios.
+**Base de datos:** 20 tablas, 20 entidades ORM principales y 8 enumeraciones de
+dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
+existen como libro mayor contable (`transacciones_cc`), no como pasarela.
 
-**Pruebas:** 31 archivos `test_*.py` (más `conftest.py`) y **704 casos** (suite completa verificada
+**Pruebas:** 33 archivos `test_*.py` (más `conftest.py`) y **752 casos** (suite completa verificada
 al generar este documento).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
@@ -47,7 +49,7 @@ mucha lógica en un solo archivo.
 
 ### 1.1. Veredicto
 
-**Monolito modular organizado por capas técnicas, con cuatro módulos de negocio
+**Monolito modular organizado por capas técnicas, con cinco módulos de negocio
 y un frontend desacoplado por HTTP.**
 
 No es:
@@ -64,23 +66,24 @@ Sí es:
 - una aplicación **monolítica en despliegue**;
 - **modular en código**, con un archivo de servicio por agregado;
 - **estratificada** en `api → schemas → services → models → db`;
-- con **cuatro contextos funcionales** reconocibles (turnos, clínica,
-  facturación, anamnesis) que comparten el mismo mecanismo de persistencia.
+- con **cinco contextos funcionales** reconocibles (turnos, clínica,
+  facturación, anamnesis, financiero) que comparten el mismo mecanismo de
+  persistencia.
 
 ### 1.2. Evidencia concreta
 
 | Dimensión | Observación en el código | Conclusión |
 |---|---|---|
 | Punto de entrada | Un único `app/main.py` crea `FastAPI`, monta estáticos y un `api_router`. | Monolito de despliegue. |
-| Routers | 14 archivos en `app/api/v1/endpoints/`, agrupados por recurso. | Separación por dominio en la capa HTTP. |
-| Servicios | 17 archivos en `app/services/`, uno por agregado o caso de uso. | Lógica de negocio fuera de las rutas. |
-| Modelos | 17 tablas en 17 archivos, todas registradas en un único `Base.metadata`. | Modelo de datos compartido. |
-| Schemas | 13 archivos Pydantic, con contratos de entrada/salida separados. | Contratos explícitos y validación centralizada. |
+| Routers | 15 archivos en `app/api/v1/endpoints/`, agrupados por recurso. | Separación por dominio en la capa HTTP. |
+| Servicios | 18 archivos en `app/services/`, uno por agregado o caso de uso. | Lógica de negocio fuera de las rutas. |
+| Modelos | 20 tablas en 16 archivos, todas registradas en un único `Base.metadata`. | Modelo de datos compartido. |
+| Schemas | 14 archivos Pydantic, con contratos de entrada/salida separados. | Contratos explícitos y validación centralizada. |
 | Acceso a datos | Los servicios usan `Session` y `select()` directamente; no hay repositorios. | Acoplamiento servicio–ORM. |
 | Transacciones | Cada servicio hace `commit()`; no hay Unit of Work explícita. | Transacciones locales por operación. |
-| Frontend | Panel de 6.527 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
+| Frontend | Panel de 6.173 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
 | Despliegue | `vercel.json` declara `framework: fastapi`; un solo deploy. | Escalado y fallos acoplados. |
-| Pruebas | SQLite en memoria + `TestClient`, 31 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
+| Pruebas | SQLite en memoria + `TestClient`, 33 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
 
 ### 1.3. Fortalezas
 
@@ -173,7 +176,7 @@ Odontologico/
 │   ├── __init__.py                  # Paquete y versión (1.0.0)
 │   ├── main.py                      # FastAPI, lifespan, CORS, errores, /health
 │   ├── api/v1/
-│   │   ├── router.py                # Agrega los 13 routers de endpoints
+│   │   ├── router.py                # Agrega los 15 routers de endpoints
 │   │   └── endpoints/
 │   │       ├── doctores.py          # CRUD y baja lógica de profesionales
 │   │       ├── disponibilidad.py    # Agenda semanal, excepciones y bloques
@@ -182,9 +185,11 @@ Odontologico/
 │   │       ├── turnos.py            # Alta, listado y PATCH de turnos
 │   │       ├── historias_clinicas.py# Ficha y evoluciones inmutables
 │   │       ├── anamnesis.py         # Ficha pública y panel de salud
+│   │       ├── odontogramas.py      # GET/PUT del odontograma por paciente
 │   │       ├── prestaciones.py      # Catálogo de prácticas facturables
 │   │       ├── aranceles.py         # Aranceles, convenios e importador
 │   │       ├── facturacion.py       # Caja, presentaciones y liquidaciones
+│   │       ├── finanzas.py          # Cuenta corriente, planes de cuotas y pagos
 │   │       ├── tareas.py            # Disparo de recordatorios
 │   │       ├── whatsapp.py          # Webhook y recordatorios Click-to-Chat
 │   │       └── whatsapp_menu.py     # CRUD del menú del FAQ Bot
@@ -220,12 +225,15 @@ Odontologico/
 │   │   ├── arancel_obra_social.py   # aranceles_obra_social
 │   │   ├── movimiento_caja.py       # movimientos_caja + detalles
 │   │   ├── opcion_menu_whatsapp.py  # opciones_menu_whatsapp
-│   │   └── antecedentes_salud.py    # antecedentes_salud
+│   │   ├── antecedentes_salud.py    # antecedentes_salud
+│   │   ├── odontograma.py           # odontogramas + odontograma_dientes
+│   │   └── cuenta_corriente.py      # cuentas_corrientes + transacciones_cc
+│   │                                #   + planes_cuotas (PK UUID, NUMERIC)
 │   ├── schemas/                     # Contratos Pydantic
 │   │   ├── doctor.py, paciente.py, turno.py, disponibilidad.py
 │   │   ├── obra_social.py, prestacion.py, arancel.py
-│   │   ├── historia_clinica.py, antecedentes_salud.py
-│   │   ├── facturacion.py, whatsapp.py
+│   │   ├── historia_clinica.py, antecedentes_salud.py, odontograma.py
+│   │   ├── facturacion.py, whatsapp.py, finanzas.py
 │   │   └── opcion_menu_whatsapp.py
 │   ├── services/
 │   │   ├── doctor_service.py
@@ -241,6 +249,8 @@ Odontologico/
 │   │   ├── facturacion_service.py
 │   │   ├── liquidacion_service.py
 │   │   ├── reporte_pdf_service.py
+│   │   ├── odontograma_service.py
+│   │   ├── finanzas_service.py
 │   │   ├── whatsapp_menu_service.py
 │   │   ├── whatsapp_bot_service.py
 │   │   └── whatsapp_service.py
@@ -270,7 +280,7 @@ Odontologico/
 │   ├── limpiar_base.py              # Limpieza transaccional de tablas
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 31 archivos test_*.py, 704 casos
+├── tests/                           # 33 archivos test_*.py, 752 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -618,7 +628,33 @@ Si no hay pendientes, responde `422`.
   ReportLab) a partir de los mismos DTO que la API; no recalculan ni consultan la
   base.
 
-#### 3.4.8. Flujo del frontend
+#### 3.4.8. Cuenta corriente, planes de cuotas y pagos
+
+1. La secretaría abre un tratamiento financiado
+   (`POST /api/v1/finanzas/plan-cuotas`) con `paciente_id`, `monto_total`,
+   `cantidad_cuotas` (1 a 120) y, opcionalmente, `porcentaje_entrega_inicial`
+   (50 % por defecto) y `pago_entrega_inicial`.
+2. El servicio calcula en `Decimal`: `entrega = total × porcentaje / 100`,
+   `financiado = total − entrega`, `cuota = financiado / cantidad_cuotas`
+   (`ROUND_HALF_UP` a 2 decimales) y el `ajuste_ultima_cuota` que cierra el plan
+   al centavo. Si la entrega cubre el total, responde `422`.
+3. Dentro de una única transacción: se abre la cuenta si es el primer movimiento
+   (`SELECT … FOR UPDATE`), se registra un `DEBITO` por el total, un `CREDITO`
+   por la entrega si se cobró en el acto, se guarda el plan en `ACTIVO`, se
+   **recalcula** el saldo sumando el libro mayor y se sincroniza el estado de los
+   planes. Cualquier error revierte todo.
+4. Cada cobro posterior (`POST /api/v1/finanzas/pagar`) agrega un `CREDITO`
+   imputado a una cuota (`plan_cuotas_id`) o como pago a cuenta, vuelve a
+   recalcular el saldo y, si queda en cero o negativo, pasa los planes a
+   `FINALIZADO`; el excedente se informa como `saldo_a_favor`.
+5. `GET /api/v1/finanzas/cuenta-corriente/paciente/{id}` devuelve saldo, totales
+   de débitos/créditos, historial descendente y planes. Es de **sólo lectura**:
+   si el paciente nunca tuvo movimientos responde `existe_cuenta=false`.
+6. La secretaría puede marcar un plan como `RECOBRABLE` (cobranza) o devolverlo a
+   `ACTIVO` con `PATCH /finanzas/plan-cuotas/{id}/estado`; `FINALIZADO` a mano es
+   `422` y una cuenta ya saldada es `409`.
+
+#### 3.4.9. Flujo del frontend
 
 - **Panel (`/`)**: `index.html` carga `app.js` y `calendar.js`.
   `app.js` expone `window.OdontoApp`; `calendar.js` consume ese puente en lugar
@@ -686,7 +722,7 @@ Si no hay pendientes, responde `422`.
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 704 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 752 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -783,7 +819,7 @@ Si no hay pendientes, responde `422`.
 | Modelo | Tabla | Campos principales | Relaciones |
 |---|---|---|---|
 | `Doctor` | `doctores` | `id`, `nombre`, `especialidad`, `activo`, `tipo_pago`, `valor_pago` | 1-N turnos, disponibilidades, excepciones, evoluciones y movimientos. |
-| `Paciente` | `pacientes` | `id`, `nombre`, `dni`, `telefono`, `email`, `obra_social_id`, `numero_afiliado`, filiatorios (`fecha_nacimiento`, `estado_civil`, `nacionalidad`, `domicilio`, `profesion`, `titular`, `lugar_trabajo`, `jerarquia`) | N-1 obra social; 1-N turnos; 1-1 historia clínica. |
+| `Paciente` | `pacientes` | `id`, `nombre`, `dni`, `telefono`, `email`, `obra_social_id`, `numero_afiliado`, filiatorios (`fecha_nacimiento`, `estado_civil`, `nacionalidad`, `domicilio`, `profesion`, `titular`, `lugar_trabajo`, `jerarquia`) | N-1 obra social; 1-N turnos; 1-1 historia clínica; 1-1 cuenta corriente. |
 | `ObraSocial` | `obras_sociales` | `id`, `nombre`, `codigo`, `activa` | 1-N pacientes y aranceles. |
 | `Turno` | `turnos` | `id`, `paciente_id`, `doctor_id`, fechas, estados, `whatsapp_mensaje_id` | N-1 paciente/doctor; 1-1 movimiento de caja. |
 | `DisponibilidadDoctor` | `disponibilidad_doctores` | `id`, `doctor_id`, `dia_semana`, `hora_inicio`, `hora_fin` | N-1 doctor. |
@@ -799,6 +835,9 @@ Si no hay pendientes, responde `422`.
 | `AntecedentesSalud` | `antecedentes_salud` | `id`, `historia_clinica_id`, campos de la Historia Clínica General (familiares, personales, odontológicos, examen bucal y diagnóstico/plan), `completado`, `fecha_completado` | 1-1 historia clínica. Los **filiatorios** de la ficha no son columnas: se guardan en `pacientes`. |
 | `Odontograma` | `odontogramas` | `id`, `historia_clinica_id`, `doctor_id`, prótesis fija/removible, coronas, dientes existentes, observaciones, `actualizado_en` | 1-1 historia clínica; 1-N dientes. |
 | `OdontogramaDiente` | `odontograma_dientes` | `id`, `odontograma_id`, `diente` (FDI), `estado`, `notas` | N-1 odontograma; único por diente. |
+| `CuentaCorriente` | `cuentas_corrientes` | `id` (UUID), `paciente_id`, `saldo_actual` (`NUMERIC(10,2)`), `ultima_actualizacion` | 1-1 paciente; 1-N transacciones y planes (orden descendente por fecha). |
+| `TransaccionCC` | `transacciones_cc` | `id` (UUID), `cuenta_corriente_id`, `tipo_movimiento`, `monto`, `descripcion`, `fecha` | N-1 cuenta. Libro mayor *append-only*. |
+| `PlanCuotas` | `planes_cuotas` | `id` (UUID), `cuenta_corriente_id`, `monto_total_tratamiento`, `monto_entrega_inicial`, `cantidad_cuotas`, `monto_por_cuota`, `estado` | N-1 cuenta; `monto_financiado` y `ajuste_ultima_cuota` son propiedades. |
 
 **Enumeraciones (`app/models/enums.py`):**
 
@@ -809,6 +848,10 @@ Si no hay pendientes, responde `422`.
 - `EstadoPagoMovimiento`: `PENDIENTE`, `EN_PROCESO_LIQUIDACION`, `COBRADO`,
   `DEBITADO_OS`.
 - `TipoDisponibilidadEspecifica`: `HABILITADO`, `BLOQUEADO`.
+- `TipoMovimientoCC`: `DEBITO`, `CREDITO` (se guarda como `VARCHAR(10)` con
+  `native_enum=False` + `create_constraint=True`: lleva `CHECK` en la base).
+- `EstadoPlanCuotas`: `ACTIVO`, `FINALIZADO`, `RECOBRABLE` (`VARCHAR(12)` con
+  `CHECK`).
 
 ### 5.2. Schemas Pydantic (`app/schemas/`)
 
@@ -825,6 +868,7 @@ Si no hay pendientes, responde `422`.
 | `antecedentes_salud.py` | `DeclaracionSaludCreate`, `FichaMedicaUpdate`, `AntecedentesSaludRead`, `AnamnesisPublicaRead`, `AnamnesisGuardadaRead`, `FichaSaludPanelRead`, `FichaSaludEnlaceRead`, `FichaSaludEnvioCreate`, `FichaSaludEnvioRead` | Ficha pública (sólo paciente), ficha completa del panel (con examen y diagnóstico), **filiatorios** (se guardan en el paciente y viajan también en `datos_filiatorios`), alertas calculadas y envío manual del enlace. |
 | `odontograma.py` | `OdontogramaDienteCreate/Read`, `OdontogramaUpdate`, `OdontogramaRead` | Gráfico dental: notación FDI 11-48, estados del PDF y totales por color. |
 | `facturacion.py` | `PrestacionFacturadaCreate`, `FacturarTurnoRequest`, `PresupuestoTurnoRequest`, `PresupuestoCobroRead`, `DetalleMovimientoCajaRead`, `MovimientoCajaRead`, `PrestacionesDisponiblesRead`, `CobrarMovimientoRequest`, `DebitarMovimientoRequest`, `ResumenCajaRead`, `PresentacionObraSocialRead`, `LiquidacionProfesionalesRead` | Cierre de visita, caja, presentaciones y liquidaciones. |
+| `finanzas.py` | `AbrirPlanCuotasRequest`, `PlanCuotasAbiertoRead`, `PlanCuotasRead`, `PlanCuotasEstadoUpdate`, `RegistrarPagoRequest`, `PagoRegistradoRead`, `TransaccionCCRead`, `CuentaCorrienteRead` | Consulta del saldo, apertura de planes de cuotas y pagos; importes en `Decimal` publicados como número JSON. |
 | `whatsapp.py` | `WhatsAppText`, `WhatsAppButtonReply`, `WhatsAppContext`, `WhatsAppInteractive`, `WhatsAppInboundMessage`, `WhatsAppWebhookPayload`, `WebhookProcesadoResponse`, `RespuestaBot`, `RecordatorioEnviado`, `RecordatorioResultado`, `RecordatorioPendiente` | Parseo del webhook y respuestas. |
 | `opcion_menu_whatsapp.py` | `OpcionMenuBase`, `OpcionMenuCreate`, `OpcionMenuUpdate`, `OpcionMenuRead`, `MenuWhatsAppVistaPrevia` | CRUD y vista previa del menú. |
 
@@ -843,6 +887,7 @@ Si no hay pendientes, responde `422`.
 | `odontograma_service.py` | `obtener_odontograma`, `guardar_odontograma`, `_aplicar_cabecera`, `_odontograma_de` | Lectura sin crear la historia, alta/corrección del gráfico y reemplazo del conjunto de dientes. |
 | `arancel_service.py` | `obtener_arancel`, `listar_aranceles`, `crear_arancel`, `actualizar_arancel`, `reemplazar_arancel`, `eliminar_arancel`, `resolver_arancel`, `mapa_aranceles`, `coseguro_sugerido`, `convenio_de_obra_social`, `guardar_convenio`, `importar_aranceles`, `plantilla_aranceles` | Acuerdo OS–práctica, grilla de convenios, importador y plantilla. |
 | `facturacion_service.py` | `periodo_mensual`, `numero_presentacion`, `movimiento_de_turno`, `listar_movimientos`, `resumen_caja`, `_resolver_prestaciones`, `prestaciones_disponibles`, `presupuestar`, `facturar_turno`, `cobrar_movimiento`, `debitar_movimiento`, `presentacion_del_periodo`, `generar_presentacion` | Motor de facturación mixta, caja y presentaciones a obras sociales. |
+| `finanzas_service.py` | `transaccion`, `obtener_cuenta_corriente`, `abrir_plan_cuotas`, `registrar_pago`, `cambiar_estado_plan` | Cuenta corriente, libro mayor *append-only*, recálculo del saldo y planes de cuotas dentro de una unidad de trabajo (`commit`/`rollback`). |
 | `liquidacion_service.py` | `_honorarios`, `liquidar_profesionales` | Producción mensual y honorarios según `tipo_pago`. |
 | `reporte_pdf_service.py` | `pdf_presentacion_obra_social`, `pdf_liquidacion_profesionales`, `nombre_archivo_presentacion`, `nombre_archivo_liquidacion` | Render PDF de los dos reportes de facturación. |
 | `whatsapp_menu_service.py` | `opciones_por_defecto`, `contar_opciones`, `listar_opciones`, `obtener_menu_vigente`, `obtener_opcion`, `crear_opcion`, `actualizar_opcion`, `desactivar_opcion`, `sembrar_menu_por_defecto`, `restaurar_menu_por_defecto` | Menú configurable, unicidad de tecla y seed inicial. |
@@ -854,6 +899,7 @@ Si no hay pendientes, responde `422`.
 ```
 whatsapp_bot → whatsapp_service → anamnesis_service → historia_clinica_service
 liquidacion → facturacion → arancel / obra_social / prestacion
+finanzas → paciente
 turno → disponibilidad / doctor
 paciente → obra_social
 ```
@@ -1002,26 +1048,60 @@ fallo de WhatsApp.
 | `PATCH` | `/api/v1/whatsapp/menu/{id}` | Edición parcial/reactivación. |
 | `DELETE` | `/api/v1/whatsapp/menu/{id}` | Baja lógica (`activa=false`). |
 
+#### 5.4.6. Cuenta corriente y financiación
+
+| Método | Ruta | Resumen / regla |
+|---|---|---|
+| `GET` | `/api/v1/finanzas/cuenta-corriente/paciente/{id}` | Saldo, totales e historial (del más nuevo al más viejo). Sin movimientos: `existe_cuenta=false` con saldo `0.00`; paciente inexistente: `404`. |
+| `POST` | `/api/v1/finanzas/plan-cuotas` | Abre el plan: debita el total, calcula entrega inicial (50 % por defecto) y cuotas. Un porcentaje que cubre el total: `422`. |
+| `POST` | `/api/v1/finanzas/pagar` | Registra un `CREDITO` (cuota o pago a cuenta) y devuelve el saldo, más `saldo_a_favor` si pagó de más. Plan de otro paciente: `422`. |
+| `PATCH` | `/api/v1/finanzas/plan-cuotas/{id}/estado` | `ACTIVO` ↔ `RECOBRABLE` (cobranza). `FINALIZADO` a mano: `422`; cuenta saldada: `409`; plan inexistente: `404`. |
+
+> Los importes viajan como número JSON pero se calculan en `Decimal` en el
+> servidor (`Numeric(10, 2)`): el redondeo nunca ocurre en el cliente y el saldo
+> se reconstruye sumando el libro mayor, no incrementándolo.
+>
+> **Interfaz:** la pestaña **Cuenta corriente** del panel (`index.html` +
+> `app.js`, grupo *Operación* del menú) consume estas cuatro rutas: el
+> desplegable de pacientes pide la cuenta del elegido, la tabla de planes ofrece
+> *Registrar pago* (precarga el valor de una cuota en el formulario), *A
+> cobranza* y *Reactivar*, y los dos formularios de la vista abren el plan y
+> registran el pago. Un paciente sin movimientos llega con
+> `existe_cuenta = false` y el saldo en cero.
+
 ### 5.5. Interfaz web (`app/web` y `app/static`)
 
 #### `app/web/router.py`
 
 | Ruta | Archivo | Detalle |
 |---|---|---|
-| `GET /` | `index.html` | Panel principal de la secretaría. |
-| `GET /medico` | `medico.html` | Agenda móvil del odontólogo. |
+| `GET /` | `index.html` | Panel principal de la secretaría; `Cache-Control: no-cache, must-revalidate`. |
+| `GET /medico` | `medico.html` | Agenda móvil del odontólogo; `Cache-Control: no-cache, must-revalidate`. |
 | `GET /anamnesis/{token}` | `anamnesis.html` | Ficha pública; agrega `Cache-Control: no-store`, `Referrer-Policy: no-referrer` y `X-Robots-Tag: noindex`. |
 
 `STATIC_DIR`, `INDEX_FILE`, `MEDICO_FILE` y `ANAMNESIS_FILE` resuelven rutas
 absolutas con `pathlib`.
 
+> **Por qué el panel no se cachea.** `StaticFiles` no envía `Cache-Control`, así
+> que el navegador aplicaba su heurística y podía seguir usando un `app.js`
+> anterior después de una actualización. El síntoma era desconcertante: la
+> pestaña nueva aparecía en el menú pero el click **no hacía nada**, porque
+> `cambiarVista()` ignora las vistas que no figuran en `VISTAS`. Por eso el
+> middleware `revalidar_estaticos` (`app/main.py`) marca `no-cache` todo lo que
+> se sirve desde `/static` y las páginas del panel hacen lo propio con
+> `SIN_CACHE`: el navegador revalida contra el `ETag` y recibe `304` cuando el
+> archivo no cambió. Como red de seguridad, `index.html` incluye un guardián que
+> compara los enlaces `.nav-link[data-view]` del menú con las claves de
+> `OdontoApp.VISTAS` y, si falta alguna, muestra un aviso con un botón para
+> recargar (además de un `console.warn` en `cambiarVista`).
+
 #### Archivos estáticos
 
 | Archivo | Tamaño aproximado | Responsabilidad |
 |---|---:|---|
-| `index.html` | 1.889 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación y bot. |
+| `index.html` | 2.107 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente y bot. |
 | `styles.css` | 1.348 líneas | Componentes, animaciones, timeline clínica y utilidades propias. |
-| `app.js` | 6.485 líneas | Estado global, cliente `fetch`, render, modales (ficha médica y envío del enlace), disponibilidad, facturación, caja, historia y puente `window.OdontoApp`. |
+| `app.js` | 6.996 líneas | Estado global, cliente `fetch`, render, modales (ficha médica y envío del enlace), disponibilidad, facturación, caja, cuenta corriente, historia y puente `window.OdontoApp`. |
 | `calendar.js` | 986 líneas | Calendario mensual, filtro por odontólogo, tooltip, panel del día y bloques libres; consume `window.OdontoApp` y expone `window.OdontoCalendar`. |
 | `ficha_medica.js` | 686 líneas | Catálogo único de **124 campos** (8 filiatorios + antecedentes familiares, personales, odontológicos, examen y diagnóstico) + formulario, edad calculada y resumen reutilizables. |
 | `ficha_medica.css` | 226 líneas | Estilos del cuestionario en la página pública, el panel y la vista móvil (incluye la edad calculada). |
@@ -1107,6 +1187,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_doctores_pago.py` | Modalidad de pago y su efecto en la liquidación. |
 | `test_enviar_ficha.py` | Enlace y envío manual/API de la ficha, el formato del mensaje (enlace en su propia línea), el botón que abre WhatsApp Web y el modal del panel (link clickeable y aviso de URL local), y la CLI con servidor HTTP falso. |
 | `test_facturacion.py` | Precios, cierre de caja, cobros, débitos, presentaciones y liquidaciones. |
+| `test_finanzas.py` | Cuenta sin movimientos (el `GET` no escribe), plan con entrega y ajuste al centavo, pagos, saldo a favor, rollback completo, estados del plan, DDL portable a PostgreSQL y los `CHECK` de los dos enums (en la metadata y con un `INSERT` inválido que levanta `IntegrityError`). |
 | `test_fechas_utc_naive.py` | Normalización UTC naive y comparaciones. |
 | `test_historias_clinicas.py` | Alta, cronología, ficha y triple inmutabilidad. |
 | `test_medico_agenda.py` | Flujo de la vista móvil y búsqueda de pacientes. |
@@ -1151,11 +1232,14 @@ python -m pytest --collect-only
 - **Fechas:** columnas `UTCDateTime`; en PostgreSQL son
   `TIMESTAMP WITH TIME ZONE` y en SQLite `DATETIME`. En Python siempre se
   entregan como **UTC naive**.
-- **Enumeraciones:** se guardan como `VARCHAR` (`native_enum=False`). Salvo las
-  restricciones `CHECK` explícitas, la validación de valores vive en Pydantic y
-  en los servicios.
-- **Importes:** `FLOAT`; no hay `NUMERIC`/`DECIMAL` en la base. El redondeo se
-  hace en la capa de servicio con `Decimal`.
+- **Enumeraciones:** se guardan como `VARCHAR` (`native_enum=False`). Sólo los
+  enums del Módulo 5 (`tipo_movimiento_cc`, `estado_plan_cuotas`) agregan el
+  `CHECK` nombrado, porque declaran además `create_constraint=True`; en el resto
+  la validación vive en Pydantic y en los servicios.
+- **Importes:** `FLOAT` en facturación y caja, sin `NUMERIC`/`DECIMAL`; el
+  redondeo se hace en la capa de servicio con `Decimal`. **Excepción:** las tres
+  tablas del Módulo 5 usan `NUMERIC(10, 2)` y `Decimal` de punta a punta para que
+  el saldo no acumule error binario.
 - **Sin timestamps universales:** no todas las tablas tienen `created_at` ni
   `updated_at`; sólo `fecha_atencion`, `fecha_subida`, `fecha` y
   `fecha_completado` donde el negocio lo requiere.
@@ -1252,12 +1336,17 @@ aplicación lista
 | 15 | `detalles_movimiento_caja` | 3 | Prácticas e importes congelados de la visita. |
 | 16 | `odontogramas` | 4 | Cabecera del odontograma (prótesis, coronas, conteos). |
 | 17 | `odontograma_dientes` | 4 | Estado pintado de cada diente (rojo/azul/X). |
+| 18 | `cuentas_corrientes` | 5 / 1 | Saldo deudor y última actualización de la cuenta del paciente. |
+| 19 | `transacciones_cc` | 5 | Libro mayor *append-only*: débitos (deuda) y créditos (pagos). |
+| 20 | `planes_cuotas` | 5 | Tratamiento financiado: entrega inicial, cuotas y estado. |
 
 ### 6.4. Diccionario de datos exhaustivo
 
 > Convenciones de las tablas:
 >
-> - **PK**: clave primaria entera autoincremental (índice implícito).
+> - **PK**: clave primaria entera autoincremental (índice implícito). Las tres
+>   tablas del Módulo 5 usan **PK `UUID`** (`CHAR(32)` en SQLite y `UUID` nativo
+>   en PostgreSQL); por eso su clave foránea a `pacientes` sigue siendo `INTEGER`.
 > - **FK**: clave foránea, con la acción `ON DELETE` indicada.
 > - **Nulo**: `No` = `NOT NULL`; `Sí` = admite `NULL`.
 > - **Default**: valor a nivel de base (`server_default`). El default Python
@@ -1718,6 +1807,81 @@ reemplaza el conjunto completo en cada guardado.
 - `GET /pacientes/{id}/odontograma` **no** crea la historia clínica; el `PUT` sí
   la crea, igual que la ficha de salud.
 
+#### 6.4.18. `cuentas_corrientes`
+
+Una fila por paciente: es la «foto» del saldo. El detalle no se guarda acá sino
+en `transacciones_cc`, de modo que el saldo siempre se puede reconstruir.
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `CHAR(32) / UUID` | No | `uuid4` (Python) | **PK** | Identificador de la cuenta. |
+| `paciente_id` | `INTEGER / INTEGER` | No | — | **FK** → `pacientes.id` (`RESTRICT`); **UQ** `uq_cuenta_corriente_paciente` | Paciente dueño de la cuenta. |
+| `saldo_actual` | `NUMERIC(10, 2) / NUMERIC(10, 2)` | No | `0` | — | `suma(DEBITO) - suma(CREDITO)`; positivo = deuda, negativo = a favor. |
+| `ultima_actualizacion` | `DATETIME / TIMESTAMP WITH TIME ZONE` | No | `now()` | — | Momento del último movimiento (UTC naive en Python). |
+
+**Restricciones y notas:**
+
+- `uq_cuenta_corriente_paciente` es un **índice único nombrado**: dos altas
+  simultáneas del mismo paciente terminan en `409`, nunca en dos cuentas.
+- `ON DELETE RESTRICT` en `paciente_id`: un paciente con movimientos contables no
+  se puede borrar (la cuenta tiene valor de comprobante).
+- El `GET` de la API **no** crea la cuenta: informa `existe_cuenta = false`.
+
+#### 6.4.19. `transacciones_cc`
+
+Libro mayor de la cuenta. Es *append-only*: un error se corrige con otro
+movimiento, nunca editando ni borrando el anterior.
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `CHAR(32) / UUID` | No | `uuid4` (Python) | **PK** | Identificador del movimiento. |
+| `cuenta_corriente_id` | `CHAR(32) / UUID` | No | — | **FK** → `cuentas_corrientes.id` (`CASCADE`); **IDX** `ix_transaccion_cc_cuenta_fecha` | Cuenta a la que pertenece. |
+| `tipo_movimiento` | `VARCHAR(10) / VARCHAR(10)` | No | — | `CHECK` `tipo_movimiento_cc` | `DEBITO` suma deuda; `CREDITO` la cancela. |
+| `monto` | `NUMERIC(10, 2) / NUMERIC(10, 2)` | No | — | `CHECK` `ck_transaccion_cc_monto_positivo` (`> 0`) | Importe, siempre positivo. |
+| `descripcion` | `VARCHAR(200) / VARCHAR(200)` | No | — | — | Concepto («Tratamiento financiado: …», «Pago de cuota»). |
+| `fecha` | `DATETIME / TIMESTAMP WITH TIME ZONE` | No | `now()` | **IDX** `ix_transaccion_cc_cuenta_fecha` | Fecha del movimiento; ordena el historial (descendente). |
+
+**Restricciones y notas:**
+
+- `monto > 0`: el signo lo pone `tipo_movimiento`, así no existen débitos
+  negativos ni «créditos negativos» encubiertos.
+- El enum viaja como `VARCHAR` (`native_enum=False`): el paso de SQLite a
+  PostgreSQL no necesita `CREATE TYPE` ni una migración de datos. Con
+  `create_constraint=True` el `CHECK` `tipo_movimiento_cc` sí queda en la tabla,
+  así que una escritura SQL directa tampoco puede inventar un tipo. En una base
+  creada antes de esa opción el `CHECK` no aparece (lo defienden Pydantic y el
+  ORM); recrear la tabla o agregarlo a mano es la única vía, porque `create_all`
+  no altera tablas existentes.
+- `ON DELETE CASCADE`: sin cuenta, los movimientos no significan nada.
+
+#### 6.4.20. `planes_cuotas`
+
+Cabecera del tratamiento financiado: total, entrega inicial, cuotas y estado. La
+deuda se registra en `transacciones_cc` (un `DEBITO` por el total y un `CREDITO`
+por la entrega si se cobró en el acto).
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `CHAR(32) / UUID` | No | `uuid4` (Python) | **PK** | Identificador del plan. |
+| `cuenta_corriente_id` | `CHAR(32) / UUID` | No | — | **FK** → `cuentas_corrientes.id` (`CASCADE`); **IDX** `ix_plan_cuotas_cuenta` | Cuenta que financia el plan. |
+| `monto_total_tratamiento` | `NUMERIC(10, 2) / NUMERIC(10, 2)` | No | — | `CHECK` `ck_plan_cuotas_monto_total` (`> 0`) | Importe total; es lo que se debita. |
+| `monto_entrega_inicial` | `NUMERIC(10, 2) / NUMERIC(10, 2)` | No | `0` | `CHECK` `ck_plan_cuotas_entrega_inicial` (`>= 0`) | Anticipo (50 % por defecto), esté cobrado o no. |
+| `cantidad_cuotas` | `INTEGER / INTEGER` | No | — | `CHECK` `ck_plan_cuotas_cantidad` (`>= 1`) | Cuotas mensuales del saldo restante. |
+| `monto_por_cuota` | `NUMERIC(10, 2) / NUMERIC(10, 2)` | No | `0` | `CHECK` `ck_plan_cuotas_monto_cuota` (`>= 0`) | Valor de cada cuota, redondeado a dos decimales. |
+| `estado` | `VARCHAR(12) / VARCHAR(12)` | No | `'ACTIVO'` | `CHECK` `estado_plan_cuotas` | `ACTIVO`; `FINALIZADO` cuando la cuenta queda saldada; `RECOBRABLE` para cobranza. |
+
+**Restricciones y notas:**
+
+- `monto_financiado` y `ajuste_ultima_cuota` son **propiedades calculadas** (no
+  columnas): la primera es `total - entrega`; la segunda, la diferencia de
+  centavos que absorbe la última cuota (`500 / 3 = 166.67` → `-0.01`).
+- `FINALIZADO` no se fija a mano: lo pone `finanzas_service` cuando la cuenta
+  queda saldada (la API responde `422` si se intenta).
+- `RECOBRABLE` marca el plan para cobranza y se conserva mientras haya deuda.
+- `estado` usa `VARCHAR(12)` con el `CHECK` `estado_plan_cuotas` (`ACTIVO`,
+  `FINALIZADO` y `RECOBRABLE`, los valores del enum), por el mismo motivo que
+  `tipo_movimiento`: `native_enum=False` + `create_constraint=True`.
+
 ### 6.5. Relaciones del sistema
 
 | Origen | Campo | Destino | Cardinalidad | `ON DELETE` | Regla |
@@ -1741,6 +1905,9 @@ reemplaza el conjunto completo en cada guardado.
 | `movimientos_caja` | `doctor_id` | `doctores.id` | N:1 | `RESTRICT` | El doctor no se borra si tiene caja. |
 | `detalles_movimiento_caja` | `movimiento_caja_id` | `movimientos_caja.id` | N:1 | `CASCADE` | Varias prácticas por movimiento. |
 | `detalles_movimiento_caja` | `prestacion_id` | `prestaciones.id` | N:1 | `RESTRICT` | La práctica no se borra si está facturada. |
+| `cuentas_corrientes` | `paciente_id` | `pacientes.id` | **1:1** (UQ) | `RESTRICT` | Una cuenta por paciente; el registro contable no se borra con el paciente. |
+| `transacciones_cc` | `cuenta_corriente_id` | `cuentas_corrientes.id` | N:1 | `CASCADE` | Muchos movimientos por cuenta (libro mayor). |
+| `planes_cuotas` | `cuenta_corriente_id` | `cuentas_corrientes.id` | N:1 | `CASCADE` | Varios planes financiados por cuenta. |
 
 **Relación N:M conceptual:** `obras_sociales` ↔ `prestaciones`, resuelta por
 `aranceles_obra_social` con los atributos `monto_cubre_os` y
@@ -1752,6 +1919,7 @@ reemplaza el conjunto completo en cada guardado.
 - `historias_clinicas` ↔ `antecedentes_salud` (`uq_antecedentes_historia_clinica`).
 - `historias_clinicas` ↔ `odontogramas` (`uq_odontograma_historia`).
 - `turnos` ↔ `movimientos_caja` (`uq_movimiento_caja_turno`).
+- `pacientes` ↔ `cuentas_corrientes` (`uq_cuenta_corriente_paciente`).
 
 ### 6.6. Restricciones e integridad
 
@@ -1770,17 +1938,28 @@ reemplaza el conjunto completo en cada guardado.
 | Índice único | `uq_odontograma_diente` | `odontograma_dientes` | `(odontograma_id, diente)` único. |
 | Índice único | `uq_movimiento_caja_turno` | `movimientos_caja` | `turno_id` único (1:1). |
 | Índice único | `uq_opcion_menu_numero` | `opciones_menu_whatsapp` | `numero` único. |
+| Índice único | `uq_cuenta_corriente_paciente` | `cuentas_corrientes` | `paciente_id` único (1:1). |
 | Índice único parcial | `uq_turno_doctor_fecha_inicio` | `turnos` | `(doctor_id, fecha_hora_inicio)` donde `estado_turno != 'CANCELADO'`. |
 | `CHECK` | `ck_turno_fin_posterior_inicio` | `turnos` | `fecha_hora_fin > fecha_hora_inicio`. |
 | `CHECK` | `ck_disponibilidad_dia_semana_valido` | `disponibilidad_doctores` | `dia_semana BETWEEN 0 AND 6`. |
 | `CHECK` | `ck_disponibilidad_fin_posterior_inicio` | `disponibilidad_doctores` | `hora_fin > hora_inicio`. |
 | `CHECK` | `ck_especifica_fin_posterior_inicio` | `disponibilidad_especifica` | `hora_fin > hora_inicio`. |
 | `CHECK` | `ck_especifica_tipo_valido` | `disponibilidad_especifica` | `tipo IN ('HABILITADO','BLOQUEADO')`. |
+| `CHECK` | `ck_transaccion_cc_monto_positivo` | `transacciones_cc` | `monto > 0`. |
+| `CHECK` | `tipo_movimiento_cc` | `transacciones_cc` | `tipo_movimiento IN ('DEBITO','CREDITO')` (generado por el enum). |
+| `CHECK` | `estado_plan_cuotas` | `planes_cuotas` | `estado IN ('ACTIVO','FINALIZADO','RECOBRABLE')` (generado por el enum). |
+| `CHECK` | `ck_plan_cuotas_monto_total` | `planes_cuotas` | `monto_total_tratamiento > 0`. |
+| `CHECK` | `ck_plan_cuotas_entrega_inicial` | `planes_cuotas` | `monto_entrega_inicial >= 0`. |
+| `CHECK` | `ck_plan_cuotas_cantidad` | `planes_cuotas` | `cantidad_cuotas >= 1`. |
+| `CHECK` | `ck_plan_cuotas_monto_cuota` | `planes_cuotas` | `monto_por_cuota >= 0`. |
 
 #### Reglas que sólo viven en la aplicación
 
 - Valores válidos de `EstadoTurno`, `EstadoWhatsApp`, `TipoPagoDoctor`,
-  `EstadoPagoMovimiento` y `TipoOpcionMenu` (columnas `VARCHAR` sin `CHECK`).
+  `EstadoPagoMovimiento` y `TipoOpcionMenu` (columnas `VARCHAR` sin `CHECK`; los
+  enums del Módulo 5 sí llevan `CHECK` en la base).
+- Que el saldo de la cuenta coincida con el libro mayor: se recalcula desde las
+  transacciones en cada operación, nunca se incrementa a mano.
 - Solapamiento **parcial** de turnos del mismo doctor y solapamiento del paciente
   con otro profesional.
 - Solapamiento de rangos semanales o de excepciones del mismo tipo.
@@ -1822,6 +2001,10 @@ paridad local, agregar un event listener de SQLAlchemy que ejecute
 - No hay bloqueo optimista (`version`) ni aislamiento explícito por operación.
 - Un turno puede cancelarse y volver a crearse en el mismo inicio; el índice
   parcial lo permite porque excluye `CANCELADO`.
+- La cuenta corriente se crea *on demand* (`SELECT … FOR UPDATE` por paciente en
+  PostgreSQL) y el alta duplicada se traduce a 409 con el índice único; el saldo
+  y el estado de los planes se actualizan en la misma transacción que el
+  movimiento, y cualquier fallo revierte todo (libro mayor incluido).
 
 ### 6.7. Estados y ciclos de vida
 
@@ -1874,6 +2057,24 @@ hace `PATCH` y pasa a `ENVIADO`.
 | `COMISION` | `valor_pago` % obligatorio (0-100). |
 | `SUELDO` | `valor_pago` fijo mensual, mayor que 0. |
 
+#### Movimiento de cuenta corriente (`transacciones_cc.tipo_movimiento`)
+
+| Valor | Significado | Efecto en el saldo |
+|---|---|---|
+| `DEBITO` | Deuda: alta de plan, ajuste de precio, cargo manual. | Suma. |
+| `CREDITO` | Pago: cuota, entrega o pago a cuenta. | Resta. |
+
+El libro es **inmutable**: no hay `UPDATE` ni `DELETE` de movimientos; una
+corrección se hace con otro movimiento de signo contrario.
+
+#### Plan de cuotas (`planes_cuotas.estado`)
+
+| Valor | Significado | Quién lo asigna |
+|---|---|---|
+| `ACTIVO` | Plan en curso, con cuotas por vencer. | Alta del plan y `PATCH` manual. |
+| `FINALIZADO` | La cuenta quedó saldada (`saldo <= 0`). | Sólo el servicio, al registrar el último pago (`422` si se intenta a mano). |
+| `RECOBRABLE` | Deuda derivada a cobranza. | `PATCH` manual (`ACTIVO` ↔ `RECOBRABLE`). |
+
 #### Menú del bot (`opciones_menu_whatsapp.tipo`)
 
 `TEXTO` (respuesta manual), `PRECIO` (tarifa de consulta), `OBRAS_SOCIALES`
@@ -1900,6 +2101,11 @@ hace `PATCH` y pasa a `ENVIADO`.
 - Columnas `FLOAT`, no `DECIMAL`.
 - `redondear_monto`, `sumar_montos`, `multiplicar_monto` y `porcentaje_de` usan
   `Decimal(str(valor))` y `ROUND_HALF_UP` a 2 decimales.
+- **Excepción — Módulo 5:** `cuentas_corrientes`, `transacciones_cc` y
+  `planes_cuotas` usan `NUMERIC(10, 2)` y `Decimal` de punta a punta (el ORM
+  devuelve `Decimal`, no `float`), porque un saldo se suma y se resta muchas
+  veces y el error binario del `FLOAT` se acumularía. La API los expone como
+  número JSON y el redondeo se hace siempre en el servidor.
 - Los importes se guardan ya redondeados por los servicios; una escritura SQL
   directa puede introducir más decimales.
 - Moneda implícita: pesos argentinos (ARS).
@@ -1941,6 +2147,9 @@ hace `PATCH` y pasa a `ENVIADO`.
 | Prácticas por código | `prestaciones` | `uq_prestacion_codigo` | Búsqueda/unicidad. |
 | Coberturas por nombre | `obras_sociales` | `uq_obra_social_nombre` | Exacta; la búsqueda parcial escanea. |
 | Menú por tecla | `opciones_menu_whatsapp` | `uq_opcion_menu_numero` | Un dígito por opción. |
+| Cuenta de un paciente | `cuentas_corrientes` | `uq_cuenta_corriente_paciente` | Búsqueda por `paciente_id` y unicidad 1:1. |
+| Historial de una cuenta | `transacciones_cc` | `ix_transaccion_cc_cuenta_fecha` | Cubre `(cuenta_corriente_id, fecha)`; el `ORDER BY fecha DESC` sale del índice. |
+| Planes de una cuenta | `planes_cuotas` | `ix_plan_cuotas_cuenta` | Ficha financiera del paciente. |
 
 **Índices duplicados/legacy detectados:** en una base SQLite ya migrada pueden
 coexistir `ix_movimiento_caja_fecha` e `ix_movimientos_caja_fecha` sobre la misma
@@ -1983,6 +2192,14 @@ una migración controlada.
   migración manual (SQLite suele necesitar reconstrucción de tabla).
 - Renombrar o eliminar columnas no está soportado por el mecanismo actual.
 - No hay tabla `alembic_version` ni historial de migraciones aplicadas.
+
+**Caso concreto — Módulo 5:** las tablas `cuentas_corrientes`,
+`transacciones_cc` y `planes_cuotas` son nuevas, así que `create_all` las crea
+completas (PK `UUID`, `NUMERIC(10, 2)`, `CHECK`, índice único e índices de
+consulta). No necesitan `CREATE TYPE` ni conversión de datos porque los enums son
+`VARCHAR` (`native_enum=False`); el DDL se compila para PostgreSQL en
+`tests/test_finanzas.py`, que falla si alguien introduce un tipo exclusivo de
+SQLite.
 
 ### 6.11. Copias de seguridad y restauración
 
@@ -2222,8 +2439,10 @@ y backup previo.
 #### Cambiar un `CHECK` o un enum de base
 
 - Cambiar un `CHECK` en SQLite requiere reconstrucción de tabla.
-- Si el enum se guarda como `VARCHAR` sin `CHECK` (caso actual), agregar un valor
-  sólo requiere actualizar el enum Python, los schemas y la UI.
+- Si el enum se guarda como `VARCHAR` sin `CHECK` (todos salvo los del Módulo 5),
+  agregar un valor sólo requiere actualizar el enum Python, los schemas y la UI.
+- Los enums del Módulo 5 sí llevan `CHECK` nombrado: agregar un valor obliga a
+  recrear el constraint (ver §7.7).
 
 ### 7.6. Agregar índices, `UNIQUE` o claves foráneas
 
@@ -2289,7 +2508,10 @@ Es el patrón de `uq_turno_doctor_fecha_inicio`. Sirve para excluir filas
    - `README.md`/`DOCUMENTACION.md`.
 5. Agregar tests de contrato y de lógica.
 6. **No** hace falta migrar la columna si es `VARCHAR` sin `CHECK`; sí hace falta
-   si se decide agregar un `CHECK` o un tipo enum nativo.
+   si se decide agregar un `CHECK` o un tipo enum nativo. Los enums del Módulo 5
+   (`tipo_movimiento_cc`, `estado_plan_cuotas`) **sí** tienen `CHECK`: agregar un
+   valor exige recrear el constraint (`ALTER TABLE ... DROP/ADD CONSTRAINT` en
+   PostgreSQL; reconstrucción de tabla en SQLite).
 7. Si se elimina un valor, primero migrar las filas existentes a otro valor y
    verificar que ningún cliente lo envíe.
 
@@ -2363,6 +2585,24 @@ def test_crear_mi_recurso(client):
     assert respuesta.status_code == 201
     assert respuesta.json()["nombre"] == "Demo"
 ```
+
+**Ejemplo de test de dinero y transacciones** (patrón de `tests/test_finanzas.py`):
+
+```python
+def test_el_saldo_coincide_con_el_libro_mayor(client, db_session, paciente):
+    _abrir_plan(client, paciente.id, monto_total=1200, cantidad_cuotas=3)
+    _pagar(client, paciente.id, 200)
+
+    cuenta = _cuenta(client, paciente.id)
+    # 1200 debitados - 600 de entrega - 200 del pago = 400
+    assert Decimal(str(cuenta["saldo_actual"])) == Decimal("400.00")
+    assert Decimal(str(cuenta["saldo_actual"])) == _saldo_del_libro_mayor(db_session)
+```
+
+Nunca comparar importes con `==` entre `float`; convertir a `Decimal` con `str`
+como en los helpers del archivo. `_abrir_plan`, `_pagar`, `_cuenta` y
+`_saldo_del_libro_mayor` son los helpers privados de `tests/test_finanzas.py`
+(acá se muestran sin sus cuerpos).
 
 **Comandos:**
 
@@ -2586,8 +2826,8 @@ Modos:
 
 | Modo | Qué vacía | Qué conserva |
 |---|---|---|
-| `operativo` (recomendado) | `pacientes`, `turnos`, `historias_clinicas`, `evoluciones_medicas`, `antecedentes_salud`, `odontogramas`, `odontograma_dientes`, `archivos_adjuntos`, `movimientos_caja`, `detalles_movimiento_caja`, `disponibilidad_especifica` | `doctores`, `obras_sociales`, `prestaciones`, `aranceles_obra_social`, `disponibilidad_doctores` y `opciones_menu_whatsapp` |
-| `todo` | Las 17 tablas | Nada; vuelve a sembrar las 4 opciones del menú del bot |
+| `operativo` (recomendado) | `pacientes`, `turnos`, `historias_clinicas`, `evoluciones_medicas`, `antecedentes_salud`, `odontogramas`, `odontograma_dientes`, `archivos_adjuntos`, `movimientos_caja`, `detalles_movimiento_caja`, `disponibilidad_especifica`, `cuentas_corrientes`, `transacciones_cc`, `planes_cuotas` | `doctores`, `obras_sociales`, `prestaciones`, `aranceles_obra_social`, `disponibilidad_doctores` y `opciones_menu_whatsapp` |
+| `todo` | Las 20 tablas | Nada; vuelve a sembrar las 4 opciones del menú del bot |
 
 El `.bat` primero ejecuta un **simulacro** (conteos), después pide escribir `SI`
 y recién entonces borra. En PostgreSQL usa `TRUNCATE ... RESTART IDENTITY` sin
@@ -2619,7 +2859,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **704 tests**.
+- Resultado actual: **752 tests**.
 
 ### 8.5. Publicación
 
@@ -2681,15 +2921,16 @@ detached; remoto `origin`; tests en verde.
 | **P0** | Webhook POST sin firma | Un tercero podría simular respuestas de pacientes. | Validar `X-Hub-Signature-256` con el App Secret de Meta. |
 | **P1** | SQLite efímero en Vercel | Pérdida total de datos entre despliegues. | `DATABASE_URL` PostgreSQL y backups verificados. |
 | **P1** | Migraciones sin versionado | Deriva de esquema, cambios no reproducibles, rollback difícil. | Adoptar Alembic; mantener scripts legacy sólo para datos. |
-| **P1** | `Float` para dinero | Errores de centavos en sumas/reportes. | `Numeric(12,2)` o `Decimal` persistido; mantiene `money.py`. |
+| **P1** | `Float` para dinero | Errores de centavos en sumas/reportes de facturación y caja (el Módulo 5 ya usa `Numeric(10,2)`). | Extender `Numeric(12,2)`/`Decimal` persistido a `movimientos_caja` y `detalles_movimiento_caja`; mantener `money.py`. |
 | **P1** | Sin auditoría | No se puede saber quién cambió una historia o un cobro. | Tabla `auditoria` + usuario autenticado + triggers/servicio. |
 | **P1** | PII en logs | Teléfonos y textos de pacientes en stdout. | Redacción, retención y acceso restringido a logs. |
 | **P1** | Sin rate limiting | Abuso del webhook, anamnesis o fuerza bruta futura. | Límites por IP/teléfono y backoff. |
 | **P1** | Token de anamnesis sin expiración | Enlace válido mientras exista el turno. | Expiración explícita o versión de token por turno. |
 | **P1** | CORS abierto | Cualquier origen puede llamar a la API desde un navegador. | Restringir dominios; no usar `*` con credenciales. |
 | **P2** | `app.js` monolítico | Regresiones y difícil mantenimiento. | Separar por vistas/módulos sin cambiar la API. |
+| **P2** | Replicación por API parcial | `scripts/replicar_datos_api.py` copia coberturas, doctores, pacientes y turnos; las cuentas corrientes y los planes no viajan (se recrean a mano). | Extender la replicación a `/finanzas` o usar `scripts/migrar_sqlite_a_postgres`, que copia **todas** las tablas de la metadata. |
 | **P2** | FK no aplicadas en SQLite | Huérfanos en desarrollo/pruebas. | `PRAGMA foreign_keys=ON` por conexión. |
-| **P2** | Enums sin `CHECK` | Valores inválidos por SQL directo. | `CHECK` o enums nativos; validar en escritura. |
+| **P2** | Enums sin `CHECK` | Valores inválidos por SQL directo (salvo el Módulo 5, que ya los tiene). | `CHECK` o enums nativos; validar en escritura. |
 | **P2** | Índices duplicados/ausentes | Consultas lentas a gran volumen. | Limpiar duplicados; índices compuestos/expresiones. |
 | **P2** | Sin scheduler | Recordatorios dependen de un cron externo no incluido. | Vercel Cron o worker con idempotencia. |
 | **P2** | Sin outbox de WhatsApp | Un fallo entre envío y commit deja estados inconsistentes. | Patrón outbox + reintentos. |
@@ -2710,7 +2951,7 @@ detached; remoto `origin`; tests en verde.
 **Fase 2 — estabilidad y mantenibilidad:**
 
 1. Alembic;
-2. `Numeric` para importes;
+2. `Numeric` para los importes del Módulo 3 (el Módulo 5 ya lo usa);
 3. auditoría;
 4. `PRAGMA foreign_keys=ON` en SQLite;
 5. tests de migración en PostgreSQL real (no sólo SQLite).
@@ -2719,10 +2960,11 @@ detached; remoto `origin`; tests en verde.
 
 1. dividir `app.js`;
 2. outbox/scheduler de WhatsApp;
-3. índices de búsqueda;
-4. almacenamiento de archivos;
-5. métricas y trazas;
-6. mejoras de accesibilidad y experiencia móvil.
+3. pestaña de cuenta corriente en el panel (hoy el Módulo 5 es sólo API);
+4. índices de búsqueda;
+5. almacenamiento de archivos;
+6. métricas y trazas;
+7. mejoras de accesibilidad y experiencia móvil.
 
 ### 9.3. Lo que **no** es deuda técnica
 
@@ -2755,6 +2997,12 @@ detached; remoto `origin`; tests en verde.
 | **Convenio** | Grilla completa de aranceles de una cobertura. |
 | **Presentación** | Documento/período que el consultorio envía a la obra social para cobrar. |
 | **Débito** | Importe que la obra social rechaza o descuenta. |
+| **Cuenta corriente** | Saldo deudor de un paciente con el consultorio; una por paciente. |
+| **Libro mayor** | Lista *append-only* de movimientos (`DEBITO`/`CREDITO`) que explica el saldo. |
+| **Entrega inicial** | Anticipo que el paciente paga al abrir un plan de cuotas (50 % por defecto). |
+| **Plan de cuotas** | Tratamiento financiado: entrega inicial + cuotas mensuales sobre el saldo restante. |
+| **Saldo a favor** | Excedente pagado por el paciente; el saldo de la cuenta queda negativo. |
+| **RECOBRABLE** | Estado del plan derivado a cobranza, con deuda pendiente. |
 | **Wamid** | Identificador del mensaje de WhatsApp; se usa para correlacionar respuestas. |
 | **UTC naive** | Fecha/hora en UTC sin `tzinfo`, convención de todo el backend. |
 | **Baja lógica** | Marcar `activo/activa = false` sin borrar la fila. |
@@ -2772,7 +3020,10 @@ UNION ALL SELECT 'turnos', COUNT(*) FROM turnos
 UNION ALL SELECT 'historias_clinicas', COUNT(*) FROM historias_clinicas
 UNION ALL SELECT 'evoluciones_medicas', COUNT(*) FROM evoluciones_medicas
 UNION ALL SELECT 'movimientos_caja', COUNT(*) FROM movimientos_caja
-UNION ALL SELECT 'detalles_movimiento_caja', COUNT(*) FROM detalles_movimiento_caja;
+UNION ALL SELECT 'detalles_movimiento_caja', COUNT(*) FROM detalles_movimiento_caja
+UNION ALL SELECT 'cuentas_corrientes', COUNT(*) FROM cuentas_corrientes
+UNION ALL SELECT 'transacciones_cc', COUNT(*) FROM transacciones_cc
+UNION ALL SELECT 'planes_cuotas', COUNT(*) FROM planes_cuotas;
 ```
 
 **Duplicados de DNI (no debería devolver filas):**
@@ -2812,6 +3063,31 @@ WHERE fecha_hora_inicio >= '2026-10-19 00:00:00'
 ORDER BY fecha_hora_inicio;
 ```
 
+**Saldos desincronizados con el libro mayor (no debería devolver filas):**
+
+```sql
+SELECT c.id, c.paciente_id, c.saldo_actual, l.saldo_libro
+FROM cuentas_corrientes c
+JOIN (
+    SELECT cuenta_corriente_id,
+           SUM(CASE WHEN tipo_movimiento = 'DEBITO'  THEN monto ELSE 0 END)
+         - SUM(CASE WHEN tipo_movimiento = 'CREDITO' THEN monto ELSE 0 END) AS saldo_libro
+    FROM transacciones_cc
+    GROUP BY cuenta_corriente_id
+) l ON l.cuenta_corriente_id = c.id
+WHERE c.saldo_actual <> l.saldo_libro;
+```
+
+**Planes en cobranza (`RECOBRABLE`):**
+
+```sql
+SELECT p.id, c.paciente_id, p.monto_total_tratamiento, c.saldo_actual
+FROM planes_cuotas p
+JOIN cuentas_corrientes c ON c.id = p.cuenta_corriente_id
+WHERE p.estado = 'RECOBRABLE'
+ORDER BY c.saldo_actual DESC;
+```
+
 **Integridad SQLite:**
 
 ```sql
@@ -2827,8 +3103,9 @@ PRAGMA foreign_key_check;
 | Agenda/disponibilidad | `disponibilidad_service.py`, `disponibilidad*.py` |
 | Historia clínica | `historia_clinica_service.py`, `evolucion_medica.py` |
 | Anamnesis / ficha médica | `anamnesis_service.py`, `anamnesis_token.py`, `antecedentes_salud.py`, `ficha_medica.js`, `ficha_pdf_service.py` |
-| Odontograma | `odontograma_service.py`, `odontograma.py`, `odontograma.js`, `test_odontograma.py` |
+| Odontograma | `odontograma_service.py`, `models/odontograma.py`, `endpoints/odontogramas.py`, `odontograma.js`, `test_odontograma.py` |
 | Facturación/caja | `facturacion_service.py`, `movimiento_caja.py` |
+| Cuenta corriente/pagos | `finanzas_service.py`, `models/cuenta_corriente.py`, `schemas/finanzas.py`, `endpoints/finanzas.py`, `test_finanzas.py` |
 | Aranceles/convenios | `arancel_service.py`, `arancel_obra_social.py` |
 | Liquidaciones/PDF | `liquidacion_service.py`, `reporte_pdf_service.py`, `pdf.py` |
 | WhatsApp | `whatsapp_service.py`, `whatsapp_bot_service.py`, `whatsapp_menu_service.py` |
@@ -2858,9 +3135,9 @@ python -m pytest
 git ls-files
 ```
 
-**Fecha de última verificación:** 26/10/2026.
+**Fecha de última verificación:** 05/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 704 tests.
+**Resultado de la suite:** 752 tests.
 
 ### 10.5. Conclusión
 
@@ -2869,7 +3146,7 @@ arquitectura modular por features ni microservicios. Es un **monolito modular
 por capas**, adecuado para un consultorio y para el tamaño actual del dominio:
 
 - la separación `endpoint → schema → service → model` es consistente;
-- los cuatro módulos funcionales están identificables;
+- los cinco módulos funcionales están identificables;
 - la base está normalizada y las relaciones críticas están protegidas;
 - la facturación conserva trazabilidad mediante snapshots;
 - la historia clínica tiene una política de inmutabilidad explícita;

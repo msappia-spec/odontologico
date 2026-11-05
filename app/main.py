@@ -67,6 +67,22 @@ app.add_middleware(
 )
 
 
+# --- Caché de los recursos del panel -----------------------------------------
+# ``StaticFiles`` no envía ``Cache-Control`` y el navegador aplica su propia
+# heurística: tras actualizar ``index.html`` o ``app.js`` la secretaría seguía
+# viendo la versión anterior. El síntoma típico era una pestaña nueva en el menú
+# que no respondía al click, porque el JS cacheado no la conocía. Con
+# ``no-cache`` el navegador revalida contra el ``ETag`` en cada carga y recibe
+# 304 (barato) cuando el archivo no cambió.
+@app.middleware("http")
+async def revalidar_estaticos(request: Request, call_next):
+    """Fuerza la revalidación de los recursos servidos desde ``/static``."""
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """Traduce las excepciones de dominio a respuestas HTTP uniformes."""

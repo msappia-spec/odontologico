@@ -818,6 +818,47 @@ select.field {
 .disp-rango-x:hover { background: #fee2e2; transform: scale(1.08); }
 .disp-rango-x:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
 
+/* Dos tramos fijos por día (Mañana / Tarde) y el alta manual plegada. */
+.disp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-top: .6rem;
+  padding-top: .6rem;
+  border-top: 1px dashed #eef2f6;
+}
+.disp-preset {
+  flex: 1 1 8.5rem;
+  gap: .3rem;
+  padding: .35rem .55rem;
+  font-size: .76rem;
+}
+.disp-preset-hora { font-size: .7rem; font-weight: 600; opacity: .72; }
+.disp-preset:disabled {
+  opacity: .5;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.disp-otro { margin-top: .35rem; }
+.disp-otro > summary {
+  cursor: pointer;
+  font-size: .72rem;
+  color: #64748b;
+  padding: .2rem 0;
+  list-style: none;
+}
+.disp-otro > summary::-webkit-details-marker { display: none; }
+.disp-otro > summary::before {
+  content: "+ ";
+  font-weight: 800;
+  color: var(--brand-600);
+}
+.disp-otro[open] > summary::before { content: "– "; }
+.disp-otro[open] > summary { color: var(--brand-700); }
+.disp-otro .disp-form { margin-top: .35rem; padding-top: .45rem; }
+
 .disp-form {
   display: flex;
   flex-wrap: wrap;

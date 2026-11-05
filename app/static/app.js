@@ -131,6 +131,14 @@
     cobroBusqueda: "",
     // Movimiento que se está debitando desde el modal de débito.
     debitoMovimientoId: null,
+    /* --- Módulo 5: cuenta corriente y planes de cuotas --- */
+    // Paciente cuya cuenta se consulta y la última respuesta de
+    // GET /finanzas/cuenta-corriente/paciente/{id} (saldo, totales, libro mayor
+    // y planes). ``ccError`` guarda el motivo cuando la consulta falla (p. ej.
+    // un paciente borrado por fuera del panel).
+    ccPacienteId: null,
+    ccCuenta: null,
+    ccError: null,
   };
 
   /* --------------------------- Utilidades fecha -------------------------- */
@@ -1200,6 +1208,10 @@
     // Desplegable de coberturas del formulario de pacientes.
     cargarObrasSocialesSelect();
 
+    // Desplegable de pacientes de la cuenta corriente (Módulo 5): se refresca
+    // cada vez que cambia el listado (por ejemplo, al registrar un paciente).
+    renderSelectPacientesCC();
+
     // Modal de nuevo turno
     const selPac = document.getElementById("turno-paciente");
     const selDoc = document.getElementById("turno-doctor");
@@ -1289,22 +1301,41 @@
     [5, "Viernes"], [6, "Sábado"], [0, "Domingo"],
   ];
 
+  /* Tramos fijos que ofrece el panel de cada día del editor semanal: se agregan
+     con un clic. Mañana de 08:00 a 13:00 y tarde de 15:30 a 18:00. */
+  const TRAMOS_RAPIDOS = [
+    { clave: "manana", etiqueta: "Mañana", desde: "08:00", hasta: "13:00" },
+    { clave: "tarde", etiqueta: "Tarde", desde: "15:30", hasta: "18:00" },
+  ];
+
   /* Plantilla sugerida para el botón "Restaurar plantilla": lunes a viernes con
-     doble turno (mañana y tarde) y sábado por la mañana. */
+     los dos tramos fijos (mañana y tarde) y sábado por la mañana. */
   const PLANTILLA_SEMANAL = (function () {
     const rangos = [];
     [1, 2, 3, 4, 5].forEach(function (dia) {
-      [["09:00", "13:00"], ["15:00", "19:00"]].forEach(function (tramo) {
-        rangos.push({ dia_semana: dia, hora_inicio: tramo[0], hora_fin: tramo[1] });
+      TRAMOS_RAPIDOS.forEach(function (tramo) {
+        rangos.push({
+          dia_semana: dia,
+          hora_inicio: tramo.desde,
+          hora_fin: tramo.hasta,
+        });
       });
     });
-    rangos.push({ dia_semana: 6, hora_inicio: "09:00", hora_fin: "13:00" });
+    const manana = TRAMOS_RAPIDOS[0];
+    rangos.push({ dia_semana: 6, hora_inicio: manana.desde, hora_fin: manana.hasta });
     return rangos;
   })();
 
   function nombreDia(dia) {
     const par = DIAS_SEMANA.find((d) => d[0] === Number(dia));
     return par ? par[1] : `Día ${dia}`;
+  }
+
+  /* ¿Dos rangos del mismo día se pisan? Las horas llegan como "HH:MM", así que
+     compararlas como texto equivale a compararlas en el tiempo. Los extremos que
+     apenas se tocan (13:00 y 15:30) no cuentan como solapamiento. */
+  function rangosSolapados(desdeA, hastaA, desdeB, hastaB) {
+    return String(desdeA) < String(hastaB) && String(desdeB) < String(hastaA);
   }
 
   /* Rangos semanales configurados de un odontólogo ([] si no tiene ninguno). */
@@ -1562,14 +1593,38 @@
           : "") +
         `</div>` +
         `<div class="disp-rangos">${chips}</div>` +
+        `<div class="disp-presets">` +
+        TRAMOS_RAPIDOS.map(function (tramo) {
+          // Si el día ya tiene un rango que se pisa, el botón no se ofrece: la
+          // API respondería 409 y el panel mostraría un error innecesario.
+          const ocupado = delDia.find(function (r) {
+            return rangosSolapados(r.hora_inicio, r.hora_fin, tramo.desde, tramo.hasta);
+          });
+          const detalle = ocupado
+            ? `Ya está cubierto por ${ocupado.hora_inicio} a ${ocupado.hora_fin}`
+            : `Agregar ${tramo.etiqueta} (${tramo.desde} a ${tramo.hasta}) al ${par[1]}`;
+          return (
+            `<button type="button" class="btn btn-soft btn-sm disp-preset" ` +
+            `data-disp-preset="${tramo.clave}" data-preset-desde="${tramo.desde}" ` +
+            `data-preset-hasta="${tramo.hasta}" title="${esc(detalle)}" ` +
+            `aria-label="${esc(detalle)}"${ocupado ? " disabled" : ""}>` +
+            `${esc(tramo.etiqueta)} <span class="disp-preset-hora">` +
+            `${esc(tramo.desde)}&ndash;${esc(tramo.hasta)}</span>` +
+            `</button>`
+          );
+        }).join("") +
+        `</div>` +
+        `<details class="disp-otro">` +
+        `<summary>Otro horario</summary>` +
         `<form class="disp-form" data-disp-form="${dia}">` +
-        `<input type="time" class="field disp-field" data-disp-desde value="09:00" step="300" ` +
+        `<input type="time" class="field disp-field" data-disp-desde value="08:00" step="300" ` +
         `required aria-label="Hora de inicio del ${esc(par[1])}" />` +
         `<span class="disp-form-sep">a</span>` +
         `<input type="time" class="field disp-field" data-disp-hasta value="13:00" step="300" ` +
         `required aria-label="Hora de fin del ${esc(par[1])}" />` +
         `<button type="submit" class="btn btn-soft btn-sm" title="Agregar el rango al ${esc(par[1])}">Agregar</button>` +
         `</form>` +
+        `</details>` +
         `</div>`
       );
     }).join("");
@@ -4036,6 +4091,342 @@
     }
   }
 
+  /* ========================================================================= */
+  /* Módulo 5 · Cuenta corriente, planes de cuotas y pagos                     */
+  /* ========================================================================= */
+  /* Cada paciente tiene un libro mayor *append-only*: los débitos suman deuda
+     (un tratamiento financiado) y los créditos la cancelan (la entrega inicial y
+     cada pago). El saldo que muestra esta vista es el que devuelve el servidor
+     —acá no se recalcula— y los importes se muestran con ``fmtMoneda``. Las
+     reglas contables (redondeo de la última cuota, pasaje automático a
+     ``FINALIZADO``, saldo a favor) viven en ``app.services.finanzas_service``. */
+  const RUTA_FINANZAS = "/finanzas";
+  const RUTA_CC = `${RUTA_FINANZAS}/cuenta-corriente`;
+
+  /* Estados del plan de cuotas: FINALIZADO lo pone el sistema al saldar la
+     cuenta; la secretaría sólo alterna ACTIVO ↔ RECOBRABLE (cobranza). */
+  const ESTADO_PLAN = {
+    ACTIVO: { texto: "Activo", clase: "badge-brand", icono: ICON.reloj },
+    FINALIZADO: { texto: "Finalizado", clase: "badge-green", icono: ICON.check },
+    RECOBRABLE: { texto: "En cobranza", clase: "badge-amber", icono: ICON.alerta },
+  };
+  function badgeEstadoPlan(estado) {
+    return badge(ESTADO_PLAN[estado] || { texto: estado, clase: "badge-slate", icono: "" });
+  }
+
+  function rutaCuentaCorriente(pacienteId) {
+    return `${RUTA_CC}/paciente/${Number(pacienteId)}`;
+  }
+
+  /* Resumen legible de un plan: «3 cuotas de $83.333,33». */
+  function planTexto(plan) {
+    const cuotas = Number(plan.cantidad_cuotas) || 0;
+    return `${cuotas} ${cuotas === 1 ? "cuota" : "cuotas"} de ${fmtMoneda(plan.monto_por_cuota)}`;
+  }
+
+  /* Desplegable de pacientes de la vista. Preserva el paciente elegido: el panel
+     reescribe la lista cada vez que se registra un paciente nuevo. */
+  function renderSelectPacientesCC() {
+    const sel = document.getElementById("cc-paciente");
+    if (!sel) return;
+    const previo =
+      state.ccPacienteId != null ? String(state.ccPacienteId) : sel.value;
+    sel.innerHTML = state.pacientes.length
+      ? state.pacientes
+          .map(
+            (p) =>
+              `<option value="${p.id}">${esc(p.nombre)}` +
+              (p.dni ? ` · DNI ${esc(p.dni)}` : "") +
+              `</option>`
+          )
+          .join("")
+      : `<option value="">— Registrá un paciente primero —</option>`;
+    if (previo && sel.querySelector(`option[value="${previo}"]`)) sel.value = previo;
+    else if (sel.options.length) sel.value = sel.options[0].value;
+    state.ccPacienteId = sel.value ? Number(sel.value) : null;
+  }
+
+  /* Planes a los que se puede imputar un pago: los que todavía tienen deuda. */
+  function renderPlanesPagoCC() {
+    const sel = document.getElementById("cc-pago-plan");
+    if (!sel) return;
+    const previo = sel.value;
+    const planes =
+      state.ccCuenta && Array.isArray(state.ccCuenta.planes) ? state.ccCuenta.planes : [];
+    sel.innerHTML =
+      `<option value="">Saldo general de la cuenta</option>` +
+      planes
+        .filter((p) => p.estado !== "FINALIZADO")
+        .map(
+          (p) =>
+            `<option value="${p.id}">Plan ${esc(String(p.id).slice(0, 8))} · ${esc(planTexto(p))}</option>`
+        )
+        .join("");
+    if (previo && sel.querySelector(`option[value="${previo}"]`)) sel.value = previo;
+  }
+
+  /* Dibuja KPIs, planes y movimientos con la última respuesta del servidor. */
+  function renderCuentaCorriente() {
+    const cuenta = state.ccCuenta;
+    const planes = cuenta && Array.isArray(cuenta.planes) ? cuenta.planes : [];
+    const movimientos =
+      cuenta && Array.isArray(cuenta.transacciones) ? cuenta.transacciones : [];
+    const saldo = cuenta ? Number(cuenta.saldo_actual) || 0 : 0;
+
+    const kpiSaldo = document.getElementById("cc-kpi-saldo");
+    if (kpiSaldo) kpiSaldo.textContent = cuenta ? fmtMoneda(Math.abs(saldo)) : "—";
+    const kpiDebitos = document.getElementById("cc-kpi-debitos");
+    if (kpiDebitos) kpiDebitos.textContent = cuenta ? fmtMoneda(cuenta.total_debitos) : "—";
+    const kpiCreditos = document.getElementById("cc-kpi-creditos");
+    if (kpiCreditos) kpiCreditos.textContent = cuenta ? fmtMoneda(cuenta.total_creditos) : "—";
+    const kpiPlanes = document.getElementById("cc-kpi-planes");
+    if (kpiPlanes) kpiPlanes.textContent = cuenta ? planes.length : "—";
+
+    /* Nota al pie de los KPIs: explica el saldo en palabras (deuda, a favor o
+       cuenta saldada) porque un número negativo en el mostrador confunde. */
+    const nota = document.getElementById("cc-nota");
+    if (nota) {
+      if (!cuenta) {
+        nota.textContent = state.ccError
+          ? state.ccError
+          : "Elegí un paciente para ver su cuenta corriente.";
+      } else if (!cuenta.existe_cuenta) {
+        nota.textContent =
+          "Este paciente todavía no tiene movimientos: la cuenta se abre con el primer plan de cuotas o pago.";
+      } else if (saldo > 0) {
+        nota.textContent = `El paciente debe ${fmtMoneda(saldo)}.`;
+      } else if (saldo < 0) {
+        nota.textContent = `La cuenta tiene un saldo a favor de ${fmtMoneda(Math.abs(saldo))}.`;
+      } else {
+        nota.textContent = "Cuenta saldada: no hay deuda pendiente.";
+      }
+    }
+    const contPlanes = document.getElementById("cc-planes-contador");
+    if (contPlanes) contPlanes.textContent = planes.length;
+    const tbodyPlanes = document.getElementById("cc-planes");
+    if (tbodyPlanes) {
+      tbodyPlanes.innerHTML = planes.length
+        ? planes
+            .map((plan) => {
+              const acciones =
+                plan.estado === "FINALIZADO"
+                  ? `<span class="text-[11px] text-slate-400">Saldado</span>`
+                  : `<div class="flex flex-wrap items-center gap-2 justify-end">` +
+                    `<button type="button" class="btn btn-soft btn-sm" data-cc-pagar="${plan.id}" ` +
+                    `title="Cargar el pago de una cuota de este plan">Registrar pago</button>` +
+                    (plan.estado === "RECOBRABLE"
+                      ? `<button type="button" class="btn btn-ghost btn-sm" data-cc-plan="${plan.id}" ` +
+                        `data-cc-estado="ACTIVO" title="Volver a marcar el plan como activo">Reactivar</button>`
+                      : `<button type="button" class="btn btn-danger-soft btn-sm" data-cc-plan="${plan.id}" ` +
+                        `data-cc-estado="RECOBRABLE" title="Pasar el plan a cobranza">A cobranza</button>`) +
+                    `</div>`;
+              return (
+                `<tr>` +
+                `<td>` +
+                `<p class="font-semibold text-slate-800">${esc(planTexto(plan))}</p>` +
+                `<p class="text-[11px] text-slate-400" title="${esc(plan.id)}">Plan ${esc(String(plan.id).slice(0, 8))}</p>` +
+                `</td>` +
+                `<td class="text-right">${fmtMoneda(plan.monto_total_tratamiento)}</td>` +
+                `<td class="text-right">${fmtMoneda(plan.monto_entrega_inicial)}</td>` +
+                `<td>${badgeEstadoPlan(plan.estado)}</td>` +
+                `<td class="text-right">${acciones}</td>` +
+                `</tr>`
+              );
+            })
+            .join("")
+        : `<tr><td colspan="5">` +
+          vacio(
+            "Sin planes de cuotas",
+            "Abrí un tratamiento financiado desde el formulario de abajo."
+          ) +
+          `</td></tr>`;
+    }
+
+    const contMov = document.getElementById("cc-mov-contador");
+    if (contMov) contMov.textContent = movimientos.length;
+    const tbodyMov = document.getElementById("cc-movimientos");
+    if (tbodyMov) {
+      tbodyMov.innerHTML = movimientos.length
+        ? movimientos
+            .map((m) => {
+              /* El libro mayor se lee como un extracto bancario: el débito suma
+                 deuda (rojo, con «+») y el crédito la baja (verde, con «−»). */
+              const debito = m.tipo_movimiento === "DEBITO";
+              const etiqueta = debito
+                ? badge({ texto: "Débito", clase: "badge-amber", icono: ICON.alerta })
+                : badge({ texto: "Crédito", clase: "badge-green", icono: ICON.check });
+              return (
+                `<tr>` +
+                `<td class="whitespace-nowrap text-slate-600">${esc(fechaHora(m.fecha))}</td>` +
+                `<td>${etiqueta}</td>` +
+                `<td class="text-slate-700">${esc(m.descripcion)}</td>` +
+                `<td class="text-right font-semibold ${debito ? "text-rose-600" : "text-emerald-600"}">` +
+                `${debito ? "+" : "−"}${fmtMoneda(m.monto)}</td>` +
+                `</tr>`
+              );
+            })
+            .join("")
+        : `<tr><td colspan="4">` +
+          vacio(
+            "Sin movimientos",
+            "Los débitos y créditos del paciente aparecen acá en cuanto se registra el primer plan o pago."
+          ) +
+          `</td></tr>`;
+    }
+
+    // Los planes disponibles del formulario de pago salen de la misma consulta.
+    renderPlanesPagoCC();
+  }
+  /* Consulta la cuenta del paciente elegido (GET /finanzas/cuenta-corriente/
+     paciente/{id}). Se llama al entrar a la pestaña y cada vez que cambia el
+     paciente: el saldo es un libro mayor y puede haber cambiado por un cobro del
+     mostrador. */
+  async function cargarCuentaCorriente() {
+    if (!state.pacientes.length) {
+      // La pestaña puede abrirse antes de que llegue el listado (o tras un
+      // error de red): se pide acá para no dejar el desplegable vacío.
+      try {
+        state.pacientes = (await api("/pacientes")) || [];
+      } catch (_) {
+        /* el aviso de la vista alcanza: no hay pacientes para elegir */
+      }
+    }
+    renderSelectPacientesCC();
+    if (!state.ccPacienteId) {
+      state.ccCuenta = null;
+      state.ccError = null;
+      renderCuentaCorriente();
+      return;
+    }
+    try {
+      state.ccCuenta = await api(rutaCuentaCorriente(state.ccPacienteId));
+      state.ccError = null;
+    } catch (err) {
+      state.ccCuenta = null;
+      state.ccError = err.message;
+      toast("error", "No se pudo cargar la cuenta corriente", err.message);
+    }
+    renderCuentaCorriente();
+  }
+  /* Abre un tratamiento financiado (POST /finanzas/plan-cuotas). La entrega
+     inicial, el valor de las cuotas y el ajuste de la última los calcula el
+     servidor con ``Decimal``: acá sólo se envían los datos del mostrador. */
+  async function abrirPlanCuotasCC() {
+    if (!state.ccPacienteId) {
+      toast("error", "Elegí un paciente", "El plan de cuotas se abre a nombre de un paciente.");
+      return;
+    }
+    const payload = {
+      paciente_id: state.ccPacienteId,
+      monto_total: Number(valorDe("cc-plan-monto")),
+      cantidad_cuotas: Number(valorDe("cc-plan-cuotas")),
+      porcentaje_entrega_inicial: Number(valorDe("cc-plan-entrega")),
+      pago_entrega_inicial: !!document.getElementById("cc-plan-cobrar-entrega")?.checked,
+    };
+    const descripcion = String(valorDe("cc-plan-descripcion") || "").trim();
+    if (descripcion) payload.descripcion = descripcion;
+
+    const btn = document.getElementById("cc-plan-guardar");
+    bloquear(btn, true);
+    try {
+      const plan = await api(`${RUTA_FINANZAS}/plan-cuotas`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const ajuste = Number(plan.ajuste_ultima_cuota) || 0;
+      toast(
+        "exito",
+        "Plan de cuotas abierto",
+        `${planTexto(plan)}` +
+          (ajuste ? ` · ajuste de la última cuota: ${fmtMoneda(ajuste)}` : "") +
+          ` · saldo ${fmtMoneda(plan.saldo_actual)}`
+      );
+      // reset() devuelve la entrega al 50 % y el tildado del cobro inmediato.
+      const form = document.getElementById("cc-plan-form");
+      if (form) form.reset();
+      await cargarCuentaCorriente();
+    } catch (err) {
+      toast("error", "No se pudo abrir el plan", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* Registra un pago (POST /finanzas/pagar). Un pago de más es válido: el
+     excedente vuelve como saldo a favor y así lo informa el servidor. */
+  async function registrarPagoCC() {
+    if (!state.ccPacienteId) {
+      toast("error", "Elegí un paciente", "El pago se registra en la cuenta de un paciente.");
+      return;
+    }
+    const payload = {
+      paciente_id: state.ccPacienteId,
+      monto: Number(valorDe("cc-pago-monto")),
+    };
+    const planId = valorDe("cc-pago-plan");
+    if (planId) payload.plan_cuotas_id = planId;
+    const concepto = String(valorDe("cc-pago-concepto") || "").trim();
+    if (concepto) payload.descripcion = concepto;
+    // Sin fecha, el servidor usa el momento del alta (UTC naive).
+    const fecha = String(valorDe("cc-pago-fecha") || "").trim();
+    if (fecha) payload.fecha = fecha;
+
+    const btn = document.getElementById("cc-pago-guardar");
+    bloquear(btn, true);
+    try {
+      const pago = await api(`${RUTA_FINANZAS}/pagar`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const favor = Number(pago.saldo_a_favor) || 0;
+      toast(
+        "exito",
+        "Pago registrado",
+        favor > 0
+          ? `Saldo ${fmtMoneda(pago.saldo_actual)} · a favor ${fmtMoneda(favor)}`
+          : `Saldo resultante ${fmtMoneda(pago.saldo_actual)}`
+      );
+      const form = document.getElementById("cc-pago-form");
+      if (form) form.reset();
+      await cargarCuentaCorriente();
+    } catch (err) {
+      toast("error", "No se pudo registrar el pago", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+  /* Pasa un plan a cobranza o lo reactiva (PATCH /finanzas/plan-cuotas/{id}/
+     estado). ``FINALIZADO`` no se fija a mano: lo pone el servidor al saldar. */
+  async function cambiarEstadoPlanCC(planId, estado) {
+    try {
+      const plan = await api(`${RUTA_FINANZAS}/plan-cuotas/${planId}/estado`, {
+        method: "PATCH",
+        body: JSON.stringify({ estado: estado }),
+      });
+      toast(
+        "info",
+        "Plan actualizado",
+        `${planTexto(plan)} · ${(ESTADO_PLAN[plan.estado] || {}).texto || plan.estado}`
+      );
+      await cargarCuentaCorriente();
+    } catch (err) {
+      toast("error", "No se pudo cambiar el estado del plan", err.message);
+    }
+  }
+
+  /* Atajo de la fila del plan: deja elegido el plan en el formulario de pago y
+     propone el valor de una cuota (la secretaría puede corregirlo). */
+  function precargarPagoCC(planId) {
+    const planes = state.ccCuenta && Array.isArray(state.ccCuenta.planes) ? state.ccCuenta.planes : [];
+    const plan = planes.find((p) => String(p.id) === String(planId)) || null;
+    const sel = document.getElementById("cc-pago-plan");
+    if (sel && plan) sel.value = String(plan.id);
+    const monto = document.getElementById("cc-pago-monto");
+    if (monto && plan) monto.value = Number(plan.monto_por_cuota).toFixed(2);
+    if (monto) monto.focus();
+  }
+
+
   /* ------------------------------ Navegación ----------------------------- */
   const VISTAS = {
     dashboard: ["Panel Principal", "Resumen del consultorio y estado de los recordatorios"],
@@ -4063,6 +4454,10 @@
       "Facturación y Caja",
       "Cierre de visitas, coseguros del mostrador y liquidación de obras sociales y profesionales",
     ],
+    "cuenta-corriente": [
+      "Cuenta corriente",
+      "Saldo deudor por paciente, historial de movimientos y planes de cuotas de los tratamientos",
+    ],
   };
 
   /* Subtítulo del encabezado superior. El <h1> muestra la operación activa (la
@@ -4074,7 +4469,13 @@
   }
 
   function cambiarVista(v) {
-    if (!VISTAS[v]) return;
+    if (!VISTAS[v]) {
+      // Defensa ante un ``app.js`` servido desde la caché del navegador: la
+      // página puede traer una pestaña que esta versión del JS todavía no
+      // conoce; se deja rastro en la consola en lugar de no hacer nada.
+      console.warn("Vista desconocida en esta versión del panel:", v);
+      return;
+    }
     state.vista = v;
     document.querySelectorAll("main > section").forEach((s) => s.classList.add("hide"));
     const sec = document.getElementById("view-" + v);
@@ -4112,6 +4513,11 @@
       // Al entrar se refresca la caja del día y la pestaña que estaba activa
       // (cada una pide al servidor lo que muestra).
       cargarFacturacion();
+    }
+    if (v === "cuenta-corriente") {
+      // El saldo se vuelve a pedir al entrar: es un libro mayor y puede haber
+      // cambiado por un cobro del mostrador desde la última visita.
+      cargarCuentaCorriente();
     }
     if (v === "bot-whatsapp") {
       // La tabla se dibuja con lo que ya está en memoria y la vista previa se
@@ -5938,6 +6344,18 @@
         agregarRangoDisponibilidad(form.dataset.dispForm, desde, hasta);
       });
       semanaDisp.addEventListener("click", function (e) {
+        // Los dos tramos fijos del día (Mañana / Tarde) se agregan con un clic.
+        const preset = e.target.closest("[data-disp-preset]");
+        if (preset) {
+          const panel = preset.closest("[data-disp-dia]");
+          if (!panel) return;
+          agregarRangoDisponibilidad(
+            panel.dataset.dispDia,
+            preset.dataset.presetDesde,
+            preset.dataset.presetHasta
+          );
+          return;
+        }
         const btn = e.target.closest("[data-borrar-rango]");
         if (!btn) return;
         const doctorId = Number(btn.dataset.borrarDoctor);
@@ -5958,7 +6376,7 @@
         if (!doctor) return;
         const ok = window.confirm(
           `¿Reemplazar la agenda de ${doctor.nombre} por la plantilla (lunes a viernes ` +
-            "de 09:00 a 13:00 y de 15:00 a 19:00, sábado sólo por la mañana)?"
+            "de 08:00 a 13:00 y de 15:30 a 18:00, sábado sólo por la mañana)?"
         );
         if (ok) reemplazarSemana(PLANTILLA_SEMANAL, "Plantilla semanal aplicada");
       });
@@ -6117,6 +6535,49 @@
         cambiarTabFacturacion(b.dataset.factTab);
       })
     );
+
+    /* --- Vista "Cuenta corriente" (Módulo 5) ------------------------------ */
+    const ccRefrescar = document.getElementById("cc-refrescar");
+    if (ccRefrescar) ccRefrescar.addEventListener("click", cargarCuentaCorriente);
+
+    const ccPaciente = document.getElementById("cc-paciente");
+    if (ccPaciente) {
+      ccPaciente.addEventListener("change", function () {
+        state.ccPacienteId = ccPaciente.value ? Number(ccPaciente.value) : null;
+        cargarCuentaCorriente();
+      });
+    }
+
+    const formPlanCC = document.getElementById("cc-plan-form");
+    if (formPlanCC) {
+      formPlanCC.addEventListener("submit", function (e) {
+        e.preventDefault();
+        abrirPlanCuotasCC();
+      });
+    }
+
+    const formPagoCC = document.getElementById("cc-pago-form");
+    if (formPagoCC) {
+      formPagoCC.addEventListener("submit", function (e) {
+        e.preventDefault();
+        registrarPagoCC();
+      });
+    }
+
+    // Las filas de planes se redibujan en cada carga: sus botones se resuelven
+    // por delegación sobre la tabla.
+    const tablaPlanesCC = document.getElementById("cc-planes");
+    if (tablaPlanesCC) {
+      tablaPlanesCC.addEventListener("click", function (e) {
+        const pagar = e.target.closest("[data-cc-pagar]");
+        if (pagar) {
+          precargarPagoCC(pagar.dataset.ccPagar);
+          return;
+        }
+        const estado = e.target.closest("[data-cc-estado]");
+        if (estado) cambiarEstadoPlanCC(estado.dataset.ccPlan, estado.dataset.ccEstado);
+      });
+    }
 
     // Caja del día: el selector de fecha recarga la caja.
     const factFecha = document.getElementById("fact-fecha");
@@ -6493,6 +6954,7 @@
     rangosDe,
     probarBloquesDisponibilidad,
     DIAS_SEMANA,
+    TRAMOS_RAPIDOS,
     PLANTILLA_SEMANAL,
     // Días personalizados (excepciones por fecha) que usan app.js y calendar.js
     renderExcepciones,
@@ -6517,6 +6979,13 @@
     rutaArancel,
     ESTADO_PAGO,
     TIPO_PAGO_TEXTO,
+    // Cuenta corriente y planes de cuotas (Módulo 5)
+    cargarCuentaCorriente,
+    renderCuentaCorriente,
+    precargarPagoCC,
+    badgeEstadoPlan,
+    ESTADO_PLAN,
+    RUTA_FINANZAS,
   };
 })();
 

@@ -70,6 +70,43 @@ class EstadoPagoMovimiento(str, enum.Enum):
     DEBITADO_OS = "DEBITADO_OS"
 
 
+class TipoMovimientoCC(str, enum.Enum):
+    """Naturaleza de un movimiento de la cuenta corriente de un paciente.
+
+    El libro mayor (``TransaccionCC``) es un registro **append-only** con dos
+    únicas naturalezas, igual que un mayor contable:
+
+    * ``DEBITO``: aumenta la deuda del paciente (cargo por un tratamiento, un
+      presupuesto aceptado, un coseguro impago…).
+    * ``CREDITO``: la reduce (entrega inicial, pago de una cuota, pago a
+      cuenta, saldo a favor).
+
+    El ``saldo_actual`` de la ``CuentaCorriente`` es siempre
+    ``suma(DEBITO) - suma(CREDITO)``: un saldo positivo es deuda del paciente y
+    uno negativo es saldo a favor.
+    """
+
+    DEBITO = "DEBITO"
+    CREDITO = "CREDITO"
+
+
+class EstadoPlanCuotas(str, enum.Enum):
+    """Situación de un plan de financiación (Módulo 5).
+
+    * ``ACTIVO``: el plan está en curso y al paciente todavía le quedan cuotas
+      (o saldo) por pagar.
+    * ``FINALIZADO``: la cuenta quedó saldada; lo calcula el servicio al
+      registrar el último pago (nunca se marca a mano).
+    * ``RECOBRABLE``: el paciente dejó de pagar y la secretaría derivó el plan a
+      **gestión de cobranza**. Sigue siendo deuda: si el paciente paga, el
+      saldo baja, y recién pasa a ``FINALIZADO`` cuando la cuenta se cancela.
+    """
+
+    ACTIVO = "ACTIVO"
+    FINALIZADO = "FINALIZADO"
+    RECOBRABLE = "RECOBRABLE"
+
+
 class TipoDisponibilidadEspecifica(str, enum.Enum):
     """Efecto de un tramo horario cargado para **una fecha concreta**.
 

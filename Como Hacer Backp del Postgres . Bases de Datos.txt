@@ -1,0 +1,25 @@
+Sí, absolutamente. De hecho, al ser un software médico con datos tan sensibles (historias clínicas de pacientes, turnos y fichas de salud), hacer copias de seguridad por fuera de Vercel es una excelente práctica de seguridad.
+Como tu sistema en Vercel utiliza PostgreSQL (el motor de base de datos relacional estándar de la plataforma), tienes tres métodos para extraer los datos y guardarlos a salvo en tu computadora o en otro servidor:
+
+Opción 1: Descargar el backup a tu PC de forma manual (Gratis y rápido)
+
+Puedes descargar una copia exacta de toda la base de datos directamente a tu computadora usando una herramienta llamada pg_dump (un comando oficial de Postgres).
+1. Entra a tu panel de Vercel ➡️ ve a la pestaña Storage (Almacenamiento) y selecciona tu base de datos.
+2. Busca la sección Settings o Connection String y copia el enlace largo que empieza con postgresql://... (esa es la llave de acceso a tus datos).
+3. Desde la consola de comandos de tu computadora, ejecutas esta línea:bash
+pg_dump "TU_ENLACE_DE_VERCEL_AQUÍ" -F c -b -v -f backup_consultorio.dump
+Usa el código con precaución.
+4. Se generará un archivo llamado backup_consultorio.dump en tu computadora con todos los turnos, pacientes y datos médicos intactos. Puedes guardar ese archivo en un pendrive o en un disco externo.
+
+Opción 2: Usar herramientas automáticas en la nube (Con planes gratis)
+
+Si no quieres hacer el proceso manual todos los días, existen servicios externos diseñados específicamente para conectarse a Vercel, sacar una copia de seguridad y guardártela de forma automática.
+• Harborix: Es una plataforma excelente que se conecta a Vercel Postgres. Tiene un plan gratuito que te permite hacer un backup automático diario y guardarlo de forma encriptada en la nube. Se configura en 2 minutos y te olvidas del tema.
+
+Opción 3: Visualizar y exportar con DBeaver o TablePlus (Sin códigos)
+
+Si prefieres no usar líneas de comandos, puedes instalar un programa visual en tu computadora como DBeaver o TablePlus.
+1. Abres el programa y pegas el enlace postgresql://... de tu Vercel.
+2. El programa te mostrará todas las tablas (Pacientes, Turnos, Doctores) como si fuera una planilla de Excel.
+3. Haces clic derecho sobre cualquier tabla y eliges la opción Exportar como CSV o Exportar como SQL.
+🔒 Recomendación médica: Al manejar datos de salud bajo leyes de confidencialidad, si descargas los backups a tu computadora personal o de la oficina, asegúrate de que el equipo tenga contraseña y que los archivos estén protegidos para que nadie ajeno al consultorio pueda acceder a la información de los pacientes.

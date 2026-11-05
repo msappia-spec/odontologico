@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     disponibilidad,
     doctores,
     facturacion,
+    finanzas,
     historias_clinicas,
     obras_sociales,
     odontogramas,
@@ -36,6 +37,8 @@ api_router.include_router(turnos.router)
 api_router.include_router(prestaciones.router)
 api_router.include_router(aranceles.router)
 api_router.include_router(facturacion.router)
+# Módulo 5: cuenta corriente, planes de cuotas y pagos del paciente.
+api_router.include_router(finanzas.router)
 api_router.include_router(tareas.router)
 api_router.include_router(whatsapp.router)
 # Menú configurable del FAQ Bot (panel «Bot WhatsApp»).

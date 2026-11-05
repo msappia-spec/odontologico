@@ -8,10 +8,10 @@ REM  eso la cadena se guarda una vez en .env.vercel.local (ignorado por git).
 REM
 REM  Modos:
 REM    1) Operativo: pacientes, turnos, historias, evoluciones, anamnesis,
-REM       adjuntos, caja y disponibilidad especifica.
+REM       adjuntos, caja, cuenta corriente y disponibilidad especifica.
 REM       Conserva doctores, obras sociales, prestaciones, aranceles, agenda
 REM       semanal y menu del bot.
-REM    2) Todo: las 15 tablas. Vuelve a sembrar el menu del FAQ Bot.
+REM    2) Todo: las 20 tablas. Vuelve a sembrar el menu del FAQ Bot.
 REM
 REM  Uso:
 REM    Doble clic sobre este archivo.
@@ -86,7 +86,7 @@ echo      Conserva doctores, obras sociales, prestaciones, aranceles, agenda
 echo      semanal y menu del bot.
 echo.
 echo   2. TODAS las tablas
-echo      Las 15 tablas, incluidos doctores y catalogos.
+echo      Las 20 tablas, incluidos doctores y catalogos.
 echo      Vuelve a sembrar el menu del bot.
 echo.
 echo   3. Cancelar

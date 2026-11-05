@@ -4,6 +4,8 @@ Verifican que FastAPI sirve la página principal, que los recursos estáticos
 están accesibles y que la API sigue operativa. No dependen de la base de datos.
 """
 
+import re
+
 
 def test_dashboard_raiz_devuelve_html(client):
     """La raíz sirve el dashboard en HTML."""
@@ -337,4 +339,110 @@ def test_el_panel_enlaza_la_vista_movil(client):
     html = client.get("/").text
     assert 'href="/medico"' in html
     assert "Vista móvil" in html
+
+
+def test_dashboard_incluye_la_pestana_de_cuenta_corriente(client):
+    """La pestaña «Cuenta corriente» (Módulo 5) viaja en el menú y en el HTML.
+
+    Es la interfaz del módulo financiero: sin ella, la cuenta corriente y los
+    planes de cuotas sólo se podían operar por API.
+    """
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'data-view="cuenta-corriente"' in r.text
+    assert "Cuenta corriente" in r.text
+    assert 'id="view-cuenta-corriente"' in r.text
+    # Controles de la vista: paciente, KPIs, planes, libro mayor y formularios.
+    for control in (
+        "cc-paciente",
+        "cc-kpi-saldo",
+        "cc-kpi-debitos",
+        "cc-kpi-creditos",
+        "cc-planes",
+        "cc-movimientos",
+        "cc-plan-form",
+        "cc-pago-form",
+    ):
+        assert f'id="{control}"' in r.text, control
+
+
+def test_el_javascript_de_la_cuenta_corriente_consume_los_endpoints_del_modulo(
+    client,
+):
+    """Los controles de la pestaña pegan contra las rutas de ``finanzas.py``."""
+    js = client.get("/static/app.js").text
+    assert "/finanzas/cuenta-corriente/paciente/" in js
+    assert "/finanzas/plan-cuotas" in js
+    assert "/finanzas/pagar" in js
+    assert "/estado" in js
+    # La vista se refresca al entrar y tiene su propia función de carga.
+    assert 'v === "cuenta-corriente"' in js
+    assert "cargarCuentaCorriente" in js
+    assert 'method: "PATCH"' in js
+
+
+def test_la_tabla_de_planes_permite_pasar_a_cobranza_y_reactivar(client):
+    """El plan se deriva a cobranza o se reactiva desde la fila de la tabla."""
+    js = client.get("/static/app.js").text
+    assert 'data-cc-estado="RECOBRABLE"' in js
+    assert 'data-cc-estado="ACTIVO"' in js
+    assert "En cobranza" in js
+    # El atajo «Registrar pago» precarga el plan y el valor de una cuota.
+    assert "data-cc-pagar=" in js
+    assert "precargarPagoCC" in js
+
+
+def test_los_controles_de_la_cuenta_corriente_que_usa_el_js_existen_en_el_html(
+    client,
+):
+    """Ningún ``getElementById`` de la pestaña apunta a un id inexistente."""
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+    usados = set(re.findall(r'getElementById\("(cc-[a-z0-9-]+)"\)', js))
+    assert usados, "app.js debe manejar los controles de la cuenta corriente"
+    faltantes = sorted(i for i in usados if f'id="{i}"' not in html)
+    assert not faltantes, f"ids usados por app.js sin HTML: {faltantes}"
+
+
+def test_el_panel_y_sus_estaticos_se_revalidan_en_cada_carga(client):
+    """El navegador no debe quedarse con una versión vieja de ``app.js``.
+
+    ``StaticFiles`` no envía ``Cache-Control`` por sí solo y el navegador aplica
+    su propia heurística. Cuando eso pasaba, el HTML nuevo mostraba una pestaña
+    que el JS cacheado no conocía y el click no hacía nada: el panel y sus
+    recursos se sirven con ``no-cache`` para revalidar contra el ``ETag``.
+    """
+    for ruta in ("/", "/medico", "/privacidad", "/eliminacion-datos"):
+        r = client.get(ruta)
+        assert r.status_code == 200, ruta
+        assert "no-cache" in r.headers.get("cache-control", ""), ruta
+    for ruta in ("/static/app.js", "/static/styles.css", "/static/calendar.js"):
+        r = client.get(ruta)
+        assert r.status_code == 200, ruta
+        assert "no-cache" in r.headers.get("cache-control", ""), ruta
+
+
+def test_la_ficha_de_salud_sigue_sin_guardarse_en_cache(client):
+    """La excepción: la ficha pública del paciente no se cachea en absoluto."""
+    r = client.get("/anamnesis/token-de-prueba")
+    assert r.status_code == 200
+    assert "no-store" in r.headers.get("cache-control", "")
+
+
+def test_el_panel_avisa_si_el_navegador_sirvio_un_javascript_viejo(client):
+    """Un ``app.js`` cacheado no puede dejar las pestañas nuevas sin respuesta.
+
+    La página compara los enlaces del menú con las vistas que conoce el JS
+    cargado y, si falta alguna, muestra un aviso con un botón para recargar en
+    lugar de dejar un menú que parece roto.
+    """
+    html = client.get("/").text
+    assert 'aviso.id = "aviso-version"' in html
+    assert "aviso-version-recargar" in html
+    assert "comprobarVersion" in html
+    assert "!app.VISTAS || !(v in app.VISTAS)" in html
+    # El JS deja rastro en la consola si llega una vista desconocida.
+    js = client.get("/static/app.js").text
+    assert "Vista desconocida en esta versión del panel:" in js
+
 

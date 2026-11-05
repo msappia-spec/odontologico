@@ -945,3 +945,70 @@ def test_el_boton_de_la_cruz_se_deshabilita_mientras_se_elimina():
 
     assert "if (btn) btn.disabled = true;" in app_js
     assert ".excep-chip-x:disabled" in css
+
+
+# --------------------------------------------------------------------------- #
+# Contrato con el panel: cada día ofrece los tramos fijos Mañana / Tarde
+# --------------------------------------------------------------------------- #
+
+
+def test_cada_dia_ofrece_los_tramos_fijos_manana_y_tarde():
+    """El panel agrega Mañana (08:00-13:00) y Tarde (15:30-18:00) con un clic.
+
+    Los dos tramos viven en una única constante (`TRAMOS_RAPIDOS`) para que los
+    botones del día y la plantilla sugerida no se desincronicen.
+    """
+    app_js = _leer_estatico("app.js")
+
+    assert 'etiqueta: "Mañana", desde: "08:00", hasta: "13:00"' in app_js
+    assert 'etiqueta: "Tarde", desde: "15:30", hasta: "18:00"' in app_js
+
+    # Los botones se pintan en el panel de cada día con sus dos horas...
+    assert 'class="btn btn-soft btn-sm disp-preset"' in app_js
+    assert 'data-disp-preset="${tramo.clave}"' in app_js
+    assert 'data-preset-desde="${tramo.desde}"' in app_js
+    assert 'data-preset-hasta="${tramo.hasta}"' in app_js
+
+    # ...y el handler los resuelve por cercanía con el día que los contiene.
+    assert 'closest("[data-disp-preset]")' in app_js
+    assert "panel.dataset.dispDia" in app_js
+    assert "preset.dataset.presetDesde" in app_js
+    assert "preset.dataset.presetHasta" in app_js
+
+
+def test_los_tramos_fijos_no_se_ofrecen_si_el_dia_ya_los_cubre():
+    """Un día con 08:00-13:00 no debe volver a ofrecer «Mañana»: la API daría 409."""
+    app_js = _leer_estatico("app.js")
+
+    assert "function rangosSolapados(desdeA, hastaA, desdeB, hastaB)" in app_js
+    assert '${ocupado ? " disabled" : ""}' in app_js
+    assert "Ya está cubierto por" in app_js
+
+
+def test_el_alta_manual_queda_plegada_en_otro_horario():
+    """Los horarios fuera de los tramos fijos se siguen cargando desde el formulario."""
+    app_js = _leer_estatico("app.js")
+    html = _leer_estatico("index.html")
+    css = _leer_estatico("styles.css")
+
+    assert '<details class="disp-otro">' in app_js
+    assert "<summary>Otro horario</summary>" in app_js
+    assert 'data-disp-form="${dia}"' in app_js
+    assert 'value="08:00"' in app_js and 'value="13:00"' in app_js
+
+    # La vista explica los dos tramos fijos.
+    assert "Mañana</strong>" in html and "Tarde</strong>" in html
+    assert "08:00 a 13:00" in html and "15:30 a 18:00" in html
+
+    assert ".disp-presets" in css and ".disp-preset:disabled" in css
+
+
+def test_la_plantilla_sugerida_usa_los_mismos_tramos_que_los_botones():
+    """«Restaurar plantilla» no puede quedar con los horarios viejos (09:00-19:00)."""
+    app_js = _leer_estatico("app.js")
+
+    assert "TRAMOS_RAPIDOS.forEach(function (tramo)" in app_js
+    assert "const manana = TRAMOS_RAPIDOS[0];" in app_js
+    assert "de 08:00 a 13:00 y de 15:30 a 18:00, sábado sólo por la mañana" in app_js
+    assert "09:00" not in app_js
+    assert "15:00" not in app_js
