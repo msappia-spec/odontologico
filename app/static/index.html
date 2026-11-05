@@ -1489,7 +1489,8 @@
               <div>
                 <h2 class="font-bold text-slate-900">Registrar un pago</h2>
                 <p class="text-[11px] text-slate-400">
-                  Un pago es un crédito nuevo. Pagar de más se acepta: el excedente queda como saldo a favor.
+                  Un pago es un crédito nuevo. Si el importe supera la deuda, el panel te pregunta si el excedente
+                  queda como saldo a favor del paciente.
                 </p>
               </div>
               <div class="grid grid-cols-2 gap-3">
@@ -1512,6 +1513,11 @@
                   <input type="date" id="cc-pago-fecha" class="field" />
                 </div>
               </div>
+              <!-- Aviso en vivo: cuota del plan elegido y qué pasa si el importe
+                   supera la deuda (el excedente queda a favor del paciente). -->
+              <p id="cc-pago-hint" class="text-[11px] text-slate-400">
+                Elegí un plan para cargar el valor de la cuota, o escribí el importe de un pago a cuenta.
+              </p>
               <button type="submit" id="cc-pago-guardar" class="btn btn-primary w-full">Registrar el pago</button>
             </form>
           </div>

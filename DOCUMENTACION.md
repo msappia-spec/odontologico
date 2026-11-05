@@ -34,8 +34,8 @@ vanilla, despliegue en Vercel.
 dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
 existen como libro mayor contable (`transacciones_cc`), no como pasarela.
 
-**Pruebas:** 33 archivos `test_*.py` (más `conftest.py`) y **752 casos** (suite completa verificada
-al generar este documento).
+**Pruebas:** 33 archivos `test_*.py` (más `conftest.py`) y **762 casos** (suite
+completa verificada al generar este documento).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
 sistema de microservicios ni un monolito desordenado. La separación de
@@ -280,7 +280,7 @@ Odontologico/
 │   ├── limpiar_base.py              # Limpieza transaccional de tablas
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 33 archivos test_*.py, 752 casos
+├── tests/                           # 33 archivos test_*.py, 762 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -653,6 +653,17 @@ Si no hay pendientes, responde `422`.
 6. La secretaría puede marcar un plan como `RECOBRABLE` (cobranza) o devolverlo a
    `ACTIVO` con `PATCH /finanzas/plan-cuotas/{id}/estado`; `FINALIZADO` a mano es
    `422` y una cuenta ya saldada es `409`.
+7. En el panel, el formulario de pago ayuda a no cobrar de más sin querer:
+   - **Al elegir un plan** en *Imputar al plan*, el importe se completa solo con
+     el `monto_por_cuota` que devuelve el servidor (volver a *Saldo general*
+     descarta esa precarga, nunca un importe escrito a mano).
+   - **Si el pago supera la deuda**, el aviso bajo el formulario lo anticipa
+     («El importe supera la deuda: $X quedarían como saldo a favor») y, al
+     confirmar, el panel **pregunta** si ese excedente debe quedar como saldo a
+     favor. Si la secretaría dice que no, no se envía nada: se enfoca el importe
+     para corregirlo. Aceptar registra el pago con el `CREDITO` completo y el
+     `saldo_a_favor` que informa el servidor. La deuda se compara al centavo
+     contra el `saldo_actual` de la cuenta; el panel nunca recalcula el saldo.
 
 #### 3.4.9. Flujo del frontend
 
@@ -722,7 +733,7 @@ Si no hay pendientes, responde `422`.
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 752 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 762 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -1222,7 +1233,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_turnos_actualizacion.py` | Reprogramación, cancelación y reactivación. |
 | `test_turnos_paciente_ubicuo.py` | Prohibición de solapamiento del paciente entre profesionales. |
 | `test_turnos_rango_fechas.py` | Filtros `fecha_desde`/`fecha_hasta`. |
-| `test_web.py` | Panel, vista móvil, anamnesis, estáticos, `/health`, cabeceras de caché y el anidamiento del documento (vistas hijas de `main`, modales fuera de ellas). |
+| `test_web.py` | Panel, vista móvil, anamnesis, estáticos, `/health`, cabeceras de caché, el anidamiento del documento (vistas hijas de `main`, modales fuera de ellas) y los avisos del pago de la cuenta corriente (precarga de la cuota y confirmación del saldo a favor). |
 | `test_whatsapp_bot.py` | FAQ Bot, normalización, menú, precios y atención manual. |
 | `test_whatsapp_flow.py` | Flujo completo recordatorio → webhook → estado del turno. |
 
@@ -2875,7 +2886,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **752 tests**.
+- Resultado actual: **762 tests**.
 
 ### 8.5. Publicación
 
@@ -3153,7 +3164,7 @@ git ls-files
 
 **Fecha de última verificación:** 05/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 752 tests.
+**Resultado de la suite:** 762 tests (761 aprobados y 1 omitido).
 
 ### 10.5. Conclusión
 

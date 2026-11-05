@@ -464,6 +464,47 @@ def test_la_tabla_de_planes_permite_pasar_a_cobranza_y_reactivar(client):
     assert "precargarPagoCC" in js
 
 
+def test_el_pago_avisa_y_pide_confirmacion_cuando_supera_la_deuda(client):
+    """Pagar de más se avisa y se pregunta antes de imputarlo a la cuenta.
+
+    El servidor acepta el excedente como saldo a favor, pero el panel compara el
+    importe con la deuda y pide confirmación: la secretaría decide si ese saldo
+    queda a favor del paciente en lugar de que aparezca sin avisar.
+    """
+    js = client.get("/static/app.js").text
+    # La deuda sale del saldo que informó el servidor (nunca se recalcula acá).
+    assert "function deudaPendienteCC(" in js
+    assert "saldo_actual" in js
+    # El importe y la deuda se comparan al centavo, como el resto del módulo.
+    assert "Math.round((Number(valor) || 0) * 100)" in js
+    assert "const excedente = centavosCC(monto - deuda) / 100;" in js
+    # La pregunta es explícita y nombra el saldo a favor que va a quedar.
+    assert "window.confirm(" in js
+    assert "¿Registrar el pago igual y dejar ese saldo a favor?" in js
+    assert "como saldo a favor del paciente" in js
+    # Si la secretaría dice que no, el pago no se envía y se corrige el importe.
+    assert '"Pago no registrado"' in js
+    assert "input.select()" in js
+
+
+def test_al_elegir_un_plan_el_pago_precarga_el_valor_de_la_cuota(client):
+    """«Imputar al plan» completa el importe con el valor de una cuota."""
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+    # El aviso en vivo viaja en el formulario de pago.
+    assert 'id="cc-pago-hint"' in html
+    assert "function precargarCuotaPagoCC(" in js
+    # El valor lo informa el servidor en el plan; el panel no lo recalcula.
+    assert "plan.monto_por_cuota" in js
+    assert 'ccPagoPlan.addEventListener("change", precargarCuotaPagoCC)' in js
+    # Un importe escrito a mano no se pisa: sólo se reemplaza la precarga previa.
+    assert "ccPagoAuto" in js
+    # El aviso cuenta la cuota, la deuda y el excedente que quedaría a favor.
+    assert "function hintPagoCC(" in js
+    assert "Cuota del plan:" in js
+    assert "El importe supera la deuda:" in js
+
+
 def test_los_controles_de_la_cuenta_corriente_que_usa_el_js_existen_en_el_html(
     client,
 ):

@@ -139,6 +139,9 @@
     ccPacienteId: null,
     ccCuenta: null,
     ccError: null,
+    // Último importe que el formulario de pago completó solo con el valor de
+    // una cuota: sirve para no pisar lo que la secretaría escribió a mano.
+    ccPagoAuto: "",
   };
 
   /* --------------------------- Utilidades fecha -------------------------- */
@@ -4276,6 +4279,8 @@
 
     // Los planes disponibles del formulario de pago salen de la misma consulta.
     renderPlanesPagoCC();
+    // El aviso del formulario depende de la deuda recién consultada.
+    hintPagoCC();
   }
   /* Consulta la cuenta del paciente elegido (GET /finanzas/cuenta-corriente/
      paciente/{id}). Se llama al entrar a la pestaña y cada vez que cambia el
@@ -4352,16 +4357,125 @@
     }
   }
 
-  /* Registra un pago (POST /finanzas/pagar). Un pago de más es válido: el
-     excedente vuelve como saldo a favor y así lo informa el servidor. */
+  /* -------------------- Avisos y precargas del pago (CC) ------------------ */
+  /* El servidor acepta pagar de más (el excedente queda a favor del paciente),
+     pero el mostrador tiene que decidirlo a conciencia: el panel compara el
+     importe con la deuda, lo avisa en vivo y pide confirmación antes de enviar
+     el pago. El saldo nunca se recalcula acá: la deuda es la que informó el
+     servidor en el último GET. */
+  function centavosCC(valor) {
+    return Math.round((Number(valor) || 0) * 100);
+  }
+
+  /* Deuda que puede cancelar un pago: el saldo deudor de la cuenta. Si el
+     paciente ya está saldado (o tiene saldo a favor), la deuda es cero y
+     cualquier pago sobra. */
+  function deudaPendienteCC() {
+    const saldo = state.ccCuenta ? Number(state.ccCuenta.saldo_actual) || 0 : 0;
+    return saldo > 0 ? centavosCC(saldo) / 100 : 0;
+  }
+
+  /* Plan elegido en «Imputar al plan»; ``null`` es el saldo general. */
+  function planPagoCC() {
+    const id = valorDe("cc-pago-plan");
+    if (!id) return null;
+    const planes =
+      state.ccCuenta && Array.isArray(state.ccCuenta.planes) ? state.ccCuenta.planes : [];
+    return planes.find((p) => String(p.id) === String(id)) || null;
+  }
+
+  /* Aviso en vivo bajo el formulario: la cuota del plan elegido, la deuda de la
+     cuenta y cuánto quedaría a favor si el importe la supera. */
+  function hintPagoCC() {
+    const hint = document.getElementById("cc-pago-hint");
+    if (!hint) return;
+    const plan = planPagoCC();
+    const monto = centavosCC(valorDe("cc-pago-monto")) / 100;
+    const deuda = deudaPendienteCC();
+    const excedente = centavosCC(monto - deuda) / 100;
+
+    const partes = [];
+    if (plan) partes.push(`Cuota del plan: ${fmtMoneda(plan.monto_por_cuota)}.`);
+    partes.push(
+      deuda > 0
+        ? `Deuda pendiente: ${fmtMoneda(deuda)}.`
+        : "La cuenta no tiene deuda pendiente."
+    );
+
+    let alerta = "";
+    if (monto > 0 && excedente > 0) {
+      alerta =
+        deuda > 0
+          ? `El importe supera la deuda: ${fmtMoneda(excedente)} quedarían como saldo a favor.`
+          : `Todo el pago (${fmtMoneda(monto)}) quedaría como saldo a favor.`;
+    }
+    hint.className = alerta
+      ? "text-[11px] font-medium text-amber-600"
+      : "text-[11px] text-slate-400";
+    hint.textContent = `${partes.join(" ")}${alerta ? ` ${alerta}` : ""}`;
+  }
+
+  /* Al elegir un plan, el importe pasa a valer una cuota: es el importe por
+     defecto del mostrador. Volver a «saldo general» sólo borra lo que completó
+     el panel, nunca un importe que la secretaría escribió a mano. */
+  function precargarCuotaPagoCC() {
+    const monto = document.getElementById("cc-pago-monto");
+    if (!monto) return;
+    const plan = planPagoCC();
+    const actual = String(monto.value || "").trim();
+    if (plan) {
+      monto.value = (centavosCC(plan.monto_por_cuota) / 100).toFixed(2);
+      state.ccPagoAuto = monto.value;
+    } else if (actual !== "" && actual === String(state.ccPagoAuto || "")) {
+      monto.value = "";
+      state.ccPagoAuto = "";
+    }
+    hintPagoCC();
+  }
+
+  /* Registra un pago (POST /finanzas/pagar). Pagar de más es válido —el
+     excedente vuelve como saldo a favor—, pero primero se compara el importe
+     con la deuda y se pide confirmación: es la secretaría la que decide si ese
+     saldo queda a favor del paciente. */
   async function registrarPagoCC() {
     if (!state.ccPacienteId) {
       toast("error", "Elegí un paciente", "El pago se registra en la cuenta de un paciente.");
       return;
     }
+    const monto = centavosCC(valorDe("cc-pago-monto")) / 100;
+    const deuda = deudaPendienteCC();
+    const excedente = centavosCC(monto - deuda) / 100;
+    // Pagar de más no es un error, pero sí una decisión: se avisa cuánto queda
+    // a favor y se pide confirmación (el patrón de confirmación del panel).
+    if (monto > 0 && excedente > 0) {
+      const motivo =
+        deuda > 0
+          ? `El pago de ${fmtMoneda(monto)} supera la deuda de ${fmtMoneda(deuda)}.`
+          : "La cuenta no tiene deuda pendiente.";
+      const ok = window.confirm(
+        `${motivo}\n\n` +
+          `Quedarían ${fmtMoneda(excedente)} como saldo a favor del paciente.\n\n` +
+          "¿Registrar el pago igual y dejar ese saldo a favor?"
+      );
+      if (!ok) {
+        toast(
+          "info",
+          "Pago no registrado",
+          deuda > 0
+            ? `Corregí el importe: la deuda pendiente es ${fmtMoneda(deuda)}.`
+            : "La cuenta ya está saldada: no hace falta registrar el pago."
+        );
+        const input = document.getElementById("cc-pago-monto");
+        if (input) {
+          input.focus();
+          input.select();
+        }
+        return;
+      }
+    }
     const payload = {
       paciente_id: state.ccPacienteId,
-      monto: Number(valorDe("cc-pago-monto")),
+      monto: monto,
     };
     const planId = valorDe("cc-pago-plan");
     if (planId) payload.plan_cuotas_id = planId;
@@ -4388,6 +4502,7 @@
       );
       const form = document.getElementById("cc-pago-form");
       if (form) form.reset();
+      state.ccPagoAuto = "";
       await cargarCuentaCorriente();
     } catch (err) {
       toast("error", "No se pudo registrar el pago", err.message);
@@ -4415,14 +4530,15 @@
   }
 
   /* Atajo de la fila del plan: deja elegido el plan en el formulario de pago y
-     propone el valor de una cuota (la secretaría puede corregirlo). */
+     propone el valor de una cuota (la secretaría puede corregirlo). El click en
+     «Registrar pago» es explícito, así que reemplaza cualquier importe previo. */
   function precargarPagoCC(planId) {
-    const planes = state.ccCuenta && Array.isArray(state.ccCuenta.planes) ? state.ccCuenta.planes : [];
-    const plan = planes.find((p) => String(p.id) === String(planId)) || null;
     const sel = document.getElementById("cc-pago-plan");
-    if (sel && plan) sel.value = String(plan.id);
+    if (sel) sel.value = String(planId);
     const monto = document.getElementById("cc-pago-monto");
-    if (monto && plan) monto.value = Number(plan.monto_por_cuota).toFixed(2);
+    if (monto) monto.value = "";
+    state.ccPagoAuto = "";
+    precargarCuotaPagoCC();
     if (monto) monto.focus();
   }
 
@@ -6562,6 +6678,17 @@
         e.preventDefault();
         registrarPagoCC();
       });
+    }
+
+    // Elegir un plan completa el importe con el valor de la cuota; escribir a
+    // mano o cambiar el plan vuelve a calcular el aviso de saldo a favor.
+    const ccPagoPlan = document.getElementById("cc-pago-plan");
+    if (ccPagoPlan) ccPagoPlan.addEventListener("change", precargarCuotaPagoCC);
+
+    const ccPagoMonto = document.getElementById("cc-pago-monto");
+    if (ccPagoMonto) {
+      ccPagoMonto.addEventListener("input", hintPagoCC);
+      ccPagoMonto.addEventListener("change", hintPagoCC);
     }
 
     // Las filas de planes se redibujan en cada carga: sus botones se resuelven
