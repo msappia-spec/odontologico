@@ -6,6 +6,50 @@ están accesibles y que la API sigue operativa. No dependen de la base de datos.
 
 import re
 
+from html.parser import HTMLParser
+
+
+class _ArbolHTML(HTMLParser):
+    """Ruta de ancestros de cada ``id`` del documento.
+
+    Alcanza para vigilar el anidamiento de las vistas del panel: un
+    ``</section>`` olvidado mete la vista siguiente (y los modales que vienen
+    después) dentro de la anterior y, como ``cambiarVista()`` arranca con todas
+    ocultas, los diálogos se abren pero no se ven. No valida todo el HTML:
+    ignora los cierres huérfanos, igual que un navegador tolerante.
+    """
+
+    VACIAS = {
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr",
+    }
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.pila = []
+        self.padres = {}
+
+    def handle_starttag(self, tag, attrs):
+        ident = dict(attrs).get("id")
+        if ident and ident not in self.padres:
+            self.padres[ident] = tuple(self.pila)
+        if tag not in self.VACIAS:
+            self.pila.append((tag, ident))
+
+    def handle_endtag(self, tag):
+        # Cierra hasta el primer tag coincidente, como un parser tolerante.
+        for i in range(len(self.pila) - 1, -1, -1):
+            if self.pila[i][0] == tag:
+                del self.pila[i:]
+                return
+
+
+def _arbol_html(html):
+    arbol = _ArbolHTML()
+    arbol.feed(html)
+    arbol.close()
+    return arbol
+
 
 def test_dashboard_raiz_devuelve_html(client):
     """La raíz sirve el dashboard en HTML."""
@@ -158,6 +202,34 @@ def test_el_encabezado_queda_fuera_de_las_secciones_de_la_spa(client):
     # Un único encabezado, ni duplicado ni dentro de una vista.
     assert html.count('id="page-title"') == 1
     assert html.count('id="page-subtitle"') == 1
+
+
+def test_las_vistas_son_hermanas_y_los_modales_quedan_fuera_de_ellas(client):
+    """Cada ``view-*`` cuelga directo de ``main`` y ningún modal vive adentro.
+
+    Si a una vista le falta su ``</section>``, la siguiente (y todos los modales
+    que vienen después en el documento) queda anidada dentro de ella. Como
+    ``cambiarVista()`` mantiene ocultas las vistas que no son la activa, el
+    diálogo se abre con ``classList.remove("hide")`` pero sigue dentro de un
+    ``display: none``: «Nuevo turno» y «Cobrar» parecían no responder según la
+    operación elegida en el menú.
+    """
+    arbol = _arbol_html(client.get("/").text)
+
+    vistas = [i for i in arbol.padres if i.startswith("view-")]
+    assert len(vistas) >= 11   # panel, calendario, disponibilidad, ... y Módulo 5
+    for vista in vistas:
+        assert arbol.padres[vista][-1] == ("main", None), vista
+
+    # Los modales (y sus títulos, que también empiezan con «modal-») tienen que
+    # quedar fuera de main y de cualquier sección de vista.
+    modales = [i for i in arbol.padres if i.startswith("modal-")]
+    assert "modal-turno" in modales
+    assert "modal-cobro" in modales
+    for modal in modales:
+        ancestros = arbol.padres[modal]
+        assert ("main", None) not in ancestros, modal
+        assert not any(i and i.startswith("view-") for _, i in ancestros), modal
 
 
 def test_cada_operacion_del_menu_escribe_su_titulo_en_el_encabezado(client):

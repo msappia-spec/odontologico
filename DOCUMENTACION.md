@@ -1095,11 +1095,27 @@ absolutas con `pathlib`.
 > `OdontoApp.VISTAS` y, si falta alguna, muestra un aviso con un botón para
 > recargar (además de un `console.warn` en `cambiarVista`).
 
+> **Por qué las vistas cuelgan directo de `<main>`.** `cambiarVista()` oculta
+> todas las secciones salvo la activa, así que todo lo que quede *dentro* de una
+> vista desaparece con ella. Al insertar la vista de **cuenta corriente** faltó
+> el `</section>` de **facturación**: el navegador anidó la vista nueva (y los
+> modales que vienen después en el documento, incluidos `#modal-turno` y
+> `#modal-cobro`) dentro de `#view-facturacion`. Como esa sección arranca con
+> `.hide`, los diálogos se abrían con `classList.remove("hide")` pero seguían
+> dentro de un `display: none`: **«Nuevo turno» sólo respondía en facturación** y
+> el botón **«Cobrar»** del panel del día no mostraba nada. La estructura
+> correcta es `main > section#view-*` para cada operación, los modales como hijos
+> del `<body>` y el `</main>` explícito antes de los dos `</div>` del layout.
+> El test `test_las_vistas_son_hermanas_y_los_modales_quedan_fuera_de_ellas`
+> (`tests/test_web.py`) lo vigila: recorre el árbol del documento y exige que
+> cada `view-*` sea hija directa de `main` y que ningún `modal-*` viva dentro de
+> una vista.
+
 #### Archivos estáticos
 
 | Archivo | Tamaño aproximado | Responsabilidad |
 |---|---:|---|
-| `index.html` | 2.107 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente y bot. |
+| `index.html` | 2.112 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente y bot. |
 | `styles.css` | 1.348 líneas | Componentes, animaciones, timeline clínica y utilidades propias. |
 | `app.js` | 6.996 líneas | Estado global, cliente `fetch`, render, modales (ficha médica y envío del enlace), disponibilidad, facturación, caja, cuenta corriente, historia y puente `window.OdontoApp`. |
 | `calendar.js` | 986 líneas | Calendario mensual, filtro por odontólogo, tooltip, panel del día y bloques libres; consume `window.OdontoApp` y expone `window.OdontoCalendar`. |
@@ -1206,7 +1222,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_turnos_actualizacion.py` | Reprogramación, cancelación y reactivación. |
 | `test_turnos_paciente_ubicuo.py` | Prohibición de solapamiento del paciente entre profesionales. |
 | `test_turnos_rango_fechas.py` | Filtros `fecha_desde`/`fecha_hasta`. |
-| `test_web.py` | Panel, vista móvil, anamnesis, estáticos y `/health`. |
+| `test_web.py` | Panel, vista móvil, anamnesis, estáticos, `/health`, cabeceras de caché y el anidamiento del documento (vistas hijas de `main`, modales fuera de ellas). |
 | `test_whatsapp_bot.py` | FAQ Bot, normalización, menú, precios y atención manual. |
 | `test_whatsapp_flow.py` | Flujo completo recordatorio → webhook → estado del turno. |
 

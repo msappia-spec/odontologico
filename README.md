@@ -1720,7 +1720,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**752 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**760 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
@@ -1748,7 +1748,11 @@ operación elegida arriba de todo, a todo el ancho, fuera de las `<section>` que
 oculta la SPA, sin rastros de «Dashboard» y con *Panel Principal* primero en el
 menú de operaciones—, estáticos CSS/JS, pestañas de disponibilidad y obras
 sociales, **la agenda del día del Panel Principal en una columna por odontólogo**,
-colores por estado y salud de la API).
+las cabeceras de caché que evitan servir un `app.js` viejo y el **anidamiento del
+documento**: cada `view-*` cuelga directo de `main` y ningún `modal-*` vive dentro
+de una vista —un `</section>` olvidado dejaba «Nuevo turno» y «Cobrar» abriendo
+diálogos invisibles según la operación del menú—, además de los colores por estado
+y la salud de la API).
 
 La **ficha médica ampliada** se cubre en `tests/test_anamnesis.py`: además del
 token y del camino público, verifica los bloques familiares, personales y
