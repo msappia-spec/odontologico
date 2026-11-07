@@ -1,10 +1,11 @@
-# Franciosi Odontología — Módulos 1, 2, 3, 4 y 5
+# Franciosi Odontología — Módulos 1 a 6
 
 **Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
 **Módulo 2: Historias Clínicas y Evoluciones Médicas** ·
 **Módulo 3: Obras Sociales, Liquidación de Médicos y Facturación Mixta** ·
 **Módulo 4: Ficha médica completa (Historia Clínica General) y odontograma** ·
-**Módulo 5: Cuenta corriente, planes de cuotas y pagos** —
+**Módulo 5: Cuenta corriente, planes de cuotas y pagos** ·
+**Módulo 6: Proveedores, egresos y cuentas por pagar** —
 Backend en **FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
 
 El **Módulo 1** implementa:
@@ -303,12 +304,16 @@ carga manual o un reintento no descuadran la cuenta.
    se cobra en el acto (`CREDITO` en la misma transacción); con `false` queda
    como deuda a cobrar. `ajuste_ultima_cuota` muestra los centavos que absorbe la
    última cuota (por ejemplo `-0.01`) para que la suma cierre exacta. Una entrega
-   que cubre el total responde **422**: no hay nada que financiar.
+   que cubre el total responde **422**: no hay nada que financiar. El cobro de la
+   entrega guarda su `medio_pago` (`EFECTIVO` por defecto o `TRANSFERENCIA`), que
+   es lo que después permite cerrar la caja del día por medio.
 3. **Pagos** (`POST /api/v1/finanzas/pagar`): cada cobro es un `CREDITO` nuevo,
    imputado a una cuota (`plan_cuotas_id`, validando que el plan sea de ese
    paciente → `422` si no) o a cuenta general. La respuesta trae el saldo
    resultante y `saldo_a_favor` si el paciente pagó de más; cuando el saldo llega
-   a cero los planes pasan solos a `FINALIZADO`.
+   a cero los planes pasan solos a `FINALIZADO`. Cada pago registra su
+   `medio_pago` (`EFECTIVO` por defecto o `TRANSFERENCIA`); los débitos lo dejan
+   en `NULL`, porque una deuda no es un cobro.
 4. **Estados del plan** (`PATCH /api/v1/finanzas/plan-cuotas/{id}/estado`):
    `ACTIVO` ↔ `RECOBRABLE` (deuda derivada a cobranza). `FINALIZADO` lo pone sólo
    el sistema: pedirlo a mano responde **422**, y tocar un plan de una cuenta ya
@@ -319,11 +324,109 @@ carga manual o un reintento no descuadran la cuenta.
 6. **Atomicidad**: cuenta, movimientos, plan, saldo y estados se escriben en una
    sola transacción; si algo falla (p. ej. un `paciente_id` que no corresponde al
    plan) el `rollback` no deja deuda, pago ni plan a medio registrar.
+7. **Medio de pago en el mostrador** (`FacturarTurnoRequest.medio_pago`): el
+   cierre de la visita guarda si el coseguro/particular se cobró en **efectivo** o
+   por **transferencia** (`movimientos_caja.medio_pago`, `NOT NULL DEFAULT
+   'EFECTIVO'`, para que los cierres históricos sigan valiendo). `GET
+   /api/v1/movimientos-caja/resumen` devuelve `monto_efectivo`,
+   `monto_transferencia` y `monto_cobrado_paciente` (la suma de los dos), además
+   de lo pendiente/acreditado/debitado de la obra social.
+8. **Borrado de movimientos** (módulo de depuración, `DELETE
+   /api/v1/finanzas/cuenta-corriente/transacciones/{id}`): elimina un movimiento
+   del libro mayor cargado por error, recalcula el saldo desde el libro en la
+   misma transacción, re-sincroniza los planes y, si la cuenta queda sin
+   movimientos ni planes, la elimina (`cuenta_eliminada: true`). El borrado de un
+   **cierre de caja** es el equivalente del Módulo 3 (`DELETE
+   /api/v1/movimientos-caja/{id}`).
+9. **Cobros del día para la caja** (`GET
+   /api/v1/finanzas/cobros-cuenta-corriente`): los `CREDITO` del rango
+   —entrega inicial, cuotas y pagos a cuenta— con el paciente, el concepto y el
+   medio de pago, más `total`, `total_efectivo` y `total_transferencia`. Es la
+   segunda mitad de la *Caja del día* del Módulo 3: sin estos cobros el día
+   quedaría subvaluado, porque un paciente que paga su cuota por transferencia no
+   aparece en ningún cierre de visita. Los pagos cargados antes de existir
+   `medio_pago` se informan como `EFECTIVO` (era el único medio que el sistema
+   suponía), así el total histórico sigue cerrando; los débitos nunca aparecen
+   (son deuda, no ingreso). El resumen de la caja suma las dos fuentes en
+   `total_ingresos`.
 
 > La pestaña **Cuenta corriente** del panel (grupo *Operación*) opera el módulo
 > completo: se elige el paciente, se ve su saldo y su libro mayor, se abren
-> planes de cuotas y se registran pagos. Los mismos endpoints siguen disponibles
-> por API (Swagger en `/docs` o `curl`) en la tabla de la sección **Endpoints**.
+> planes de cuotas y se registran pagos. Los dos formularios dejan elegir el
+> **medio de pago** (efectivo o transferencia) y el libro mayor muestra una
+> columna **Medio** en cada cobro. El botón **Informe** del encabezado muestra el
+> consolidado de todos los pacientes (plan, lo que pagó y lo que debe, con la
+> deuda total al pie) y lo puede **imprimir** o guardar en PDF. Los mismos
+> endpoints siguen disponibles por API (Swagger en `/docs` o `curl`) en la tabla
+> de la sección **Endpoints**.
+>
+> La pestaña **Caja del día** (Módulo 3) también se cierra por medio de pago: el
+> formulario de cobro tiene su selector *Medio de pago*, la tabla de cierres
+> muestra la columna **Medio** y, debajo, la tabla de **cobros de cuentas
+> corrientes** del día (entregas, cuotas y pagos a cuenta) lista cada uno con su
+> medio y su total, de modo que los KPIs de efectivo, transferencia e **ingresos
+> del día** incluyan lo cobrado fuera del mostrador.
+>
+> La pestaña **Borrar movimientos** (también en *Operación*) es la herramienta de
+> depuración del circuito financiero: elimina cierres de caja y movimientos del
+> libro mayor cargados por error, de a uno o en lote. Siempre pide confirmación
+> con el detalle del movimiento y, en la cuenta corriente, muestra el **saldo
+> recalculado** que deja el servidor (deuda, saldo a favor o cuenta saldada).
+
+---
+
+## 🧾 Módulo 6 · Proveedores, egresos y cuentas por pagar
+
+La otra mitad de la contabilidad: lo que **sale** del consultorio. Es un contexto
+delimitado que se apoya en `Paciente` (sólo para vincular la pieza de un mecánico
+dental) y **no escribe nada** de la historia clínica ni de la caja de cobros.
+
+1. **Proveedores** (`proveedores`): `id` **UUID**, `nombre`, `telefono_contacto`,
+   `tipo_proveedor` (`MECANICO_DENTAL` / `INSUMOS` / `SERVICIOS_IMPUESTOS`) y
+   `saldo_pendiente` (`Numeric(10, 2)`, lo que el consultorio le debe **hoy**).
+   El saldo nace en `0.00` y **sólo** lo mueven las facturas y los pagos: el
+   cliente no puede enviarlo.
+2. **Facturas recibidas** (`gastos_facturas`): `proveedor_id` (`RESTRICT`),
+   `paciente_id` **opcional** (`SET NULL`; sólo se admite si el proveedor es
+   `MECANICO_DENTAL`), `concepto`, `monto_total`, `monto_pagado`, `fecha_emision`,
+   `fecha_vencimiento` y `estado_pago` (`PENDIENTE` → `PARCIAL` → `PAGADO`). Al
+   registrarla, el `saldo_pendiente` del proveedor **sube** por el total, en la
+   misma transacción.
+3. **Pagos de egresos** (`pagos_egresos`): cada pago con su `monto_pagado` y su
+   `metodo_pago` (`EFECTIVO`, `TRANSFERENCIA` o `TARJETA`). Un pago **baja** el
+   saldo de la factura y **resta** el mismo importe del saldo del proveedor, de
+   forma atómica; si el pago supera el saldo pendiente se rechaza con `422` y no
+   se escribe nada (con un proveedor no existe el «saldo a favor»).
+
+Endpoints (`/api/v1/egresos`):
+
+| Método | Ruta | Para qué |
+| --- | --- | --- |
+| `POST` | `/egresos/proveedores` | Alta del proveedor (saldo inicial `0.00`) |
+| `GET` | `/egresos/proveedores` | Listado alfabético con saldo, deuda vencida y facturas abiertas; filtros `tipo_proveedor` y `solo_con_deuda` |
+| `GET` | `/egresos/proveedores/{id}` | Detalle con todas sus facturas y sus pagos |
+| `POST` | `/egresos/facturas` | Registra el gasto y **aumenta** el saldo del proveedor |
+| `GET` | `/egresos/facturas` | Cartera por vencimiento; filtros `proveedor_id`, `estado_pago`, `paciente_id`, `solo_vencidas` |
+| `POST` | `/egresos/pagar` | Aplica el pago y devuelve los dos saldos resultantes |
+| `GET` | `/egresos/cuentas-por-pagar` | Tablero: deuda total, vencida y desglose por rubro |
+
+> **Atomicidad.** Todas las escrituras pasan por `egreso_service.transaccion`
+> (el mismo patrón del Módulo 5): `commit` único al salir bien y `rollback` total
+> si algo falla, con la fila del proveedor bloqueada (`SELECT … FOR UPDATE` en
+> PostgreSQL) para que dos altas o dos pagos simultáneos no pisen el saldo. El
+> bloqueo se toma con `populate_existing`, así la resta parte del saldo
+> confirmado y no de una copia vieja en memoria (*lost update*). Los importes se
+> calculan **siempre** en `Decimal` sobre `Numeric(10, 2)`.
+>
+> **Vencimiento.** Si el payload no trae `fecha_vencimiento` se toman **30 días**
+> desde la emisión; un vencimiento anterior a la emisión responde `422`.
+>
+> La pestaña **Proveedores y egresos** del panel (grupo *Operación*) opera el
+> módulo completo: tablero de deuda total, vencida y por rubro, alta de
+> proveedor, tabla de proveedores con su saldo y la cartera de facturas por
+> vencimiento, con el **alta de factura** y el **pago** en dos modales (importe
+> precargado con el saldo, medio de pago y fecha). Los endpoints siguen
+> documentados en Swagger (`/docs`).
 
 ---
 
@@ -364,6 +467,7 @@ Odontologico/
 │   │   ├── arancel_obra_social.py  # Módulo 3: cobertura y coseguro por práctica
 │   │   ├── movimiento_caja.py      # Módulo 3: cierre de la visita + detalle congelado
 │   │   ├── cuenta_corriente.py     # Módulo 5: cuenta, libro mayor (transacciones_cc) y planes
+│   │   ├── egreso.py               # Módulo 6: proveedores, gastos recibidos y pagos de egresos
 │   │   └── opcion_menu_whatsapp.py # FAQ Bot: menú configurable desde el panel
 │   ├── schemas/                    # Esquemas Pydantic v2 (I/O de la API)
 │   │   ├── doctor.py, paciente.py, turno.py, whatsapp.py
@@ -374,6 +478,7 @@ Odontologico/
 │   │   ├── odontograma.py          # Módulo 4: dientes, estados y totales por color
 │   │   ├── opcion_menu_whatsapp.py # FAQ Bot: alta/edición/baja y vista previa del menú
 │   │   ├── finanzas.py             # Módulo 5: cuenta corriente, plan de cuotas y pagos
+│   │   ├── egreso.py               # Módulo 6: proveedores, gastos y pagos de egresos
 │   │   └── prestacion.py, arancel.py, facturacion.py # Módulo 3: precios, caja y liquidaciones
 │   ├── services/                   # Lógica de negocio
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
@@ -391,6 +496,7 @@ Odontologico/
 │   │   ├── liquidacion_service.py  # Módulo 3: producción y honorarios por profesional
 │   │   ├── reporte_pdf_service.py  # Módulo 3: los dos cierres de mes en PDF
 │   │   ├── finanzas_service.py     # Módulo 5: libro mayor, planes de cuotas y pagos
+│   │   ├── egreso_service.py       # Módulo 6: facturas recibidas, pagos y cuentas por pagar
 │   │   ├── whatsapp_service.py     # Recordatorios, webhook y enlaces wa.me
 │   │   ├── whatsapp_menu_service.py # FAQ Bot: CRUD, defaults y restauración del menú
 │   │   └── whatsapp_bot_service.py # FAQ Bot: árbol de decisión de las respuestas
@@ -407,6 +513,7 @@ Odontologico/
 │           ├── aranceles.py        # Módulo 3: aranceles por cobertura + convenios e importador
 │           ├── facturacion.py      # Módulo 3: facturar, caja y liquidaciones
 │           ├── finanzas.py         # Módulo 5: cuenta corriente, planes de cuotas y pagos
+│           ├── egresos.py          # Módulo 6: proveedores, gastos y cuentas por pagar
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
 │           ├── whatsapp.py         # Webhook (bot + botones) + recordatorios
@@ -459,6 +566,7 @@ Odontologico/
 │   └── test_whatsapp_flow.py
 ├── requirements.txt
 ├── pytest.ini
+├── ejecutar.bat                    # Doble clic: levanta la app (Uvicorn) y muestra las URLs
 ├── publicar.bat                    # Doble clic: publica usando el intérprete del .venv
 ├── limpiar_vercel.bat              # Doble clic: limpia las tablas de Vercel/Neon
 ├── .env.example
@@ -495,6 +603,17 @@ uvicorn app.main:app --reload
 - **Agenda móvil del odontólogo (celular):** <http://127.0.0.1:8000/medico>
 - Documentación interactiva (OpenAPI/Swagger): <http://127.0.0.1:8000/docs>
 - Health-check: <http://127.0.0.1:8000/health>
+
+> **Atajo en Windows (`ejecutar.bat`).** Doble clic en `ejecutar.bat` (raíz del
+> proyecto) levanta el servidor con el Python del `.venv`, escuchando en
+> `0.0.0.0:8000` para poder entrar también desde el celular, y antes de arrancar
+> comprueba el intérprete, las dependencias y que el puerto esté libre. Muestra
+> las URLs, las IPs de esta PC en la red y el estado de la base
+> (`Esquema verificado/creado`). Para detenerlo: `Ctrl+C` en esa ventana.
+> Opciones: `ejecutar.bat 8080` (otro puerto), `--local` (sólo esta PC),
+> `--reload` (recarga al guardar cambios), `--abrir` (abre el panel en el
+> navegador) y `--help`. Si el puerto ya está tomado, ofrece abrir el panel en
+> lugar de arrancar un segundo servidor.
 
 > **Siempre con `--reload` (o reiniciando el proceso).** Al editar o cancelar un
 > turno la interfaz usa `PATCH /api/v1/turnos/{id}`. Si el servidor que responde
@@ -759,9 +878,10 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. |
 | **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
-| **Facturación y Caja** | **Módulo 3.** Cinco pestañas: *Caja del día* (KPIs de efectivo y saldo de obras sociales + movimientos del día con acciones *Cobrar* / *Debitar*), *Liquidación de obras sociales* (cobertura + mes, totales del período, botón **Generar presentación del período**, tildado de órdenes pagadas o debitadas, cierre en lote y **exportación a CSV** o **PDF para la cobertura**), *Liquidación de médicos* (elegís el profesional y el mes: **tabla de subtotales** con la producción, el efectivo, lo presentado a las obras sociales, los honorarios por profesional y los totales del consultorio al pie —según la forma de pago configurada en *Doctores*— más exportación a CSV o **PDF de la liquidación**, que respeta el profesional elegido), *Prestaciones y aranceles* (catálogo de prácticas y tabla de aranceles por cobertura) y *Convenios* (**todo el nomenclador de Córdoba** para la cobertura elegida, con el campo **Monto que cubre la OS**, el **coseguro sugerido** calculado en vivo, los totales de la grilla, guardado en lote y el **importador masivo**: *Descargar Plantilla Excel de Ejemplo* —dos columnas: `codigo` y `precio_cobertura`, en `.csv` o `.xlsx`— + recuadro de **arrastrar y soltar** con vista previa por fila y confirmación). El **formulario de cobro** —que se abre con el botón *Cobrar una visita* o desde la tarjeta de un turno— tiene un **buscador rápido** por código del nomenclador o nombre, muestra por cada práctica su **arancel**, lo que **cubre la obra social** y el **coseguro**, avisa que el saldo queda **PENDIENTE para la liquidación de la cobertura** y calcula el cartel **«Cobrar Coseguro en mostrador: $X.XXX»** con el total de las prácticas; se confirma con **Confirmar y cerrar atención**, que registra el movimiento de caja y finaliza el turno. |
+| **Facturación y Caja** | **Módulo 3.** Cinco pestañas: *Caja del día* (KPIs de efectivo, **transferencia**, **ingresos del día** y saldo de obras sociales + movimientos del día con acciones *Cobrar* / *Debitar* y columna **Medio**, más la tabla de **cobros de cuentas corrientes** del día con sus totales por medio), *Liquidación de obras sociales* (cobertura + mes, totales del período, botón **Generar presentación del período**, tildado de órdenes pagadas o debitadas, cierre en lote y **exportación a CSV** o **PDF para la cobertura**), *Liquidación de médicos* (elegís el profesional y el mes: **tabla de subtotales** con la producción, el efectivo, lo presentado a las obras sociales, los honorarios por profesional y los totales del consultorio al pie —según la forma de pago configurada en *Doctores*— más exportación a CSV o **PDF de la liquidación**, que respeta el profesional elegido), *Prestaciones y aranceles* (catálogo de prácticas y tabla de aranceles por cobertura) y *Convenios* (**todo el nomenclador de Córdoba** para la cobertura elegida, con el campo **Monto que cubre la OS**, el **coseguro sugerido** calculado en vivo, los totales de la grilla, guardado en lote y el **importador masivo**: *Descargar Plantilla Excel de Ejemplo* —dos columnas: `codigo` y `precio_cobertura`, en `.csv` o `.xlsx`— + recuadro de **arrastrar y soltar** con vista previa por fila y confirmación). El **formulario de cobro** —que se abre con el botón *Cobrar una visita* o desde la tarjeta de un turno— tiene un **buscador rápido** por código del nomenclador o nombre, muestra por cada práctica su **arancel**, lo que **cubre la obra social** y el **coseguro**, avisa que el saldo queda **PENDIENTE para la liquidación de la cobertura** y calcula el cartel **«Cobrar Coseguro en mostrador: $X.XXX»** con el total de las prácticas; se confirma con **Confirmar y cerrar atención**, que registra el movimiento de caja y finaliza el turno. |
 
 | **Cuenta corriente** | **Módulo 5.** Elegís el paciente y ves su **saldo deudor** (KPIs de saldo, total debitado, total cobrado y cantidad de planes) con una nota que lo explica en palabras —*el paciente debe*, *saldo a favor* o *cuenta saldada*—, la **tabla de planes de cuotas** (valor de cada cuota, total del tratamiento, entrega inicial y estado `ACTIVO` / `EN COBRANZA` / `FINALIZADO`, con las acciones *Registrar pago* —precarga el importe de una cuota en el formulario—, *A cobranza* y *Reactivar*) y el **libro mayor** con todos los débitos (deuda) y créditos (pagos) del paciente, del más nuevo al más viejo. Los dos formularios de la vista **abren un plan** (`POST /finanzas/plan-cuotas`: total, cuotas, entrega inicial del 50 % y la opción de cobrarla en el acto) y **registran un pago** (`POST /finanzas/pagar`, imputable a un plan o a cuenta general, con fecha y concepto). El saldo lo calcula siempre el servidor: la vista no lo edita y el plan se cierra solo cuando la cuenta queda saldada. **Al elegir un plan** en *Imputar al plan* el importe se completa con el **valor de la cuota** que informa el servidor (volver a *Saldo general* descarta esa precarga, nunca un importe escrito a mano) y, si el pago **supera la deuda**, el formulario lo avisa en vivo y **pregunta** si el excedente debe quedar como **saldo a favor** antes de registrar nada: aceptar lo imputa como crédito y muestra el `saldo_a_favor`, y cancelar devuelve el foco al importe para corregirlo. |
+| **Proveedores y egresos** | **Módulo 6.** Lo que el consultorio **debe**: tablero con la deuda total, la vencida, las facturas abiertas y la cantidad de proveedores, el desglose **por rubro** (mecánico dental, insumos, servicios) y la insignia del menú con las facturas impagas. El **alta de proveedor** (nombre, rubro y teléfono) vive en la misma vista; la tabla muestra el saldo, lo vencido y las facturas abiertas de cada uno con las acciones *Facturar* (abre el modal con el proveedor ya elegido) y *Facturas* (filtra la cartera). La **cartera de facturas recibidas** va por vencimiento, con filtros de proveedor, estado y *Sólo vencidas*, y el botón *Pagar* abre el modal con el **saldo precargado**, el **medio de pago** (`EFECTIVO`, `TRANSFERENCIA`, `TARJETA`) y la fecha; el servidor descuenta la factura y el saldo del proveedor en la misma operación. El campo **Paciente** del modal sólo se habilita en un proveedor mecánico dental (en otro rubro la API responde `422`) y un pago mayor al saldo se avisa antes de enviarlo. |
 
 ### Colores por estado del turno
 
@@ -943,7 +1063,7 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 | **DisponibilidadDoctor** | `id`, `doctor_id`, `dia_semana`, `hora_inicio`, `hora_fin` |
 | **Prestacion** | `id`, `codigo_nomenclador`, `descripcion`, `valor_base`, `activa` |
 | **ArancelObraSocial** | `id`, `obra_social_id`, `prestacion_id`, `monto_cubre_os`, `monto_coseguro_paciente` |
-| **MovimientoCaja** | `id`, `turno_id`, `doctor_id`, `fecha`, `monto_efectivo`, `monto_pendiente_os`, `monto_cobrado_os`, `estado_pago`, `observaciones` |
+| **MovimientoCaja** | `id`, `turno_id`, `doctor_id`, `fecha`, `monto_efectivo`, `medio_pago`, `monto_pendiente_os`, `monto_cobrado_os`, `estado_pago`, `observaciones` |
 | **DetalleMovimientoCaja** | `id`, `movimiento_caja_id`, `prestacion_id`, `codigo_nomenclador`, `descripcion`, `cantidad`, `monto_cubre_os`, `monto_coseguro_paciente` |
 | **DisponibilidadEspecifica** | `id`, `doctor_id`, `fecha`, `hora_inicio`, `hora_fin`, `tipo` |
 | **HistoriaClinica** | `id`, `paciente_id` (UQ), `numero_ficha` (UQ) |
@@ -954,10 +1074,13 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 | **OdontogramaDiente** | `id`, `odontograma_id`, `diente` (UQ con el odontograma), `estado`, `notas` |
 | **OpcionMenuWhatsApp** | `id`, `numero`, `titulo`, `tipo`, `respuesta`, `activa`, `orden` |
 | **CuentaCorriente** | `id` (UUID), `paciente_id`, `saldo_actual`, `ultima_actualizacion` |
-| **TransaccionCC** | `id` (UUID), `cuenta_corriente_id`, `tipo_movimiento`, `monto`, `descripcion`, `fecha` |
+| **TransaccionCC** | `id` (UUID), `cuenta_corriente_id`, `tipo_movimiento`, `monto`, `descripcion`, `fecha`, `medio_pago` |
 | **PlanCuotas** | `id` (UUID), `cuenta_corriente_id`, `monto_total_tratamiento`, `monto_entrega_inicial`, `cantidad_cuotas`, `monto_por_cuota`, `estado` (+ `monto_financiado` y `ajuste_ultima_cuota`, propiedades calculadas) |
+| **Proveedor** | `id` (UUID), `nombre`, `telefono_contacto`, `tipo_proveedor`, `saldo_pendiente` (`Numeric(10, 2)`) |
+| **GastoFactura** | `id` (UUID), `proveedor_id`, `paciente_id` (opcional, sólo mecánico dental), `concepto`, `monto_total`, `monto_pagado`, `fecha_emision`, `fecha_vencimiento`, `estado_pago` (+ `saldo_pendiente` y `vencida`, propiedades calculadas) |
+| **PagoEgreso** | `id` (UUID), `gasto_factura_id`, `monto_pagado`, `metodo_pago`, `fecha_pago` |
 
-> La tabla resume los **20 modelos** (una clase ORM por tabla). El detalle campo
+> La tabla resume los **23 modelos** (una clase ORM por tabla). El detalle campo
 > por campo, con tipos, índices y constraints, está en **`DOCUMENTACION.md` §6.4**.
 
 **Enumeraciones**
@@ -970,6 +1093,10 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 - `TipoDisponibilidadEspecifica`: `HABILITADO`, `BLOQUEADO` (excepciones de agenda)
 - `TipoMovimientoCC` (**Módulo 5**): `DEBITO` (suma deuda), `CREDITO` (la reduce)
 - `EstadoPlanCuotas` (**Módulo 5**): `ACTIVO`, `FINALIZADO`, `RECOBRABLE`
+- `MedioPago` (**Módulos 3 y 5**): `EFECTIVO`, `TRANSFERENCIA` (cómo paga el paciente)
+- `TipoProveedor` (**Módulo 6**): `MECANICO_DENTAL`, `INSUMOS`, `SERVICIOS_IMPUESTOS`
+- `EstadoPagoFactura` (**Módulo 6**): `PENDIENTE`, `PARCIAL`, `PAGADO`
+- `MetodoPagoEgreso` (**Módulo 6**): `EFECTIVO`, `TRANSFERENCIA`, `TARJETA` (cómo paga el consultorio)
 
 **Restricciones de integridad del turno**
 
@@ -1148,6 +1275,31 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > nombrado (`tipo_movimiento_cc`, `estado_plan_cuotas`) porque los modelos usan
 > `native_enum=False` + `create_constraint=True`; en PostgreSQL **no** hace falta
 > `CREATE TYPE` y tampoco hay tipos que limpiar si se reversa el cambio.
+>
+> **Medio de pago en la caja y en la cuenta corriente.** `movimientos_caja` y
+> `transacciones_cc` recibieron la columna `medio_pago` (`EFECTIVO` /
+> `TRANSFERENCIA`). En la caja es `NOT NULL DEFAULT 'EFECTIVO'` —los cierres
+> históricos quedan en efectivo, que era el único medio que el sistema
+> suponía— y en el libro mayor es **anulable**, porque un débito es deuda y no un
+> cobro. `init_db` la agrega en cada arranque con `aplicar_columnas_faltantes`
+> (idempotente, aditiva y sin perder filas); en SQLite alcanza con reiniciar la
+> app y en PostgreSQL/Vercel el `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` corre
+> solo. La caja del día cuenta los cobros con `medio_pago` nulo como efectivo,
+> así el total histórico sigue cerrando.
+>
+> **Proveedores y cuentas por pagar (Módulo 6).** Las tres tablas nuevas
+> (`proveedores`, `gastos_facturas` y `pagos_egresos`) son **puramente
+> aditivas**: no agregan columnas a tablas existentes ni necesitan script de
+> migración. `create_all` las crea en SQLite y en PostgreSQL al reiniciar el
+> proceso; los tres enums (`tipo_proveedor`, `estado_pago_factura`,
+> `metodo_pago_egreso`) viajan como `VARCHAR` con su `CHECK` nombrado
+> (`native_enum=False` + `create_constraint=True`), así que en PostgreSQL **no**
+> hace falta `CREATE TYPE`. Las claves foráneas son `RESTRICT` (factura →
+> proveedor), `SET NULL` (factura → paciente) y `CASCADE` (pago → factura):
+> borrar un paciente no borra la deuda con el laboratorio, pero los pagos
+> acompañan a su factura. Los importes quedan en `NUMERIC(10, 2)` y la base
+> rechaza por `CHECK` un `monto_pagado` mayor al `monto_total`, un
+> `saldo_pendiente` negativo o un importe no positivo.
 >
 > **En PostgreSQL/Vercel este paso ya es automático:** `init_db()` llama a
 > `aplicar_columnas_faltantes` (`app/db/migraciones.py`) en cada arranque y
@@ -1720,7 +1872,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**762 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**834 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
@@ -1735,7 +1887,9 @@ validados en el alta, el `PUT` del modal y el `PATCH`, la liquidación del mes q
 sale de esa regla y los controles del panel que habilitan el campo numérico),
 **migraciones aditivas al arrancar** (`test_migraciones_esquema.py`: una base
 vieja sin `tipo_pago`/`valor_pago` se completa sin perder filas, una base sin
-los filiatorios del paciente recibe las columnas nuevas, el segundo
+los filiatorios del paciente recibe las columnas nuevas, una base con caja y
+cuenta corriente previas recibe `medio_pago` (la caja queda en efectivo y el
+libro mayor en `NULL`), el segundo
 arranque no repite DDL y PostgreSQL usa `ADD COLUMN IF NOT EXISTS` para tolerar
 instancias concurrentes de Vercel), **catálogo de obras sociales**
 (`test_obras_sociales.py`: CRUD, nombre único `409` sin distinguir mayúsculas,
@@ -1908,7 +2062,7 @@ buscador rápido del formulario de cobro y el **PDF** que respeta el profesional
 elegido.
 
 La **cuenta corriente, los planes de cuotas y los pagos del Módulo 5** se cubren
-en `tests/test_finanzas.py` (*26 pruebas*): la consulta que **no escribe** (un
+en `tests/test_finanzas.py` (*42 pruebas*): la consulta que **no escribe** (un
 paciente sin movimientos devuelve `existe_cuenta: false` y la tabla sigue vacía,
 un paciente inexistente responde `404`) y el historial del más nuevo al más viejo
 con sus totales; la apertura del plan (deuda completa, entrega inicial del 50 %,
@@ -1923,7 +2077,31 @@ compila con el dialecto de PostgreSQL, los enums viajan como `VARCHAR` y los
 importes son `NUMERIC(10, 2)` con su `Decimal` intacto. Los dos enums llevan su
 `CHECK` nombrado (`tipo_movimiento_cc`, `estado_plan_cuotas`): una prueba lo
 comprueba en la metadata y otra intenta un `INSERT` directo con un tipo
-inventado y espera el `IntegrityError` de la base.
+inventado y espera el `IntegrityError` de la base. El **medio de pago y la caja
+del día** tienen su bloque propio: cada crédito guarda si se cobró en efectivo o
+por transferencia (los débitos quedan en `NULL`), `GET
+/finanzas/cobros-cuenta-corriente` devuelve los cobros del rango con `total`,
+`total_efectivo` y `total_transferencia`, los pagos cargados antes de existir la
+columna se informan como efectivo y el **informe consolidado** suma sólo los
+saldos deudores. `tests/test_facturacion.py` (*66 pruebas*) cubre, entre otras
+cosas, que el cierre de la visita guarde su `medio_pago`, que el resumen de la
+caja separe efectivo de transferencia y que `total_ingresos` sume el mostrador y
+los cobros de cuentas corrientes.
+
+El **Módulo 6** tiene su archivo propio, `tests/test_egresos.py` (*41 pruebas*):
+el alta de proveedores con saldo `0.00` y rubro validado, el listado alfabético
+con los filtros `tipo_proveedor` y `solo_con_deuda`, la factura de un mecánico
+dental vinculada a un paciente (que **aumenta** el saldo del proveedor) y el
+rechazo `422` de `paciente_id` en cualquier otro rubro, el vencimiento por
+defecto de 30 días y la normalización de fechas con zona a UTC naive, los pagos
+`PARCIAL` y `PAGADO` con su método (`EFECTIVO` / `TRANSFERENCIA` / `TARJETA`),
+la **atomicidad** (un pago mayor al saldo no deja pago ni descuenta el saldo, y
+un error a mitad de la transacción revierte factura y saldo), el control
+decimal (tres facturas de `0.10` dan `0.30`), el recálculo del saldo desde las
+facturas, la cartera por vencimiento con sus filtros, el tablero de cuentas por
+pagar (deuda total, vencida y por rubro), el DDL compilado para PostgreSQL, los
+`CHECK` de la base contra estados y saldos inventados y que las tres tablas
+nuevas no necesiten migración de columnas.
 
 Los **reportes en PDF del Módulo 3** se cubren en `tests/test_reportes_pdf.py`
 (*21 pruebas*): el generador `app/core/pdf.py` (firma del archivo, tabla `xref`

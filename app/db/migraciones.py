@@ -178,6 +178,22 @@ COLUMNAS_NUEVAS: tuple[ColumnaNueva, ...] = (
         "VARCHAR(15) NOT NULL DEFAULT 'DUENO'",
     ),
     ColumnaNueva("doctores", "valor_pago", "FLOAT", "DOUBLE PRECISION"),
+    # Módulos 3 y 5: medio de pago de los cobros (efectivo o transferencia).
+    # En la caja es obligatoria y las filas viejas quedan en efectivo (el único
+    # medio que el sistema suponía); en el libro mayor es anulable porque los
+    # débitos no son cobros.
+    ColumnaNueva(
+        "movimientos_caja",
+        "medio_pago",
+        "VARCHAR(15) NOT NULL DEFAULT 'EFECTIVO'",
+        "VARCHAR(15) NOT NULL DEFAULT 'EFECTIVO'",
+    ),
+    ColumnaNueva(
+        "transacciones_cc",
+        "medio_pago",
+        "VARCHAR(15)",
+        "VARCHAR(15)",
+    ),
     # Datos administrativos del paciente (DNI y cobertura).
     ColumnaNueva("pacientes", "dni", "VARCHAR(20)", "VARCHAR(20)"),
     ColumnaNueva("pacientes", "obra_social_id", "INTEGER", "INTEGER"),

@@ -95,6 +95,9 @@
     factFecha: hoyISO(),
     factCaja: [],
     factResumen: null,
+    // Cobros de cuentas corrientes del día (entregas, cuotas y pagos a cuenta):
+    // completan el total ingresado, porque no pasan por el cierre de una visita.
+    factCobrosCC: [],
     // Catálogo de prestaciones (activas y dadas de baja) y aranceles de la
     // cobertura elegida en la pantalla de precios.
     factPrestaciones: [],
@@ -142,6 +145,45 @@
     // Último importe que el formulario de pago completó solo con el valor de
     // una cuota: sirve para no pisar lo que la secretaría escribió a mano.
     ccPagoAuto: "",
+    // Último informe consolidado recibido (GET /finanzas/cuentas-corrientes):
+    // se guarda para poder imprimirlo sin volver a consultar.
+    ccInforme: null,
+    /* --- Módulo de borrado: depuración de caja y cuenta corriente --- */
+    // Movimientos de caja del período consultado y los tildados para borrar
+    // (``id -> true``). ``depCajaFiltro`` es el texto del buscador local.
+    depCaja: [],
+    depCajaSel: {},
+    depCajaDesde: "",
+    depCajaHasta: "",
+    depCajaFiltro: "",
+    // Movimientos del libro mayor de todas las cuentas
+    // (GET /finanzas/transacciones) y los tildados para borrar.
+    depCC: [],
+    depCCSel: {},
+    depCCPaciente: "",
+    depCCDesde: "",
+    depCCHasta: "",
+    depCCTipo: "",
+    /* --- Módulo 6: proveedores, egresos y cuentas por pagar --- */
+    // Catálogo completo (GET /egresos/proveedores): alimenta la tabla, los
+    // desplegables y el modal de factura. Los filtros de rubro y «sólo con
+    // deuda» se aplican en memoria, igual que en el catálogo de obras sociales.
+    egrProveedores: [],
+    // Tablero de cuentas por pagar (GET /egresos/cuentas-por-pagar): deuda
+    // total, vencida y desglose por rubro. ``egrError`` guarda el motivo si la
+    // consulta falla (p. ej. un backend anterior sin el módulo).
+    egrResumen: null,
+    egrError: null,
+    // Cartera de facturas recibidas (GET /egresos/facturas) y los filtros que
+    // viajan al servidor: proveedor, estado y «sólo vencidas».
+    egrFacturas: [],
+    egrTipoProveedor: "",
+    egrSoloConDeuda: false,
+    egrProveedorId: "",
+    egrEstadoFactura: "",
+    egrSoloVencidas: false,
+    // Factura que se está pagando en el modal de pago.
+    egrPagoFacturaId: null,
   };
 
   /* --------------------------- Utilidades fecha -------------------------- */
@@ -1281,6 +1323,11 @@
       cargarDisponibilidad();
       // El menú del bot se pide aparte para no frenar el panel si la consulta falla.
       cargarMenuWhatsApp();
+      // La insignia de «Proveedores y egresos» muestra las facturas abiertas;
+      // el tablero completo se pide al entrar a la pestaña.
+      cargarResumenEgreso().catch(function () {
+        /* la insignia es opcional: la vista avisa si la consulta falla */
+      });
     } catch (err) {
       estadoApi(false);
       toast("error", "No se pudo conectar con el servidor", err.message);
@@ -2102,6 +2149,18 @@
     return badge(ESTADO_PAGO[estado] || { texto: estado, clase: "badge-slate", icono: "" });
   }
 
+  /* Medios de pago con los que se cobra en el mostrador y en las cuentas
+     corrientes. La caja del día se cierra por medio: la etiqueta se usa tanto en
+     la tabla de cierres de visita como en la de cobros de cuentas corrientes. */
+  const MEDIO_PAGO = {
+    EFECTIVO: { texto: "Efectivo", clase: "badge-green" },
+    TRANSFERENCIA: { texto: "Transferencia", clase: "badge-brand" },
+  };
+  function badgeMedioPago(medio) {
+    const meta = MEDIO_PAGO[medio] || { texto: medio || "—", clase: "badge-slate" };
+    return badge({ texto: meta.texto, clase: meta.clase, icono: "" });
+  }
+
   /* Cómo se liquida cada modalidad de pago (etiqueta del reporte mensual). */
   const TIPO_PAGO_TEXTO = {
     DUENO: "Dueño",
@@ -2278,15 +2337,22 @@
   }
 
   /* ------------------------------ Caja del día --------------------------- */
+  /* La caja del día tiene dos fuentes: los cierres de visita
+     (`GET /movimientos-caja` + `/resumen`) y los cobros de cuentas corrientes
+     (`GET /finanzas/cobros-cuenta-corriente`). Los segundos no pasan por el
+     mostrador, pero son plata que entró: sin ellos el total del día quedaría
+     subvaluado. */
   async function cargarCajaDelDia() {
     const fecha = state.factFecha || hoyISO();
     state.factFecha = fecha;
-    const [movimientos, resumen] = await Promise.all([
+    const [movimientos, resumen, cobrosCC] = await Promise.all([
       api(`${RUTA_CAJA}?desde=${fecha}&hasta=${fecha}&limit=200`),
       api(`${RUTA_CAJA}/resumen?desde=${fecha}&hasta=${fecha}`),
+      api(`${RUTA_FINANZAS}/cobros-cuenta-corriente?desde=${fecha}&hasta=${fecha}`),
     ]);
     state.factCaja = movimientos || [];
     state.factResumen = resumen;
+    state.factCobrosCC = (cobrosCC && cobrosCC.cobros) || [];
     renderCaja();
   }
 
@@ -2297,10 +2363,25 @@
       if (el) el.textContent = texto;
     };
     set("fact-kpi-efectivo", resumen ? fmtMoneda(resumen.monto_efectivo) : "—");
+    set(
+      "fact-kpi-transferencia",
+      resumen ? fmtMoneda(resumen.monto_transferencia) : "—"
+    );
+    set("fact-kpi-cc", resumen ? fmtMoneda(resumen.monto_cc) : "—");
+    set("fact-kpi-total", resumen ? fmtMoneda(resumen.total_ingresos) : "—");
     set("fact-kpi-pendiente", resumen ? fmtMoneda(resumen.monto_pendiente_os) : "—");
     set("fact-kpi-cobrado", resumen ? fmtMoneda(resumen.monto_cobrado_os) : "—");
     set("fact-kpi-cantidad", resumen ? String(resumen.cantidad_movimientos) : "—");
     set("fact-caja-contador", String(state.factCaja.length));
+
+    // Desglose de los cobros de cuentas corrientes (efectivo / transferencia).
+    set("fact-cc-efectivo", resumen ? fmtMoneda(resumen.monto_cc_efectivo) : "—");
+    set(
+      "fact-cc-transferencia",
+      resumen ? fmtMoneda(resumen.monto_cc_transferencia) : "—"
+    );
+    set("fact-cc-total", resumen ? fmtMoneda(resumen.monto_cc) : "—");
+    set("fact-cc-contador", String(state.factCobrosCC.length));
 
     // Insignia del menú: órdenes todavía sin acreditar (pendientes o presentadas).
     const abiertos = state.factCaja.filter(
@@ -2313,11 +2394,36 @@
       badgeNav.classList.toggle("hide", abiertos === 0);
     }
 
+    const tbodyCC = document.getElementById("fact-lista-cc");
+    if (tbodyCC) {
+      tbodyCC.innerHTML = state.factCobrosCC.length
+        ? state.factCobrosCC
+            .map(
+              (c) =>
+                `<tr>` +
+                `<td class="font-semibold text-slate-600">${esc(parteHora(c.fecha))}</td>` +
+                `<td><div class="flex items-center gap-2">${avatar(c.paciente_nombre, c.paciente_id)}` +
+                `<div class="min-w-0"><p class="font-semibold text-slate-800 truncate">${esc(c.paciente_nombre || "—")}</p>` +
+                `<p class="text-[11px] text-slate-400 font-mono">${esc(c.paciente_dni || "sin DNI")}</p></div></div></td>` +
+                `<td class="text-slate-700">${esc(c.descripcion)}</td>` +
+                `<td>${badgeMedioPago(c.medio_pago)}</td>` +
+                `<td class="text-right font-semibold">${fmtMoneda(c.monto)}</td>` +
+                `</tr>`
+            )
+            .join("")
+        : `<tr><td colspan="5">` +
+          vacio(
+            "Sin cobros de cuentas corrientes ese día",
+            "Las entregas iniciales, las cuotas y los pagos a cuenta cargados en la cuenta del paciente aparecen acá."
+          ) +
+          `</td></tr>`;
+    }
+
     const tbody = document.getElementById("fact-lista-caja");
     if (!tbody) return;
     if (!state.factCaja.length) {
       tbody.innerHTML =
-        `<tr><td colspan="9">` +
+        `<tr><td colspan="10">` +
         vacio(
           "Todavía no hay visitas cerradas ese día",
           "Cerrá una visita con el botón «Cobrar» de su tarjeta en la agenda, o elegí otro día."
@@ -2347,6 +2453,7 @@
           `<td class="text-xs">${esc(m.doctor_nombre || "—")}</td>` +
           `<td><ul class="fact-practicas"><li>${esc(practicasTexto(m)) || "—"}</li></ul></td>` +
           `<td class="text-right font-semibold">${fmtMoneda(m.monto_efectivo)}</td>` +
+          `<td>${badgeMedioPago(m.medio_pago)}</td>` +
           `<td class="text-right text-slate-500">${fmtMoneda(m.monto_pendiente_os)}</td>` +
           `<td>${badgeEstadoPago(m.estado_pago)}</td>` +
           `<td><div class="flex items-center justify-end gap-2">${acciones}</div></td></tr>`
@@ -2435,6 +2542,9 @@
     );
     const obs = document.getElementById("fact-cobro-obs");
     if (obs) obs.value = "";
+    // Cada visita arranca en efectivo: el medio no se arrastra de la anterior.
+    const medio = document.getElementById("fact-cobro-medio");
+    if (medio) medio.value = "EFECTIVO";
     const particular = document.getElementById("fact-cobro-particular");
     if (particular) particular.checked = false;
     ocultarAviso("fact-cobro-error");
@@ -2602,6 +2712,9 @@
     const payload = {
       prestaciones,
       observaciones: valorDe("fact-cobro-obs").trim() || null,
+      // Medio con el que se cobró el mostrador: la caja del día se cierra por
+      // medio de pago (efectivo vs. transferencia).
+      medio_pago: valorDe("fact-cobro-medio") || "EFECTIVO",
       permitir_particular: Boolean(
         document.getElementById("fact-cobro-particular").checked
       ),
@@ -2614,15 +2727,17 @@
       });
       const cierre =
         `Turno #${state.cobro.turno_id} finalizado · movimiento de caja #${movimiento.id}`;
+      const medio =
+        (MEDIO_PAGO[movimiento.medio_pago] || MEDIO_PAGO.EFECTIVO).texto;
       cerrarModalCobro();
       toast(
         "exito",
         `Cobrar Coseguro en mostrador: ${fmtMoneda(movimiento.monto_efectivo)}`,
         movimiento.monto_pendiente_os > 0
-          ? `${cierre} · se presenta a ` +
+          ? `${cierre} · ${medio} · se presenta a ` +
             `${movimiento.obra_social_nombre || "la obra social"}: ` +
             `${fmtMoneda(movimiento.monto_pendiente_os)}`
-          : `${cierre} · visita saldada en el mostrador (sin saldo para la obra social).`
+          : `${cierre} · ${medio} · visita saldada en el mostrador (sin saldo para la obra social).`
       );
       await cargarCajaDelDia();
       await cargarTodo();
@@ -4105,6 +4220,8 @@
      ``FINALIZADO``, saldo a favor) viven en ``app.services.finanzas_service``. */
   const RUTA_FINANZAS = "/finanzas";
   const RUTA_CC = `${RUTA_FINANZAS}/cuenta-corriente`;
+  /* Informe consolidado: todos los pacientes con cuenta, en una sola llamada. */
+  const RUTA_INFORME_CC = `${RUTA_FINANZAS}/cuentas-corrientes`;
 
   /* Estados del plan de cuotas: FINALIZADO lo pone el sistema al saldar la
      cuenta; la secretaría sólo alterna ACTIVO ↔ RECOBRABLE (cobranza). */
@@ -4263,13 +4380,14 @@
                 `<td class="whitespace-nowrap text-slate-600">${esc(fechaHora(m.fecha))}</td>` +
                 `<td>${etiqueta}</td>` +
                 `<td class="text-slate-700">${esc(m.descripcion)}</td>` +
+                `<td>${debito ? '<span class="text-slate-300">—</span>' : badgeMedioPago(m.medio_pago)}</td>` +
                 `<td class="text-right font-semibold ${debito ? "text-rose-600" : "text-emerald-600"}">` +
                 `${debito ? "+" : "−"}${fmtMoneda(m.monto)}</td>` +
                 `</tr>`
               );
             })
             .join("")
-        : `<tr><td colspan="4">` +
+        : `<tr><td colspan="5">` +
           vacio(
             "Sin movimientos",
             "Los débitos y créditos del paciente aparecen acá en cuanto se registra el primer plan o pago."
@@ -4313,6 +4431,229 @@
     }
     renderCuentaCorriente();
   }
+  /* ------------------ Informe de todas las cuentas (CC) ------------------ */
+  /* El informe se arma con **una** llamada al servidor
+     (GET /finanzas/cuentas-corrientes): trae a todos los pacientes con cuenta,
+     sus planes, lo que pagó cada uno y lo que debe, más la deuda total del
+     consultorio. Acá sólo se formatea: el único que suma importes es el
+     servidor, en ``Decimal``. */
+  function renderInformeCC(datos) {
+    const cuentas = datos && Array.isArray(datos.cuentas) ? datos.cuentas : [];
+    const setTexto = (id, texto) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = texto;
+    };
+    const conDeuda = Number(datos && datos.cantidad_con_deuda) || 0;
+    setTexto(
+      "informe-cc-pacientes",
+      `${cuentas.length}${conDeuda ? ` · ${conDeuda} con deuda` : ""}`
+    );
+    setTexto("informe-cc-deuda", fmtMoneda(datos.deuda_total));
+    setTexto("informe-cc-cobrado", fmtMoneda(datos.total_cobrado));
+    setTexto("informe-cc-favor", fmtMoneda(datos.saldo_a_favor_total));
+    setTexto(
+      "informe-cc-sub",
+      `Generado el ${fechaHora(datos.generado)} · ${Number(datos.cantidad_planes) || 0} plan(es) de cuotas.`
+    );
+
+    const filas = document.getElementById("informe-cc-filas");
+    if (filas) {
+      filas.innerHTML = cuentas.length
+        ? cuentas
+            .map((cuenta) => {
+              const planes = Array.isArray(cuenta.planes) ? cuenta.planes : [];
+              const detalle = planes.length
+                ? planes
+                    .map(
+                      (p) =>
+                        `<div class="mb-1 last:mb-0">` +
+                        `<div class="flex flex-wrap items-center gap-2">` +
+                        `<span class="text-slate-700">${esc(planTexto(p))}</span>` +
+                        badgeEstadoPlan(p.estado) +
+                        `</div>` +
+                        `<div class="text-[11px] text-slate-400">` +
+                        `Tratamiento ${fmtMoneda(p.monto_total_tratamiento)} · ` +
+                        `Entrega ${fmtMoneda(p.monto_entrega_inicial)} ` +
+                        `${p.entrega_inicial_pagada ? "cobrada" : "sin cobrar"}` +
+                        `</div>` +
+                        `</div>`
+                    )
+                    .join("")
+                : `<span class="text-[11px] text-slate-400">Sin plan de cuotas</span>`;
+              const saldo = Number(cuenta.saldo_actual) || 0;
+              const debe =
+                saldo > 0
+                  ? `<span class="font-bold text-rose-600">${fmtMoneda(saldo)}</span>`
+                  : saldo < 0
+                    ? `<span class="badge badge-green">A favor ${fmtMoneda(Math.abs(saldo))}</span>`
+                    : `<span class="font-semibold text-emerald-600">Saldada</span>`;
+              const dni = cuenta.paciente_dni
+                ? `DNI ${esc(cuenta.paciente_dni)}`
+                : "Sin DNI";
+              const telefono = cuenta.paciente_telefono
+                ? ` · ${esc(cuenta.paciente_telefono)}`
+                : "";
+              return (
+                `<tr>` +
+                `<td><p class="font-bold text-slate-900">${esc(cuenta.paciente_nombre)}</p>` +
+                `<p class="text-[11px] text-slate-400">${dni}${telefono}</p></td>` +
+                `<td>${detalle}</td>` +
+                `<td class="text-right">${fmtMoneda(cuenta.total_debitos)}</td>` +
+                `<td class="text-right">${fmtMoneda(cuenta.total_creditos)}</td>` +
+                `<td class="text-right">${debe}</td>` +
+                `</tr>`
+              );
+            })
+            .join("")
+        : `<tr><td colspan="5">` +
+          vacio(
+            "Sin cuentas corrientes",
+            "El informe se arma con los pacientes que tienen un plan de cuotas o un pago registrado."
+          ) +
+          `</td></tr>`;
+    }
+
+    /* Pie del informe: la deuda total de los pacientes y los totales del
+       consultorio. Es el dato que se lleva la secretaría al cobrar. */
+    const pie = document.getElementById("informe-cc-pie");
+    if (pie) {
+      pie.innerHTML = cuentas.length
+        ? `<tr class="bg-slate-50">` +
+          `<td colspan="2" class="font-bold text-slate-700">Deuda total de los pacientes</td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(datos.total_debitado)}</td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(datos.total_cobrado)}</td>` +
+          `<td class="text-right font-extrabold text-rose-600">${fmtMoneda(datos.deuda_total)}</td>` +
+          `</tr>`
+        : "";
+    }
+
+    const nota = document.getElementById("informe-cc-nota");
+    if (nota) {
+      nota.textContent =
+        "La deuda total suma sólo los saldos deudores: el saldo a favor de un paciente no compensa la deuda de otro. " +
+        "«Pagó» incluye la entrega inicial y cada cuota o pago a cuenta registrado.";
+    }
+  }
+
+  /* Abre el modal y consulta el informe. Si la consulta falla, el error queda
+     dentro del modal (sin perder lo que ya se estaba mirando en la vista). */
+  async function abrirInformeCC() {
+    mostrarModal("modal-informe-cc");
+    const cargando = document.getElementById("informe-cc-cargando");
+    const cuerpo = document.getElementById("informe-cc-cuerpo");
+    const imprimir = document.getElementById("informe-cc-imprimir");
+    if (cargando) cargando.classList.remove("hide");
+    if (cuerpo) cuerpo.classList.add("hide");
+    if (imprimir) imprimir.disabled = true;
+    ocultarAviso("informe-cc-error");
+    try {
+      const datos = await api(RUTA_INFORME_CC);
+      state.ccInforme = datos;
+      renderInformeCC(datos);
+      if (cargando) cargando.classList.add("hide");
+      if (cuerpo) cuerpo.classList.remove("hide");
+      if (imprimir) imprimir.disabled = false;
+    } catch (err) {
+      state.ccInforme = null;
+      if (cargando) cargando.classList.add("hide");
+      mostrarAviso("informe-cc-error", `No se pudo armar el informe: ${err.message}`);
+    }
+  }
+
+  function cerrarInformeCC() {
+    ocultarAviso("informe-cc-error");
+    ocultarModal("modal-informe-cc");
+  }
+
+  /* Imprime el informe en una pestaña aparte: la ventana lleva su propia hoja
+     de estilo (el panel no tiene) y el navegador abre el diálogo de impresión,
+     así la secretaría puede archivarlo en papel o guardarlo en PDF. */
+  function imprimirInformeCC() {
+    const datos = state.ccInforme;
+    if (!datos) {
+      toast(
+        "info",
+        "El informe todavía no está listo",
+        "Esperá a que termine la consulta de las cuentas corrientes."
+      );
+      return;
+    }
+    const cuentas = Array.isArray(datos.cuentas) ? datos.cuentas : [];
+    const filas = cuentas
+      .map((cuenta) => {
+        const planes =
+          (Array.isArray(cuenta.planes) ? cuenta.planes : [])
+            .map((p) => {
+              const estado = ESTADO_PLAN[p.estado] ? ESTADO_PLAN[p.estado].texto : p.estado;
+              const entrega = `${fmtMoneda(p.monto_entrega_inicial)} ${
+                p.entrega_inicial_pagada ? "cobrada" : "sin cobrar"
+              }`;
+              return (
+                `${esc(planTexto(p))} · ${esc(estado)}` +
+                `<br><span class="sub">Tratamiento ${fmtMoneda(p.monto_total_tratamiento)} · Entrega ${entrega}</span>`
+              );
+            })
+            .join("<br>") || "Sin plan de cuotas";
+        const saldo = Number(cuenta.saldo_actual) || 0;
+        const debe =
+          saldo > 0
+            ? fmtMoneda(saldo)
+            : saldo < 0
+              ? `A favor ${fmtMoneda(Math.abs(saldo))}`
+              : "Saldada";
+        const dni = cuenta.paciente_dni
+          ? `<br><span class="sub">DNI ${esc(cuenta.paciente_dni)}</span>`
+          : "";
+        return (
+          `<tr><td><strong>${esc(cuenta.paciente_nombre)}</strong>${dni}</td>` +
+          `<td>${planes}</td>` +
+          `<td class="num">${fmtMoneda(cuenta.total_debitos)}</td>` +
+          `<td class="num">${fmtMoneda(cuenta.total_creditos)}</td>` +
+          `<td class="num">${debe}</td></tr>`
+        );
+      })
+      .join("");
+    const html =
+      `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
+      `<title>Informe de cuentas corrientes</title><style>` +
+      `*{box-sizing:border-box}body{font-family:Inter,system-ui,Arial,sans-serif;color:#0f1c24;margin:24px}` +
+      `h1{font-size:20px;margin:0 0 4px}p.sub{color:#64748b;font-size:12px;margin:0 0 16px}` +
+      `p.pie{color:#64748b;font-size:11px;margin:14px 0 0}` +
+      `table{width:100%;border-collapse:collapse;font-size:12px}` +
+      `th{text-align:left;text-transform:uppercase;letter-spacing:.04em;font-size:10px;color:#64748b;` +
+      `border-bottom:1.5px solid #e2e8f0;padding:6px 8px}` +
+      `td{border-bottom:1px solid #eef2f6;padding:7px 8px;vertical-align:top}` +
+      `.num{text-align:right;white-space:nowrap}.sub{color:#94a3b8;font-size:11px}` +
+      `tfoot td{font-weight:800;border-top:1.5px solid #e2e8f0;border-bottom:none;background:#f8fafc}` +
+      `</style></head><body><h1>Informe de cuentas corrientes</h1>` +
+      `<p class="sub">Generado el ${esc(fechaHora(datos.generado))} · ${cuentas.length} paciente(s) con cuenta · ` +
+      `${Number(datos.cantidad_planes) || 0} plan(es) de cuotas</p>` +
+      `<table><thead><tr><th>Paciente</th><th>Plan y cuotas</th>` +
+      `<th class="num">Total debitado</th><th class="num">Pagó</th><th class="num">Debe</th>` +
+      `</tr></thead><tbody>${filas}</tbody>` +
+      `<tfoot><tr><td colspan="2">Deuda total de los pacientes</td>` +
+      `<td class="num">${fmtMoneda(datos.total_debitado)}</td>` +
+      `<td class="num">${fmtMoneda(datos.total_cobrado)}</td>` +
+      `<td class="num">${fmtMoneda(datos.deuda_total)}</td></tr></tfoot></table>` +
+      `<p class="pie">Saldo a favor de los pacientes: ${fmtMoneda(datos.saldo_a_favor_total)}. ` +
+      `La deuda total suma sólo los saldos deudores.</p></body></html>`;
+
+    const ventana = window.open("", "_blank");
+    if (!ventana) {
+      toast(
+        "error",
+        "El navegador bloqueó la ventana",
+        "Permití las ventanas emergentes del panel y volvé a intentar."
+      );
+      return;
+    }
+    ventana.document.open();
+    ventana.document.write(html);
+    ventana.document.close();
+    ventana.focus();
+    ventana.print();
+  }
+
   /* Abre un tratamiento financiado (POST /finanzas/plan-cuotas). La entrega
      inicial, el valor de las cuotas y el ajuste de la última los calcula el
      servidor con ``Decimal``: acá sólo se envían los datos del mostrador. */
@@ -4327,6 +4668,8 @@
       cantidad_cuotas: Number(valorDe("cc-plan-cuotas")),
       porcentaje_entrega_inicial: Number(valorDe("cc-plan-entrega")),
       pago_entrega_inicial: !!document.getElementById("cc-plan-cobrar-entrega")?.checked,
+      // Medio con el que se cobra la entrega inicial (si se cobra ahora).
+      medio_pago: valorDe("cc-plan-medio") || "EFECTIVO",
     };
     const descripcion = String(valorDe("cc-plan-descripcion") || "").trim();
     if (descripcion) payload.descripcion = descripcion;
@@ -4476,6 +4819,8 @@
     const payload = {
       paciente_id: state.ccPacienteId,
       monto: monto,
+      // Medio del cobro: efectivo o transferencia (lo usa la caja del día).
+      medio_pago: valorDe("cc-pago-medio") || "EFECTIVO",
     };
     const planId = valorDe("cc-pago-plan");
     if (planId) payload.plan_cuotas_id = planId;
@@ -4493,12 +4838,16 @@
         body: JSON.stringify(payload),
       });
       const favor = Number(pago.saldo_a_favor) || 0;
+      const medio =
+        (MEDIO_PAGO[pago.transaccion && pago.transaccion.medio_pago] ||
+          MEDIO_PAGO.EFECTIVO).texto;
       toast(
         "exito",
         "Pago registrado",
-        favor > 0
-          ? `Saldo ${fmtMoneda(pago.saldo_actual)} · a favor ${fmtMoneda(favor)}`
-          : `Saldo resultante ${fmtMoneda(pago.saldo_actual)}`
+        `${medio} · ` +
+          (favor > 0
+            ? `saldo ${fmtMoneda(pago.saldo_actual)} · a favor ${fmtMoneda(favor)}`
+            : `saldo resultante ${fmtMoneda(pago.saldo_actual)}`)
       );
       const form = document.getElementById("cc-pago-form");
       if (form) form.reset();
@@ -4543,6 +4892,985 @@
   }
 
 
+  /* =================== Módulo de borrado de movimientos ================== */
+  /* Depuración de la caja y de las cuentas corrientes. Se eliminan dos tipos de
+     registros, ambos con `DELETE` y de forma definitiva:
+
+     * **Cierre de caja** (`DELETE /movimientos-caja/{id}`): se borra el
+       movimiento con su detalle de prácticas y el turno vuelve a quedar sin
+       facturar.
+     * **Movimiento del libro mayor** (`DELETE /finanzas/cuenta-corriente/
+       transacciones/{id}`): el servidor reconstruye el saldo desde el libro
+       mayor, re-sincroniza los planes de cuotas y responde el saldo nuevo.
+
+     La confirmación (`window.confirm`) muestra paciente, fecha, importes y
+     estado: es el único paso en el que la secretaría puede arrepentirse. */
+
+  const RUTA_TRANSACCIONES_CC = "/finanzas/transacciones";
+  const RUTA_BAJA_TRANSACCION_CC = "/finanzas/cuenta-corriente/transacciones";
+
+  /* Comparación tolerante del buscador local (sin acentos ni mayúsculas). */
+  function coincideDep(texto, filtro) {
+    if (!filtro) return true;
+    return normalizarTexto(texto).indexOf(normalizarTexto(filtro)) !== -1;
+  }
+
+  /* Filas de caja que pasan el buscador (paciente o DNI). */
+  function movimientosCajaDep() {
+    return state.depCaja.filter(
+      (m) =>
+        coincideDep(m.paciente_nombre, state.depCajaFiltro) ||
+        coincideDep(m.paciente_dni, state.depCajaFiltro)
+    );
+  }
+
+  /* Fechas por defecto del módulo: los últimos 30 días. Respeta lo que la
+     secretaría ya haya elegido (y no pisa el valor de los inputs). */
+  function prepararFechasDep() {
+    const hoy = hoyISO();
+    const haceUnMes = sumarDiasISO(hoy, -30);
+    [
+      ["dep-caja-desde", "depCajaDesde", haceUnMes],
+      ["dep-caja-hasta", "depCajaHasta", hoy],
+      ["dep-cc-desde", "depCCDesde", haceUnMes],
+      ["dep-cc-hasta", "depCCHasta", hoy],
+    ].forEach(function (par) {
+      const el = document.getElementById(par[0]);
+      if (el && !el.value) el.value = state[par[1]] || par[2];
+      if (!state[par[1]]) state[par[1]] = el ? el.value || par[2] : par[2];
+    });
+  }
+
+  /* Desplegable de pacientes del filtro del libro mayor. */
+  function renderPacientesDep() {
+    const sel = document.getElementById("dep-cc-paciente");
+    if (!sel) return;
+    const actual = sel.value || state.depCCPaciente;
+    sel.innerHTML =
+      `<option value="">Todos los pacientes</option>` +
+      state.pacientes
+        .slice()
+        .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), "es"))
+        .map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`)
+        .join("");
+    if (actual) sel.value = String(actual);
+  }
+
+  /* Texto del estado de cobro de un cierre de caja (para la confirmación). */
+  function estadoPagoTexto(estado) {
+    const meta = ESTADO_PAGO[estado];
+    return meta ? meta.texto : String(estado || "—");
+  }
+
+  /* Habilita el botón de borrado en lote y muestra cuántos hay tildados. */
+  function actualizarBotonDep(cual) {
+    const sel = cual === "caja" ? state.depCajaSel : state.depCCSel;
+    const boton = document.getElementById("dep-" + cual + "-eliminar");
+    const cantidad = Object.keys(sel).length;
+    if (!boton) return;
+    boton.disabled = cantidad === 0;
+    boton.textContent = cantidad
+      ? `Eliminar ${cantidad} seleccionado${cantidad === 1 ? "" : "s"}`
+      : "Eliminar seleccionados";
+  }
+
+  /* Carga el módulo completo: pacientes del filtro, caja del período y libro
+     mayor de todas las cuentas. Las dos consultas van en paralelo. */
+  async function cargarModuloBorrado() {
+    if (!state.pacientes.length) {
+      try {
+        state.pacientes = (await api("/pacientes")) || [];
+      } catch (_) {
+        /* el filtro por paciente queda vacío, el resto funciona igual */
+      }
+    }
+    prepararFechasDep();
+    renderPacientesDep();
+    await Promise.all([
+      cargarCajaDep().catch((err) =>
+        toast("error", "No se pudieron cargar los movimientos de caja", err.message)
+      ),
+      cargarTransaccionesDep().catch((err) =>
+        toast("error", "No se pudo cargar el libro mayor", err.message)
+      ),
+    ]);
+  }
+
+
+  async function cargarCajaDep() {
+    const desde = state.depCajaDesde || hoyISO();
+    const hasta = state.depCajaHasta || desde;
+    const movimientos = await api(
+      `${RUTA_CAJA}?desde=${desde}&hasta=${hasta}&limit=200`
+    );
+    state.depCaja = movimientos || [];
+    state.depCajaSel = {};
+    const todos = document.getElementById("dep-caja-todos");
+    if (todos) todos.checked = false;
+    renderCajaDep();
+  }
+
+  function renderCajaDep() {
+    const filas = movimientosCajaDep();
+    const contador = document.getElementById("dep-caja-contador");
+    if (contador) contador.textContent = String(filas.length);
+    actualizarBotonDep("caja");
+
+    const tbody = document.getElementById("dep-caja-filas");
+    if (!tbody) return;
+    if (!filas.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="8">` +
+        vacio(
+          "Sin movimientos de caja en el período",
+          "Probá con otro rango de fechas o limpiá el buscador."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filas
+      .map((m) => {
+        const tildado = Boolean(state.depCajaSel[m.id]);
+        return (
+          `<tr${tildado ? ' class="fact-tildada"' : ""}>` +
+          `<td><input type="checkbox" class="fact-check" data-dep-tilde-caja="${m.id}"` +
+          `${tildado ? " checked" : ""} title="Tildar para borrar" /></td>` +
+          `<td class="whitespace-nowrap text-slate-600">${esc(fechaCorta(m.fecha))}` +
+          `<span class="block text-[11px] text-slate-400">${esc(parteHora(m.fecha))} h · #${m.id}</span></td>` +
+          `<td><div class="flex items-center gap-2">${avatar(m.paciente_nombre, m.paciente_id)}` +
+          `<div class="min-w-0"><p class="font-semibold text-slate-800 truncate">${esc(m.paciente_nombre || "—")}</p>` +
+          `<p class="text-[11px] text-slate-400 font-mono">${esc(m.paciente_dni || "sin DNI")}</p></div></div></td>` +
+          `<td>${m.obra_social_nombre ? esc(m.obra_social_nombre) : '<span class="badge badge-slate">Particular</span>'}</td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(m.monto_efectivo)}</td>` +
+          `<td class="text-right text-slate-500">${fmtMoneda(m.monto_pendiente_os)}</td>` +
+          `<td>${badgeEstadoPago(m.estado_pago)}</td>` +
+          `<td class="text-right"><button type="button" class="btn btn-danger-soft btn-sm" ` +
+          `data-dep-borrar-caja="${m.id}">Eliminar</button></td>` +
+          `</tr>`
+        );
+      })
+      .join("");
+  }
+
+  async function cargarTransaccionesDep() {
+    const params = new URLSearchParams({ limit: "200" });
+    if (state.depCCPaciente) params.set("paciente_id", state.depCCPaciente);
+    if (state.depCCDesde) params.set("desde", state.depCCDesde);
+    if (state.depCCHasta) params.set("hasta", state.depCCHasta);
+    if (state.depCCTipo) params.set("tipo_movimiento", state.depCCTipo);
+    const movimientos = await api(
+      `${RUTA_TRANSACCIONES_CC}?${params.toString()}`
+    );
+    state.depCC = movimientos || [];
+    state.depCCSel = {};
+    const todos = document.getElementById("dep-cc-todos");
+    if (todos) todos.checked = false;
+    renderTransaccionesDep();
+  }
+
+  function renderTransaccionesDep() {
+    const filas = state.depCC;
+    const contador = document.getElementById("dep-cc-contador");
+    if (contador) contador.textContent = String(filas.length);
+    actualizarBotonDep("cc");
+
+    const tbody = document.getElementById("dep-cc-filas");
+    if (!tbody) return;
+    if (!filas.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="7">` +
+        vacio(
+          "Sin movimientos en el libro mayor",
+          "Elegí otro paciente o rango de fechas: los pacientes sin planes ni pagos no tienen movimientos."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filas
+      .map((m) => {
+        const debito = m.tipo_movimiento === "DEBITO";
+        const etiqueta = debito
+          ? badge({ texto: "Débito", clase: "badge-amber", icono: ICON.alerta })
+          : badge({ texto: "Crédito", clase: "badge-green", icono: ICON.check });
+        const tildado = Boolean(state.depCCSel[m.id]);
+        return (
+          `<tr${tildado ? ' class="fact-tildada"' : ""}>` +
+          `<td><input type="checkbox" class="fact-check" data-dep-tilde-cc="${m.id}"` +
+          `${tildado ? " checked" : ""} title="Tildar para borrar" /></td>` +
+          `<td class="whitespace-nowrap text-slate-600">${esc(fechaCorta(m.fecha))}` +
+          `<span class="block text-[11px] text-slate-400">${esc(parteHora(m.fecha))} h</span></td>` +
+          `<td><div class="flex items-center gap-2">${avatar(m.paciente_nombre, m.paciente_id)}` +
+          `<div class="min-w-0"><p class="font-semibold text-slate-800 truncate">${esc(m.paciente_nombre || "—")}</p>` +
+          `<p class="text-[11px] text-slate-400 font-mono">${esc(m.paciente_dni || "sin DNI")}</p></div></div></td>` +
+          `<td>${etiqueta}</td>` +
+          `<td class="text-slate-700">${esc(m.descripcion)}</td>` +
+          `<td class="text-right font-semibold ${debito ? "text-rose-600" : "text-emerald-600"}">` +
+          `${debito ? "+" : "−"}${fmtMoneda(m.monto)}</td>` +
+          `<td class="text-right"><button type="button" class="btn btn-danger-soft btn-sm" ` +
+          `data-dep-borrar-cc="${m.id}">Eliminar</button></td>` +
+          `</tr>`
+        );
+      })
+      .join("");
+  }
+
+
+  /* Tilde de una fila: se guarda en el estado y se marca la fila sin volver a
+     dibujar la tabla (así no se pierde el foco ni el scroll). */
+  function alternarTildeDep(cual, id, marcado) {
+    const sel = cual === "caja" ? state.depCajaSel : state.depCCSel;
+    if (marcado) sel[id] = true;
+    else delete sel[id];
+    const casilla = document.querySelector(`[data-dep-tilde-${cual}="${id}"]`);
+    if (casilla) {
+      const fila = casilla.closest("tr");
+      if (fila) fila.classList.toggle("fact-tildada", Boolean(marcado));
+    }
+    actualizarBotonDep(cual);
+  }
+
+  /* Tilde (o destilde) todas las filas visibles del panel. */
+  function tildarTodosDep(cual, marcado) {
+    const filas = cual === "caja" ? movimientosCajaDep() : state.depCC;
+    const sel = {};
+    if (marcado) filas.forEach((m) => { sel[m.id] = true; });
+    if (cual === "caja") {
+      state.depCajaSel = sel;
+      renderCajaDep();
+    } else {
+      state.depCCSel = sel;
+      renderTransaccionesDep();
+    }
+  }
+
+  /* Después de borrar, las otras pestañas quedan con datos viejos: se refrescan
+     sin bloquear la respuesta del módulo (si fallan, se ignora). */
+  function refrescarVistasTrasBorrar() {
+    cargarCajaDelDia().catch(() => {});
+    cargarCuentaCorriente().catch(() => {});
+  }
+
+  /* DELETE /movimientos-caja/{id}: el cierre de caja y su detalle. */
+  async function borrarMovimientoCajaDep(id) {
+    const mov = state.depCaja.find((m) => String(m.id) === String(id));
+    if (!mov) return;
+    const partes = [
+      mov.paciente_nombre || "Paciente sin nombre",
+      fechaHora(mov.fecha),
+      `efectivo ${fmtMoneda(mov.monto_efectivo)}`,
+    ];
+    if (Number(mov.monto_pendiente_os)) {
+      partes.push(`OS ${fmtMoneda(mov.monto_pendiente_os)}`);
+    }
+    partes.push(estadoPagoTexto(mov.estado_pago));
+    const ok = window.confirm(
+      `¿Eliminar el cierre de caja #${mov.id}?\n\n${partes.join(" · ")}\n\n` +
+        "Se borran también sus prácticas y el turno vuelve a quedar sin " +
+        "facturar. No se puede deshacer."
+    );
+    if (!ok) return;
+    try {
+      const borrado = await api(`${RUTA_CAJA}/${id}`, { method: "DELETE" });
+      delete state.depCajaSel[id];
+      toast(
+        "exito",
+        "Cierre de caja eliminado",
+        `Movimiento #${borrado.id} · ${borrado.paciente_nombre || "paciente"} · ` +
+          `${borrado.cantidad_practicas} práctica(s)`
+      );
+      await cargarCajaDep();
+      refrescarVistasTrasBorrar();
+    } catch (err) {
+      toast("error", "No se pudo eliminar el movimiento", err.message);
+    }
+  }
+
+  /* DELETE /finanzas/cuenta-corriente/transacciones/{id}: movimiento del libro
+     mayor. La respuesta trae el saldo recalculado por el servidor. */
+  async function borrarTransaccionCCDep(id) {
+    const mov = state.depCC.find((m) => String(m.id) === String(id));
+    const debito = mov ? mov.tipo_movimiento === "DEBITO" : false;
+    const resumen = mov
+      ? `${mov.paciente_nombre} · ${fechaHora(mov.fecha)} · ` +
+        `${debito ? "débito" : "crédito"} ${fmtMoneda(mov.monto)} · ${mov.descripcion}`
+      : `movimiento ${id}`;
+    const ok = window.confirm(
+      `¿Eliminar este movimiento de la cuenta corriente?\n\n${resumen}\n\n` +
+        "El saldo del paciente se recalcula desde el libro mayor y los planes de " +
+        "cuotas se re-sincronizan. No se puede deshacer."
+    );
+    if (!ok) return;
+    try {
+      const datos = await api(`${RUTA_BAJA_TRANSACCION_CC}/${id}`, {
+        method: "DELETE",
+      });
+      delete state.depCCSel[id];
+      const saldo = Number(datos.saldo_actual) || 0;
+      let cola;
+      if (datos.cuenta_eliminada) {
+        cola = "La cuenta quedó sin movimientos y se eliminó.";
+      } else if (saldo > 0) {
+        cola = `${datos.paciente_nombre} queda debiendo ${fmtMoneda(saldo)}.`;
+      } else if (saldo < 0) {
+        cola = `${datos.paciente_nombre} queda con ${fmtMoneda(Math.abs(saldo))} a favor.`;
+      } else {
+        cola = "La cuenta queda saldada.";
+      }
+      toast("exito", "Movimiento de cuenta corriente eliminado", cola);
+      await cargarTransaccionesDep();
+      refrescarVistasTrasBorrar();
+    } catch (err) {
+      toast("error", "No se pudo eliminar el movimiento", err.message);
+    }
+  }
+
+  /* Borrado en lote de lo tildado: una petición por movimiento (el backend
+     devuelve el saldo de cada cuenta, así que no hay un DELETE masivo). */
+  async function borrarSeleccionadosDep(cual) {
+    const esCaja = cual === "caja";
+    const sel = esCaja ? state.depCajaSel : state.depCCSel;
+    const ids = Object.keys(sel);
+    if (!ids.length) return;
+    const ok = window.confirm(
+      `¿Eliminar ${ids.length} movimiento${ids.length === 1 ? "" : "s"} de ` +
+        `${esCaja ? "caja" : "cuenta corriente"}?\n\n` +
+        "El borrado es definitivo y los totales se recalculan. No se puede deshacer."
+    );
+    if (!ok) return;
+    const boton = document.getElementById(`dep-${cual}-eliminar`);
+    let hechos = 0;
+    const errores = [];
+    try {
+      bloquear(boton, true);
+      for (const id of ids) {
+        try {
+          await api(
+            esCaja ? `${RUTA_CAJA}/${id}` : `${RUTA_BAJA_TRANSACCION_CC}/${id}`,
+            { method: "DELETE" }
+          );
+          hechos += 1;
+        } catch (err) {
+          errores.push(`#${id}: ${err.message}`);
+        }
+      }
+      toast(
+        errores.length ? "info" : "exito",
+        `${hechos} movimiento${hechos === 1 ? "" : "s"} eliminado${hechos === 1 ? "" : "s"}`,
+        errores.length ? errores.slice(0, 3).join(" · ") : "Los totales se actualizaron."
+      );
+      await (esCaja ? cargarCajaDep() : cargarTransaccionesDep());
+      refrescarVistasTrasBorrar();
+    } catch (err) {
+      toast("error", "No se pudieron eliminar los movimientos", err.message);
+    } finally {
+      bloquear(boton, false);
+      actualizarBotonDep(cual);
+    }
+  }
+
+
+  /* --------- Módulo 6: proveedores, facturas recibidas y pagos ----------- */
+  /* La pestaña «Proveedores y egresos» es la cara del circuito de egresos:
+     proveedores con su saldo, facturas recibidas ordenadas por vencimiento y el
+     pago que descuenta la factura y el saldo del proveedor en una sola operación
+     del servidor. Reglas del backend que la vista refleja:
+       * el saldo de un proveedor nace en 0.00 y sólo lo mueven facturas y pagos;
+       * `paciente_id` sólo se admite si el proveedor es ``MECANICO_DENTAL``;
+       * un pago mayor al saldo de la factura responde 422 y no descuenta nada. */
+  const RUTA_EGRESOS = "/egresos";
+  const RUTA_PROVEEDORES_EGRESO = `${RUTA_EGRESOS}/proveedores`;
+  const RUTA_FACTURAS_EGRESO = `${RUTA_EGRESOS}/facturas`;
+  const RUTA_PAGO_EGRESO = `${RUTA_EGRESOS}/pagar`;
+  const RUTA_CUENTAS_POR_PAGAR = `${RUTA_EGRESOS}/cuentas-por-pagar`;
+
+  /* Rubros del enum ``TipoProveedor`` con su etiqueta del mostrador. */
+  const TIPO_PROVEEDOR_TEXTO = {
+    MECANICO_DENTAL: "Mecánico dental",
+    INSUMOS: "Insumos",
+    SERVICIOS_IMPUESTOS: "Servicios e impuestos",
+  };
+  /* Estados del enum ``EstadoPagoFactura`` de una factura recibida. */
+  const ESTADO_FACTURA_EGRESO = {
+    PENDIENTE: { texto: "Pendiente", clase: "badge-amber", icono: ICON.reloj },
+    PARCIAL: { texto: "Parcial", clase: "badge-brand", icono: ICON.arena },
+    PAGADO: { texto: "Pagada", clase: "badge-green", icono: ICON.check },
+  };
+  /* Medios con los que **sale** la plata del consultorio (``MetodoPagoEgreso``).
+     El texto se usa en el aviso del pago registrado. */
+  const METODO_PAGO_EGRESO = {
+    EFECTIVO: "Efectivo",
+    TRANSFERENCIA: "Transferencia",
+    TARJETA: "Tarjeta",
+  };
+
+  function tipoProveedorTexto(tipo) {
+    return TIPO_PROVEEDOR_TEXTO[tipo] || tipo || "—";
+  }
+
+  function badgeEstadoFactura(estado) {
+    return badge(
+      ESTADO_FACTURA_EGRESO[estado] || { texto: estado, clase: "badge-slate", icono: "" }
+    );
+  }
+
+  function proveedorEgresoPorId(id) {
+    return state.egrProveedores.find((p) => String(p.id) === String(id)) || null;
+  }
+
+  function facturaEgresoPorId(id) {
+    return state.egrFacturas.find((f) => String(f.id) === String(id)) || null;
+  }
+
+  /* Opciones de un ``<select>`` de proveedores. ``textoVacio`` agrega la opción
+     «todos» (filtros); con ``null`` el select obliga a elegir uno (modal). */
+  function opcionesProveedoresEgreso(select, seleccionado, textoVacio) {
+    if (!select) return;
+    const valor = seleccionado == null ? "" : String(seleccionado);
+    const proveedores = state.egrProveedores
+      .slice()
+      .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"));
+    select.innerHTML =
+      (textoVacio ? `<option value="">${esc(textoVacio)}</option>` : "") +
+      proveedores
+        .map(
+          (p) =>
+            `<option value="${esc(p.id)}">${esc(p.nombre)} · ` +
+            `${esc(tipoProveedorTexto(p.tipo_proveedor))}</option>`
+        )
+        .join("");
+    if (proveedores.some((p) => String(p.id) === valor)) select.value = valor;
+    else if (!textoVacio && proveedores.length) select.value = String(proveedores[0].id);
+  }
+
+  /* Desplegables de la vista: el filtro de la cartera, el del modal de factura y
+     el de pacientes (sólo se habilita en un mecánico dental). */
+  function cargarSelectoresEgreso() {
+    opcionesProveedoresEgreso(
+      document.getElementById("egr-fact-proveedor"),
+      state.egrProveedorId,
+      "Todos los proveedores"
+    );
+    const modal = document.getElementById("egr-fact-proveedor-modal");
+    if (modal) opcionesProveedoresEgreso(modal, modal.value, null);
+    const pacientes = document.getElementById("egr-fact-paciente");
+    if (pacientes) {
+      const anterior = pacientes.value;
+      const lista = state.pacientes
+        .slice()
+        .sort((a, b) =>
+          String(a.nombre || "").localeCompare(String(b.nombre || ""), "es")
+        );
+      pacientes.innerHTML =
+        '<option value="">Sin paciente</option>' +
+        lista.map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join("");
+      if (lista.some((p) => String(p.id) === anterior)) pacientes.value = anterior;
+    }
+  }
+
+  /* Carga completa de la pestaña. Cada consulta falla por separado para que un
+     error del tablero no deje vacías las dos tablas (y al revés). */
+  async function cargarEgresos() {
+    renderResumenEgreso();
+    renderProveedoresEgreso();
+    renderFacturasEgreso();
+    await Promise.all([
+      cargarResumenEgreso().catch(function (err) {
+        // El tablero puede fallar (backend anterior, base sin las tablas): el
+        // motivo queda en la nota al pie en lugar de dejar los KPIs en «—».
+        state.egrError = err.message;
+        renderResumenEgreso();
+        toast("error", "No se pudo cargar el tablero de cuentas por pagar", err.message);
+      }),
+      cargarProveedoresEgreso().catch(function (err) {
+        toast("error", "No se pudieron cargar los proveedores", err.message);
+      }),
+      cargarFacturasEgreso().catch(function (err) {
+        toast("error", "No se pudieron cargar las facturas", err.message);
+      }),
+    ]);
+  }
+
+  async function cargarResumenEgreso() {
+    state.egrResumen = await api(RUTA_CUENTAS_POR_PAGAR);
+    state.egrError = null;
+    renderResumenEgreso();
+  }
+
+  async function cargarProveedoresEgreso() {
+    state.egrProveedores = (await api(RUTA_PROVEEDORES_EGRESO)) || [];
+    // Un filtro por un proveedor que ya no existe dejaría la cartera vacía.
+    if (state.egrProveedorId && !proveedorEgresoPorId(state.egrProveedorId)) {
+      state.egrProveedorId = "";
+    }
+    cargarSelectoresEgreso();
+    renderProveedoresEgreso();
+  }
+
+  async function cargarFacturasEgreso() {
+    const params = new URLSearchParams({ limit: "200" });
+    if (state.egrProveedorId) params.set("proveedor_id", state.egrProveedorId);
+    if (state.egrEstadoFactura) params.set("estado_pago", state.egrEstadoFactura);
+    if (state.egrSoloVencidas) params.set("solo_vencidas", "true");
+    state.egrFacturas =
+      (await api(`${RUTA_FACTURAS_EGRESO}?${params.toString()}`)) || [];
+    renderFacturasEgreso();
+  }
+
+  function renderResumenEgreso() {
+    const resumen = state.egrResumen;
+    const kpiDeuda = document.getElementById("egr-kpi-deuda");
+    if (kpiDeuda) kpiDeuda.textContent = resumen ? fmtMoneda(resumen.deuda_total) : "—";
+    const kpiVencida = document.getElementById("egr-kpi-vencida");
+    if (kpiVencida) kpiVencida.textContent = resumen ? fmtMoneda(resumen.deuda_vencida) : "—";
+    const kpiFacturas = document.getElementById("egr-kpi-facturas");
+    if (kpiFacturas) {
+      kpiFacturas.textContent = resumen ? resumen.cantidad_facturas_abiertas : "—";
+    }
+    const kpiProveedores = document.getElementById("egr-kpi-proveedores");
+    if (kpiProveedores) {
+      kpiProveedores.textContent = resumen ? resumen.cantidad_proveedores : "—";
+    }
+
+    // Insignia del menú con las facturas abiertas (se oculta si no hay ninguna).
+    const nav = document.getElementById("nav-egresos-deuda");
+    if (nav) {
+      const abiertas = resumen ? Number(resumen.cantidad_facturas_abiertas) || 0 : 0;
+      nav.textContent = String(abiertas);
+      nav.classList.toggle("hide", abiertas === 0);
+      nav.title = abiertas
+        ? `${abiertas} factura${abiertas === 1 ? "" : "s"} de proveedor sin pagar`
+        : "";
+    }
+
+    // Deuda por rubro: un chip por cada rubro con saldo.
+    const porTipo = document.getElementById("egr-por-tipo");
+    if (porTipo) {
+      const filas = resumen && Array.isArray(resumen.por_tipo) ? resumen.por_tipo : [];
+      porTipo.innerHTML = filas
+        .filter((d) => Number(d.deuda) > 0 || Number(d.cantidad_facturas) > 0)
+        .map(
+          (d) =>
+            `<span class="badge badge-slate">${esc(tipoProveedorTexto(d.tipo_proveedor))}: ` +
+            `${fmtMoneda(d.deuda)} · ${d.cantidad_facturas} ` +
+            `factura${d.cantidad_facturas === 1 ? "" : "s"}</span>`
+        )
+        .join("");
+    }
+
+    const nota = document.getElementById("egr-nota");
+    if (nota) {
+      if (!resumen) {
+        nota.textContent =
+          state.egrError || "Consultando el tablero de cuentas por pagar…";
+      } else {
+        const vencida = Number(resumen.deuda_vencida) || 0;
+        nota.textContent =
+          `Total facturado ${fmtMoneda(resumen.total_facturado)} · ` +
+          `pagado ${fmtMoneda(resumen.total_pagado)} · ` +
+          (vencida > 0
+            ? `vencido ${fmtMoneda(vencida)} (eso se paga primero).`
+            : "nada vencido.") +
+          ` Actualizado ${fechaHora(resumen.generado)}.`;
+      }
+    }
+  }
+
+  function renderProveedoresEgreso() {
+    const tipo = state.egrTipoProveedor;
+    const visibles = state.egrProveedores.filter(
+      (p) =>
+        (!tipo || p.tipo_proveedor === tipo) &&
+        (!state.egrSoloConDeuda || Number(p.saldo_pendiente) > 0)
+    );
+    const contador = document.getElementById("egr-prov-contador");
+    if (contador) contador.textContent = String(visibles.length);
+
+    const tbody = document.getElementById("egr-proveedores");
+    if (!tbody) return;
+    if (!visibles.length) {
+      tbody.innerHTML =
+        `<tr><td colspan="7">` +
+        vacio(
+          state.egrProveedores.length
+            ? "Ningún proveedor coincide con el filtro"
+            : "Todavía no hay proveedores",
+          state.egrProveedores.length
+            ? "Probá con otro rubro o quitá «Sólo los que tienen deuda»."
+            : "Cargá el primero en el formulario «Nuevo proveedor»."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = visibles
+      .map((p) => {
+        const saldo = Number(p.saldo_pendiente) || 0;
+        const vencido = Number(p.deuda_vencida) || 0;
+        const abiertas = Number(p.facturas_abiertas) || 0;
+        const detalle = abiertas
+          ? `${abiertas} factura${abiertas === 1 ? "" : "s"} sin pagar`
+          : "Sin deuda";
+        return (
+          `<tr>` +
+          `<td><div class="flex items-center gap-3">` +
+          `<span class="w-9 h-9 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold text-xs flex-none">` +
+          `${esc(iniciales(p.nombre))}</span>` +
+          `<div class="min-w-0"><p class="font-semibold text-slate-800 truncate">${esc(p.nombre)}</p>` +
+          `<p class="text-[11px] text-slate-400">${esc(detalle)}</p></div></div></td>` +
+          `<td><span class="badge badge-slate">${esc(tipoProveedorTexto(p.tipo_proveedor))}</span></td>` +
+          `<td class="text-slate-600">` +
+          (p.telefono_contacto ? esc(p.telefono_contacto) : '<span class="text-slate-400">—</span>') +
+          `</td>` +
+          `<td class="text-right font-semibold ${saldo > 0 ? "text-rose-600" : "text-slate-500"}">` +
+          `${fmtMoneda(saldo)}</td>` +
+          `<td class="text-right ${vencido > 0 ? "text-rose-600 font-semibold" : "text-slate-400"}">` +
+          `${fmtMoneda(vencido)}</td>` +
+          `<td class="text-center"><span class="badge badge-brand">${abiertas}</span></td>` +
+          `<td><div class="flex flex-wrap items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-soft btn-sm" data-egr-facturar="${esc(p.id)}" ` +
+          `title="Registrar una factura de ${esc(p.nombre)}">Facturar</button>` +
+          `<button type="button" class="btn btn-ghost btn-sm" data-egr-ver="${esc(p.id)}" ` +
+          `title="Ver las facturas de ${esc(p.nombre)}">Facturas</button>` +
+          `</div></td></tr>`
+        );
+      })
+      .join("");
+  }
+
+  function renderFacturasEgreso() {
+    const contador = document.getElementById("egr-fact-contador");
+    if (contador) contador.textContent = String(state.egrFacturas.length);
+
+    const tbody = document.getElementById("egr-facturas");
+    if (!tbody) return;
+    if (!state.egrFacturas.length) {
+      const filtrando =
+        state.egrProveedorId || state.egrEstadoFactura || state.egrSoloVencidas;
+      tbody.innerHTML =
+        `<tr><td colspan="9">` +
+        vacio(
+          "No hay facturas para mostrar",
+          filtrando
+            ? "Probá quitando los filtros de proveedor, estado o «Sólo vencidas»."
+            : "Registrá la primera factura con «Registrar factura»."
+        ) +
+        `</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = state.egrFacturas
+      .map((f) => {
+        const saldo = Number(f.saldo_pendiente) || 0;
+        const pagos = Array.isArray(f.pagos) ? f.pagos.length : 0;
+        const accion =
+          saldo > 0
+            ? `<button type="button" class="btn btn-primary btn-sm" data-egr-pagar="${esc(f.id)}" ` +
+              `title="Registrar un pago de ${fmtMoneda(saldo)}">Pagar</button>`
+            : '<span class="text-[11px] text-slate-400">Saldada</span>';
+        const vence =
+          `<span class="${f.vencida ? "text-rose-600 font-semibold" : "text-slate-600"}">` +
+          `${esc(fechaCorta(f.fecha_vencimiento))}</span>` +
+          (f.vencida ? ' <span class="badge badge-red">Vencida</span>' : "");
+        const paciente = f.paciente_nombre
+          ? `<p class="text-[11px] text-slate-400">Paciente: ${esc(f.paciente_nombre)}</p>`
+          : "";
+        return (
+          `<tr>` +
+          `<td><p class="font-semibold text-slate-800">${esc(f.proveedor_nombre)}</p>` +
+          `<p class="text-[11px] text-slate-400">${esc(tipoProveedorTexto(f.proveedor_tipo))}</p></td>` +
+          `<td><p class="text-slate-700">${esc(f.concepto)}</p>${paciente}</td>` +
+          `<td class="whitespace-nowrap text-slate-600">${esc(fechaCorta(f.fecha_emision))}</td>` +
+          `<td class="whitespace-nowrap">${vence}</td>` +
+          `<td class="text-right font-semibold">${fmtMoneda(f.monto_total)}</td>` +
+          `<td class="text-right text-slate-500">${fmtMoneda(f.monto_pagado)}` +
+          (pagos
+            ? `<span class="block text-[11px] text-slate-400">${pagos} pago${pagos === 1 ? "" : "s"}</span>`
+            : "") +
+          `</td>` +
+          `<td class="text-right ${saldo > 0 ? "font-semibold text-rose-600" : "text-slate-500"}">` +
+          `${fmtMoneda(saldo)}</td>` +
+          `<td>${badgeEstadoFactura(f.estado_pago)}</td>` +
+          `<td class="text-right">${accion}</td></tr>`
+        );
+      })
+      .join("");
+  }
+
+  /* Los filtros de la tabla de proveedores se aplican en memoria; los de la
+     cartera viajan al servidor porque es la que ordena y pagina por vencimiento. */
+  function filtrarProveedoresEgresos() {
+    state.egrTipoProveedor = valorDe("egr-prov-filtro-tipo");
+    const chk = document.getElementById("egr-prov-solo-deuda");
+    state.egrSoloConDeuda = Boolean(chk && chk.checked);
+    renderProveedoresEgreso();
+  }
+
+  function filtrarFacturasEgresos() {
+    state.egrProveedorId = valorDe("egr-fact-proveedor");
+    state.egrEstadoFactura = valorDe("egr-fact-estado");
+    const chk = document.getElementById("egr-fact-vencidas");
+    state.egrSoloVencidas = Boolean(chk && chk.checked);
+    cargarFacturasEgreso().catch(function (err) {
+      toast("error", "No se pudieron cargar las facturas", err.message);
+    });
+  }
+
+  /* Desde la fila de un proveedor: «Facturas» deja la cartera filtrada por él. */
+  function verFacturasDeProveedor(proveedorId) {
+    state.egrProveedorId = String(proveedorId);
+    state.egrEstadoFactura = "";
+    const proveedor = document.getElementById("egr-fact-proveedor");
+    if (proveedor) proveedor.value = String(proveedorId);
+    const estado = document.getElementById("egr-fact-estado");
+    if (estado) estado.value = "";
+    cargarFacturasEgreso().catch(function (err) {
+      toast("error", "No se pudieron cargar las facturas", err.message);
+    });
+    const tabla = document.getElementById("egr-facturas");
+    if (tabla && tabla.scrollIntoView) {
+      tabla.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  /* --- Alta de proveedor (POST /egresos/proveedores) --------------------- */
+  async function crearProveedorEgreso(ev) {
+    ev.preventDefault();
+    const boton = document.getElementById("egr-prov-guardar");
+    const nombre = valorDe("egr-prov-nombre").trim();
+    const telefono = valorDe("egr-prov-telefono").trim();
+    if (!nombre) {
+      mostrarAviso("egr-prov-error", "El nombre del proveedor es obligatorio.");
+      return;
+    }
+    const payload = {
+      nombre: nombre,
+      tipo_proveedor: valorDe("egr-prov-tipo") || "INSUMOS",
+    };
+    if (telefono) payload.telefono_contacto = telefono;
+    try {
+      bloquear(boton, true);
+      const proveedor = await api(RUTA_PROVEEDORES_EGRESO, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      ocultarAviso("egr-prov-error");
+      const form = document.getElementById("form-proveedor-egreso");
+      if (form) form.reset();
+      toast(
+        "exito",
+        "Proveedor registrado",
+        `${proveedor.nombre} · ${tipoProveedorTexto(proveedor.tipo_proveedor)}`
+      );
+      await cargarEgresos();
+    } catch (err) {
+      mostrarAviso("egr-prov-error", err.message);
+    } finally {
+      bloquear(boton, false);
+    }
+  }
+
+  /* --- Factura recibida (POST /egresos/facturas) ------------------------- */
+  /* El paciente sólo se puede vincular en un proveedor MECANICO_DENTAL: en otro
+     rubro el backend responde 422, así que el campo se deshabilita y se limpia
+     al cambiar de proveedor. */
+  function sincronizarPacienteFacturaEgreso() {
+    const proveedor = proveedorEgresoPorId(valorDe("egr-fact-proveedor-modal"));
+    const select = document.getElementById("egr-fact-paciente");
+    const nota = document.getElementById("egr-fact-paciente-nota");
+    if (!select) return;
+    const mecanico = Boolean(
+      proveedor && proveedor.tipo_proveedor === "MECANICO_DENTAL"
+    );
+    select.disabled = !mecanico;
+    if (!mecanico) select.value = "";
+    if (nota) {
+      nota.textContent = mecanico
+        ? "Vincula la pieza con el paciente (opcional)."
+        : "Sólo se puede vincular un paciente en un mecánico dental.";
+    }
+  }
+
+  function abrirModalFacturaEgreso(proveedorId) {
+    if (!state.egrProveedores.length) {
+      toast(
+        "error",
+        "Primero cargá un proveedor",
+        "La factura se registra a nombre de un proveedor."
+      );
+      return;
+    }
+    cargarSelectoresEgreso();
+    const select = document.getElementById("egr-fact-proveedor-modal");
+    if (select && proveedorId) select.value = String(proveedorId);
+    const proveedor = proveedorEgresoPorId(select ? select.value : "");
+    const titulo = document.getElementById("egr-fact-titulo");
+    if (titulo) {
+      titulo.textContent = proveedor ? `Factura de ${proveedor.nombre}` : "Registrar factura";
+    }
+    document.getElementById("egr-fact-concepto").value = "";
+    document.getElementById("egr-fact-monto").value = "";
+    document.getElementById("egr-fact-emision").value = hoyISO();
+    // Sin fecha de vencimiento el servidor toma 30 días; se propone la misma
+    // fecha para que la secretaría la vea antes de guardar.
+    document.getElementById("egr-fact-vencimiento").value = sumarDiasISO(hoyISO(), 30);
+    sincronizarPacienteFacturaEgreso();
+    ocultarAviso("egr-fact-error");
+    mostrarModal("modal-factura-egreso");
+  }
+
+  function cerrarModalFacturaEgreso() {
+    ocultarModal("modal-factura-egreso");
+    const form = document.getElementById("form-factura-egreso");
+    if (form) form.reset();
+    ocultarAviso("egr-fact-error");
+    const paciente = document.getElementById("egr-fact-paciente");
+    if (paciente) paciente.disabled = false;
+  }
+
+  async function guardarFacturaEgreso(ev) {
+    ev.preventDefault();
+    const boton = document.getElementById("modal-factura-save");
+    const proveedorId = valorDe("egr-fact-proveedor-modal");
+    const concepto = valorDe("egr-fact-concepto").trim();
+    const monto = Number(valorDe("egr-fact-monto"));
+    if (!proveedorId) {
+      mostrarAviso("egr-fact-error", "Elegí el proveedor de la factura.");
+      return;
+    }
+    if (!concepto) {
+      mostrarAviso("egr-fact-error", "El concepto del gasto es obligatorio.");
+      return;
+    }
+    if (!(monto > 0)) {
+      mostrarAviso("egr-fact-error", "El importe de la factura debe ser mayor que cero.");
+      return;
+    }
+    const payload = { proveedor_id: proveedorId, concepto: concepto, monto_total: monto };
+    const emision = valorDe("egr-fact-emision");
+    if (emision) payload.fecha_emision = emision;
+    const vencimiento = valorDe("egr-fact-vencimiento");
+    if (vencimiento) payload.fecha_vencimiento = vencimiento;
+    const paciente = valorDe("egr-fact-paciente");
+    if (paciente) payload.paciente_id = Number(paciente);
+
+    try {
+      bloquear(boton, true);
+      const factura = await api(RUTA_FACTURAS_EGRESO, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      cerrarModalFacturaEgreso();
+      toast(
+        "exito",
+        "Factura registrada",
+        `${factura.proveedor_nombre} · ${fmtMoneda(factura.monto_total)} · ` +
+          `vence ${fechaCorta(factura.fecha_vencimiento)}`
+      );
+      await cargarEgresos();
+    } catch (err) {
+      mostrarAviso("egr-fact-error", err.message);
+    } finally {
+      bloquear(boton, false);
+    }
+  }
+
+  /* --- Pago de una factura (POST /egresos/pagar) ------------------------- */
+  function abrirModalPagoEgreso(facturaId) {
+    const factura = facturaEgresoPorId(facturaId);
+    if (!factura) return;
+    state.egrPagoFacturaId = factura.id;
+    const saldo = Number(factura.saldo_pendiente) || 0;
+    const titulo = document.getElementById("egr-pago-titulo");
+    if (titulo) titulo.textContent = `Pagar ${fmtMoneda(saldo)}`;
+    const detalle = document.getElementById("egr-pago-detalle");
+    if (detalle) {
+      detalle.textContent =
+        `${factura.proveedor_nombre} · ${factura.concepto} · ` +
+        `vence ${fechaCorta(factura.fecha_vencimiento)} · ` +
+        `saldo ${fmtMoneda(saldo)}`;
+    }
+    const monto = document.getElementById("egr-pago-monto");
+    if (monto) {
+      monto.value = saldo ? saldo.toFixed(2) : "";
+      monto.max = saldo ? saldo.toFixed(2) : "";
+    }
+    const metodo = document.getElementById("egr-pago-metodo");
+    if (metodo) metodo.value = "EFECTIVO";
+    const fecha = document.getElementById("egr-pago-fecha");
+    if (fecha) fecha.value = hoyISO();
+    ocultarAviso("egr-pago-error");
+    mostrarModal("modal-pago-egreso");
+  }
+
+  function cerrarModalPagoEgreso() {
+    state.egrPagoFacturaId = null;
+    const form = document.getElementById("form-pago-egreso");
+    if (form) form.reset();
+    ocultarAviso("egr-pago-error");
+    ocultarModal("modal-pago-egreso");
+  }
+
+  async function guardarPagoEgreso(ev) {
+    ev.preventDefault();
+    const factura = facturaEgresoPorId(state.egrPagoFacturaId);
+    if (!factura) {
+      toast(
+        "error",
+        "Elegí una factura",
+        "La factura ya no está en la cartera: actualizá la lista."
+      );
+      return;
+    }
+    const boton = document.getElementById("modal-pago-save");
+    const monto = Number(valorDe("egr-pago-monto"));
+    const saldo = Number(factura.saldo_pendiente) || 0;
+    if (!(monto > 0)) {
+      mostrarAviso("egr-pago-error", "El importe del pago debe ser mayor que cero.");
+      return;
+    }
+    // El backend también lo rechaza con 422; avisarlo acá evita el viaje.
+    if (monto > saldo) {
+      mostrarAviso(
+        "egr-pago-error",
+        `El pago no puede superar el saldo de la factura (${fmtMoneda(saldo)}).`
+      );
+      return;
+    }
+    const payload = {
+      gasto_factura_id: factura.id,
+      monto_pagado: monto,
+      metodo_pago: valorDe("egr-pago-metodo") || "EFECTIVO",
+    };
+    const fecha = valorDe("egr-pago-fecha");
+    if (fecha) payload.fecha_pago = fecha;
+
+    try {
+      bloquear(boton, true);
+      const resultado = await api(RUTA_PAGO_EGRESO, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      cerrarModalPagoEgreso();
+      const pagado = resultado.pago ? resultado.pago.monto_pagado : monto;
+      const medio =
+        METODO_PAGO_EGRESO[payload.metodo_pago] || payload.metodo_pago;
+      toast(
+        "exito",
+        "Pago registrado",
+        `${medio} ${fmtMoneda(pagado)} · factura ${fmtMoneda(
+          resultado.factura_saldo_pendiente
+        )} · proveedor ${fmtMoneda(resultado.proveedor_saldo_pendiente)}`
+      );
+      await cargarEgresos();
+    } catch (err) {
+      mostrarAviso("egr-pago-error", err.message);
+    } finally {
+      bloquear(boton, false);
+    }
+  }
+
   /* ------------------------------ Navegación ----------------------------- */
   const VISTAS = {
     dashboard: ["Panel Principal", "Resumen del consultorio y estado de los recordatorios"],
@@ -4573,6 +5901,14 @@
     "cuenta-corriente": [
       "Cuenta corriente",
       "Saldo deudor por paciente, historial de movimientos y planes de cuotas de los tratamientos",
+    ],
+    "borrar-movimientos": [
+      "Borrar movimientos",
+      "Depuración: eliminar cierres de caja y movimientos de cuenta corriente cargados por error",
+    ],
+    egresos: [
+      "Proveedores y egresos",
+      "Cuentas por pagar del consultorio: facturas de mecánicos dentales, insumos y servicios, con sus pagos",
     ],
   };
 
@@ -4634,6 +5970,16 @@
       // El saldo se vuelve a pedir al entrar: es un libro mayor y puede haber
       // cambiado por un cobro del mostrador desde la última visita.
       cargarCuentaCorriente();
+    }
+    if (v === "borrar-movimientos") {
+      // Depuración: se recargan el período de caja y el libro mayor cada vez que
+      // se entra (otra pestaña pudo haber borrado o cobrado algo).
+      cargarModuloBorrado();
+    }
+    if (v === "egresos") {
+      // El tablero, los proveedores y la cartera se vuelven a pedir al entrar:
+      // un pago o una factura pudo cambiar los saldos desde la última visita.
+      cargarEgresos();
     }
     if (v === "bot-whatsapp") {
       // La tabla se dibuja con lo que ya está en memoria y la vista previa se
@@ -6271,6 +7617,9 @@
       cerrarModalOpcionMenu();
       cerrarModalFicha();
       cerrarModalEnviarFicha();
+      cerrarInformeCC();
+      cerrarModalFacturaEgreso();
+      cerrarModalPagoEgreso();
     });
 
     document.getElementById("form-doctor").addEventListener("submit", crearDoctor);
@@ -6656,6 +8005,25 @@
     const ccRefrescar = document.getElementById("cc-refrescar");
     if (ccRefrescar) ccRefrescar.addEventListener("click", cargarCuentaCorriente);
 
+    // Informe consolidado de la cobranza: todos los pacientes con cuenta, el
+    // plan, lo que pagó cada uno y lo que debe, con la deuda total al pie.
+    const ccInformeBtn = document.getElementById("cc-informe");
+    if (ccInformeBtn) ccInformeBtn.addEventListener("click", abrirInformeCC);
+    document
+      .getElementById("modal-informe-cc-close")
+      .addEventListener("click", cerrarInformeCC);
+    document
+      .getElementById("modal-informe-cc-cancel")
+      .addEventListener("click", cerrarInformeCC);
+    document
+      .getElementById("informe-cc-imprimir")
+      .addEventListener("click", imprimirInformeCC);
+    document
+      .getElementById("modal-informe-cc")
+      .addEventListener("click", function (e) {
+        if (e.target.id === "modal-informe-cc") cerrarInformeCC();
+      });
+
     const ccPaciente = document.getElementById("cc-paciente");
     if (ccPaciente) {
       ccPaciente.addEventListener("change", function () {
@@ -6705,6 +8073,177 @@
         if (estado) cambiarEstadoPlanCC(estado.dataset.ccPlan, estado.dataset.ccEstado);
       });
     }
+
+    /* --- Módulo de borrado: depuración de caja y cuenta corriente --------- */
+    const depRefrescar = document.getElementById("dep-refrescar");
+    if (depRefrescar) depRefrescar.addEventListener("click", cargarModuloBorrado);
+
+    // El buscador de la caja filtra en memoria: no vuelve a consultar.
+    const depCajaBuscar = document.getElementById("dep-caja-buscar");
+    if (depCajaBuscar) {
+      depCajaBuscar.addEventListener("input", function () {
+        state.depCajaFiltro = depCajaBuscar.value;
+        renderCajaDep();
+      });
+    }
+    const depCajaDesde = document.getElementById("dep-caja-desde");
+    if (depCajaDesde) {
+      depCajaDesde.addEventListener("change", function () {
+        state.depCajaDesde = depCajaDesde.value;
+        cargarCajaDep().catch(function (err) {
+          toast("error", "No se pudieron cargar los movimientos de caja", err.message);
+        });
+      });
+    }
+    const depCajaHasta = document.getElementById("dep-caja-hasta");
+    if (depCajaHasta) {
+      depCajaHasta.addEventListener("change", function () {
+        state.depCajaHasta = depCajaHasta.value;
+        cargarCajaDep().catch(function (err) {
+          toast("error", "No se pudieron cargar los movimientos de caja", err.message);
+        });
+      });
+    }
+    const depCajaBuscarBtn = document.getElementById("dep-caja-buscar-btn");
+    if (depCajaBuscarBtn) depCajaBuscarBtn.addEventListener("click", cargarCajaDep);
+
+    // Filtros del libro mayor: cada cambio vuelve a pedir el listado.
+    [
+      ["dep-cc-paciente", "depCCPaciente"],
+      ["dep-cc-desde", "depCCDesde"],
+      ["dep-cc-hasta", "depCCHasta"],
+      ["dep-cc-tipo", "depCCTipo"],
+    ].forEach(function (par) {
+      const el = document.getElementById(par[0]);
+      if (!el) return;
+      el.addEventListener("change", function () {
+        state[par[1]] = el.value;
+        cargarTransaccionesDep().catch(function (err) {
+          toast("error", "No se pudo cargar el libro mayor", err.message);
+        });
+      });
+    });
+    const depCcBuscarBtn = document.getElementById("dep-cc-buscar-btn");
+    if (depCcBuscarBtn) {
+      depCcBuscarBtn.addEventListener("click", function () {
+        cargarTransaccionesDep().catch(function (err) {
+          toast("error", "No se pudo cargar el libro mayor", err.message);
+        });
+      });
+    }
+
+    // «Tildar todas» y borrado en lote de cada panel.
+    const depCajaTodos = document.getElementById("dep-caja-todos");
+    if (depCajaTodos) {
+      depCajaTodos.addEventListener("change", function () {
+        tildarTodosDep("caja", depCajaTodos.checked);
+      });
+    }
+    const depCcTodos = document.getElementById("dep-cc-todos");
+    if (depCcTodos) {
+      depCcTodos.addEventListener("change", function () {
+        tildarTodosDep("cc", depCcTodos.checked);
+      });
+    }
+    const depCajaEliminar = document.getElementById("dep-caja-eliminar");
+    if (depCajaEliminar) {
+      depCajaEliminar.addEventListener("click", function () {
+        borrarSeleccionadosDep("caja");
+      });
+    }
+    const depCcEliminar = document.getElementById("dep-cc-eliminar");
+    if (depCcEliminar) {
+      depCcEliminar.addEventListener("click", function () {
+        borrarSeleccionadosDep("cc");
+      });
+    }
+
+    /* --- Proveedores y egresos (Módulo 6) --------------------------------- */
+    // Alta de proveedor: formulario en la misma vista (sin modal: son 3 campos).
+    const formProveedorEgreso = document.getElementById("form-proveedor-egreso");
+    if (formProveedorEgreso) {
+      formProveedorEgreso.addEventListener("submit", crearProveedorEgreso);
+    }
+    const egrRefrescar = document.getElementById("egr-refrescar");
+    if (egrRefrescar) egrRefrescar.addEventListener("click", cargarEgresos);
+    const egrNuevaFactura = document.getElementById("egr-nueva-factura");
+    if (egrNuevaFactura) {
+      egrNuevaFactura.addEventListener("click", function () {
+        abrirModalFacturaEgreso(null);
+      });
+    }
+    // Proveedores: los filtros se aplican en memoria (catálogo chico).
+    ["egr-prov-filtro-tipo", "egr-prov-solo-deuda"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("change", filtrarProveedoresEgresos);
+    });
+    // Cartera: cada filtro vuelve a pedir el listado al servidor.
+    ["egr-fact-proveedor", "egr-fact-estado", "egr-fact-vencidas"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("change", filtrarFacturasEgresos);
+    });
+    const egrFactBuscar = document.getElementById("egr-fact-buscar");
+    if (egrFactBuscar) egrFactBuscar.addEventListener("click", filtrarFacturasEgresos);
+
+    // Modal de factura: el proveedor manda sobre el campo de paciente.
+    const formFacturaEgreso = document.getElementById("form-factura-egreso");
+    if (formFacturaEgreso) {
+      formFacturaEgreso.addEventListener("submit", guardarFacturaEgreso);
+    }
+    const egrFactProveedorModal = document.getElementById("egr-fact-proveedor-modal");
+    if (egrFactProveedorModal) {
+      egrFactProveedorModal.addEventListener("change", function () {
+        const proveedor = proveedorEgresoPorId(egrFactProveedorModal.value);
+        const titulo = document.getElementById("egr-fact-titulo");
+        if (titulo) {
+          titulo.textContent = proveedor
+            ? `Factura de ${proveedor.nombre}`
+            : "Registrar factura";
+        }
+        sincronizarPacienteFacturaEgreso();
+      });
+    }
+    ["modal-factura-close", "modal-factura-cancel"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("click", cerrarModalFacturaEgreso);
+    });
+    const modalFacturaEgreso = document.getElementById("modal-factura-egreso");
+    if (modalFacturaEgreso) {
+      modalFacturaEgreso.addEventListener("click", function (e) {
+        if (e.target.id === "modal-factura-egreso") cerrarModalFacturaEgreso();
+      });
+    }
+
+    // Modal de pago de una factura recibida.
+    const formPagoEgreso = document.getElementById("form-pago-egreso");
+    if (formPagoEgreso) formPagoEgreso.addEventListener("submit", guardarPagoEgreso);
+    ["modal-pago-close", "modal-pago-cancel"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("click", cerrarModalPagoEgreso);
+    });
+    const modalPagoEgreso = document.getElementById("modal-pago-egreso");
+    if (modalPagoEgreso) {
+      modalPagoEgreso.addEventListener("click", function (e) {
+        if (e.target.id === "modal-pago-egreso") cerrarModalPagoEgreso();
+      });
+    }
+
+    // Las filas de proveedores y facturas se redibujan en cada carga: sus
+    // botones se resuelven por delegación sobre el documento.
+    document.addEventListener("click", function (e) {
+      const facturar = e.target.closest("[data-egr-facturar]");
+      if (facturar) {
+        abrirModalFacturaEgreso(facturar.dataset.egrFacturar);
+        return;
+      }
+      const ver = e.target.closest("[data-egr-ver]");
+      if (ver) {
+        verFacturasDeProveedor(ver.dataset.egrVer);
+        return;
+      }
+      const pagar = e.target.closest("[data-egr-pagar]");
+      if (pagar) abrirModalPagoEgreso(pagar.dataset.egrPagar);
+    });
 
     // Caja del día: el selector de fecha recarga la caja.
     const factFecha = document.getElementById("fact-fecha");
@@ -6964,6 +8503,16 @@
     document.addEventListener("change", function (e) {
       const chk = e.target.closest("[data-cobro-tilde]");
       if (chk) alternarSeleccionCobro(chk.dataset.cobroTilde, chk.checked);
+      // Tildes del módulo de borrado (las filas se redibujan en cada carga).
+      const tildeCaja = e.target.closest("[data-dep-tilde-caja]");
+      if (tildeCaja) {
+        alternarTildeDep("caja", tildeCaja.dataset.depTildeCaja, tildeCaja.checked);
+        return;
+      }
+      const tildeCC = e.target.closest("[data-dep-tilde-cc]");
+      if (tildeCC) {
+        alternarTildeDep("cc", tildeCC.dataset.depTildeCc, tildeCC.checked);
+      }
     });
     document.addEventListener("input", function (e) {
       // Monto que cubre la OS en la grilla de convenios: recalcula el coseguro.
@@ -7010,6 +8559,15 @@
       }
       const quitarArancel = e.target.closest("[data-fact-eliminar-arancel]");
       if (quitarArancel) eliminarArancel(quitarArancel.dataset.factEliminarArancel);
+      // Módulo de borrado: eliminar un cierre de caja o un movimiento del libro
+      // mayor (las filas se redibujan, así que se resuelve por delegación).
+      const borrarCaja = e.target.closest("[data-dep-borrar-caja]");
+      if (borrarCaja) {
+        borrarMovimientoCajaDep(borrarCaja.dataset.depBorrarCaja);
+        return;
+      }
+      const borrarCC = e.target.closest("[data-dep-borrar-cc]");
+      if (borrarCC) borrarTransaccionCCDep(borrarCC.dataset.depBorrarCc);
     });
   }
 
@@ -7101,10 +8659,12 @@
     cargarAranceles,
     fmtMoneda,
     badgeEstadoPago,
+    badgeMedioPago,
     practicasTexto,
     rutaPrestacion,
     rutaArancel,
     ESTADO_PAGO,
+    MEDIO_PAGO,
     TIPO_PAGO_TEXTO,
     // Cuenta corriente y planes de cuotas (Módulo 5)
     cargarCuentaCorriente,

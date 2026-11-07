@@ -681,6 +681,49 @@ select.field {
 }
 .cal-slot:hover { border-color: var(--brand-400); background: #f4fbf9; transform: translateX(2px); }
 .cal-slot:disabled { opacity: .55; cursor: not-allowed; transform: none; background: #f8fafc; }
+/* Bloque que no se puede agendar (hora pasada, ocupado o fuera de agenda): se
+   ve apagado pero SIGUE respondiendo al clic, que explica el motivo con un
+   aviso en pantalla (`.cal-slot-off` + `aria-disabled="true"`). */
+.cal-slot-off,
+.cal-slot[aria-disabled="true"] {
+  opacity: .55;
+  cursor: not-allowed;
+  transform: none;
+  background: #f8fafc;
+}
+.cal-slot-off:hover,
+.cal-slot[aria-disabled="true"]:hover {
+  border-color: #e8edf3;
+  background: #f8fafc;
+  transform: none;
+}
+/* Aviso "sin horarios libres" arriba de la lista de bloques. */
+.cal-aviso {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-bottom: .5rem;
+  padding: .55rem .7rem;
+  border: 1px solid #fde68a;
+  border-radius: .7rem;
+  background: #fffbeb;
+}
+.cal-aviso p { font-size: .72rem; font-weight: 600; color: #92400e; }
+.cal-aviso-btn {
+  font-family: inherit;
+  font-size: .7rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fff;
+  border: 1px solid #fcd34d;
+  border-radius: .55rem;
+  padding: .28rem .6rem;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease;
+}
+.cal-aviso-btn:hover { background: #fef3c7; border-color: #f59e0b; }
 .cal-slot-hora {
   display: flex;
   flex-direction: column;

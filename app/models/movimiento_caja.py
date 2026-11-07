@@ -6,6 +6,9 @@ y el sistema guarda **un movimiento de caja por turno**
 
 * ``monto_efectivo``: lo que se cobra (o se cobró) en el mostrador. Es la suma
   de los coseguros y de las prácticas sin cobertura.
+* ``medio_pago``: cómo pagó el paciente ese importe del mostrador (efectivo o
+  transferencia). La caja del día se cierra por medio de pago, así que el dato
+  se guarda con el cierre y no se deduce del texto de las observaciones.
 * ``monto_pendiente_os``: lo que queda a cobrarle a la obra social del paciente.
 * ``estado_pago``: dónde está ese importe en el circuito de la obra social
   (``PENDIENTE`` → ``EN_PROCESO_LIQUIDACION`` → ``COBRADO`` / ``DEBITADO_OS``).
@@ -37,7 +40,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.datetime_utils import utcnow
 from app.db.base_class import Base
 from app.db.types import UTCDateTime
-from app.models.enums import EstadoPagoMovimiento
+from app.models.enums import EstadoPagoMovimiento, MedioPago
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.doctor import Doctor
@@ -80,6 +83,24 @@ class MovimientoCaja(Base):
     )
     monto_cobrado_os: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # Medio con el que el paciente pagó el importe del mostrador. Se guarda por
+    # cierre (y no en el detalle) porque el cobro es de la visita completa.
+    # ``EFECTIVO`` como valor por defecto: es lo que se suponía hasta que existió
+    # la columna, así las filas viejas siguen cuadrando con la caja.
+    medio_pago: Mapped[MedioPago] = mapped_column(
+        SAEnum(
+            MedioPago,
+            name="medio_pago_movimiento_caja",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            length=15,
+        ),
+        nullable=False,
+        default=MedioPago.EFECTIVO,
+        server_default=MedioPago.EFECTIVO.value,
+    )
+
     estado_pago: Mapped[EstadoPagoMovimiento] = mapped_column(
         SAEnum(
             EstadoPagoMovimiento,
@@ -116,6 +137,7 @@ class MovimientoCaja(Base):
         return (
             f"<MovimientoCaja id={self.id} turno_id={self.turno_id} "
             f"doctor_id={self.doctor_id} efectivo={self.monto_efectivo} "
+            f"medio={self.medio_pago} "
             f"pendiente_os={self.monto_pendiente_os} estado={self.estado_pago}>"
         )
 

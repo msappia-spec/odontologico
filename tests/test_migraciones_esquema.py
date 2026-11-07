@@ -150,3 +150,74 @@ def test_init_db_aplica_la_migracion_antes_de_sembrar(monkeypatch):
     init_db_module.init_db()
 
     assert llamados == [engine_falso]
+
+
+def test_agrega_el_medio_de_pago_a_la_caja_y_al_libro_mayor(tmp_path):
+    """Las bases con caja y cuenta corriente previas reciben el medio de pago.
+
+    La caja histórica queda en efectivo (el único medio que el sistema suponía);
+    el libro mayor viejo queda en ``NULL``, que la caja también cuenta como
+    efectivo, y los débitos nuevos siguen sin medio (no son cobros).
+    """
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'medio_pago.db').as_posix()}", future=True
+    )
+    with engine.begin() as conexion:
+        conexion.exec_driver_sql(
+            "CREATE TABLE movimientos_caja ("
+            "id INTEGER PRIMARY KEY, "
+            "turno_id INTEGER NOT NULL, "
+            "doctor_id INTEGER NOT NULL, "
+            "fecha DATETIME NOT NULL, "
+            "monto_efectivo FLOAT NOT NULL DEFAULT 0, "
+            "monto_pendiente_os FLOAT NOT NULL DEFAULT 0, "
+            "estado_pago VARCHAR(25) NOT NULL)"
+        )
+        conexion.exec_driver_sql(
+            "INSERT INTO movimientos_caja "
+            "(turno_id, doctor_id, fecha, monto_efectivo, monto_pendiente_os, "
+            "estado_pago) VALUES (1, 1, '2026-11-03 12:00:00', 5000, 0, 'COBRADO')"
+        )
+        conexion.exec_driver_sql(
+            "CREATE TABLE transacciones_cc ("
+            "id CHAR(32) PRIMARY KEY, "
+            "cuenta_corriente_id CHAR(32) NOT NULL, "
+            "tipo_movimiento VARCHAR(10) NOT NULL, "
+            "monto NUMERIC(10, 2) NOT NULL, "
+            "descripcion VARCHAR(200) NOT NULL, "
+            "fecha DATETIME NOT NULL)"
+        )
+        conexion.exec_driver_sql(
+            "INSERT INTO transacciones_cc "
+            "(id, cuenta_corriente_id, tipo_movimiento, monto, descripcion, fecha) "
+            "VALUES ('a', 'b', 'CREDITO', 1000, 'Pago previo', "
+            "'2026-11-03 10:00:00')"
+        )
+
+    aplicadas = aplicar_columnas_faltantes(engine)
+
+    assert {"movimientos_caja.medio_pago", "transacciones_cc.medio_pago"} <= set(
+        aplicadas
+    )
+    with engine.connect() as conexion:
+        caja = conexion.exec_driver_sql("SELECT medio_pago FROM movimientos_caja").one()
+        libro = conexion.exec_driver_sql(
+            "SELECT medio_pago FROM transacciones_cc"
+        ).one()
+    assert tuple(caja) == ("EFECTIVO",)
+    assert tuple(libro) == (None,)
+    engine.dispose()
+
+
+def test_postgres_agrega_el_medio_de_pago_con_default_efectivo():
+    """En producción la columna entra con ``DEFAULT 'EFECTIVO'`` (sin filas nulas)."""
+    columna = next(
+        c
+        for c in COLUMNAS_NUEVAS
+        if c.tabla == "movimientos_caja" and c.columna == "medio_pago"
+    )
+
+    sentencia = _sentencia_alter(columna, "postgresql")
+
+    assert "ADD COLUMN IF NOT EXISTS" in sentencia
+    assert "VARCHAR(15) NOT NULL DEFAULT 'EFECTIVO'" in sentencia

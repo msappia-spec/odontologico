@@ -163,7 +163,11 @@ def test_el_dashboard_actualiza_turnos_con_patch():
     # agenda semanal (/doctores/{id}/disponibilidad) y la gestión del profesional
     # (PUT de edición y DELETE de baja lógica en /doctores/{id}), todos declarados
     # por la API (app/api/v1/endpoints/disponibilidad.py y doctores.py). El panel
-    # de anamnesis agrega el PUT interno que carga la ficha de un turno.
+    # de anamnesis agrega el PUT interno que carga la ficha de un turno. El módulo
+    # de borrado («Borrar movimientos») suma los DELETE de un cierre de caja
+    # (``/movimientos-caja/{id}``) y de un movimiento del libro mayor
+    # (``/finanzas/cuenta-corriente/transacciones/{id}``), ambos declarados en
+    # facturacion.py y finanzas.py.
     assert not re.search(r'method:\s*"(PUT|DELETE)"', calendar_js)
     assert not re.search(r'method:\s*"(PUT|DELETE)"', _leer_estatico("index.html"))
 
@@ -171,7 +175,12 @@ def test_el_dashboard_actualiza_turnos_con_patch():
         r"api\(\s*`([^`]+)`\s*,\s*\{\s*method:\s*\"(?:PUT|DELETE)\"", app_js
     )
     assert usos_put_delete, "app.js debería gestionar la agenda semanal con PUT/DELETE"
-    permitidos = ("/doctores/", "/anamnesis/panel/")
+    permitidos = (
+        "/doctores/",
+        "/anamnesis/panel/",
+        "${RUTA_CAJA}/",
+        "${RUTA_BAJA_TRANSACCION_CC}/",
+    )
     assert all(ruta.startswith(permitidos) for ruta in usos_put_delete), usos_put_delete
     assert all("turnos" not in ruta for ruta in usos_put_delete), usos_put_delete
 

@@ -70,6 +70,74 @@ class EstadoPagoMovimiento(str, enum.Enum):
     DEBITADO_OS = "DEBITADO_OS"
 
 
+class MedioPago(str, enum.Enum):
+    """Forma en que el paciente pagó un importe (Módulos 3 y 5).
+
+    * ``EFECTIVO``: billetes en el mostrador. Es el valor por defecto para no
+      reinterpretar los cobros ya cargados: hasta que existió esta columna todo
+      lo que entraba al mostrador se suponía en efectivo.
+    * ``TRANSFERENCIA``: transferencia o depósito a la cuenta del consultorio.
+
+    Se guarda en cada cobro (cierre de visita y crédito de la cuenta corriente)
+    para poder **cerrar la caja del día por medio de pago**: cuánto entró en
+    efectivo, cuánto por transferencia y, sumando las entregas y los pagos de
+    las cuentas corrientes, cuánto ingresó realmente en el día. Sin este dato la
+    única forma de distinguirlo sería adivinar por el texto del concepto.
+    """
+
+    EFECTIVO = "EFECTIVO"
+    TRANSFERENCIA = "TRANSFERENCIA"
+
+
+class TipoProveedor(str, enum.Enum):
+    """Rubro de un proveedor del consultorio (Módulo 6: egresos).
+
+    * ``MECANICO_DENTAL``: laboratorio que fabrica las piezas de los pacientes.
+      Es el **único** rubro que puede vincular una factura a un ``paciente_id``,
+      porque el gasto corresponde a un trabajo concreto de ese paciente.
+    * ``INSUMOS``: droguería, descartables, instrumental.
+    * ``SERVICIOS_IMPUESTOS``: alquiler, luz, gas, internet, honorarios y
+      obligaciones fiscales.
+
+    A diferencia de los cobros al paciente (``MedioPago``), este enum clasifica
+    **a quién se le paga**, no cómo se paga.
+    """
+
+    MECANICO_DENTAL = "MECANICO_DENTAL"
+    INSUMOS = "INSUMOS"
+    SERVICIOS_IMPUESTOS = "SERVICIOS_IMPUESTOS"
+
+
+class EstadoPagoFactura(str, enum.Enum):
+    """Situación de una factura recibida (cuenta por pagar, Módulo 6).
+
+    Se calcula **siempre** en el servidor a partir de los pagos registrados:
+
+    * ``PENDIENTE``: no se pagó nada todavía.
+    * ``PARCIAL``: hay al menos un pago, pero queda saldo.
+    * ``PAGADO``: ``monto_pagado == monto_total``; la deuda con el proveedor por
+      esa factura quedó cancelada.
+    """
+
+    PENDIENTE = "PENDIENTE"
+    PARCIAL = "PARCIAL"
+    PAGADO = "PAGADO"
+
+
+class MetodoPagoEgreso(str, enum.Enum):
+    """Forma en que el consultorio **paga** a un proveedor (Módulo 6).
+
+    Es el espejo de ``MedioPago`` (que registra cómo paga el paciente) con un
+    valor más: ``TARJETA``. Se mantienen separados para no agregarle un valor
+    imposible a los cobros (un paciente no paga con «tarjeta de débito del
+    consultorio») ni obligar a la caja a interpretar medios que no son ingresos.
+    """
+
+    EFECTIVO = "EFECTIVO"
+    TRANSFERENCIA = "TRANSFERENCIA"
+    TARJETA = "TARJETA"
+
+
 class TipoMovimientoCC(str, enum.Enum):
     """Naturaleza de un movimiento de la cuenta corriente de un paciente.
 

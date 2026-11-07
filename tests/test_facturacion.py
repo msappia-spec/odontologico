@@ -1,6 +1,6 @@
 """Pruebas del Módulo 3: obras sociales, liquidación y facturación mixta.
 
-Cubren las cuatro piezas del módulo de punta a punta (API + base de datos):
+Cubren las cinco piezas del módulo de punta a punta (API + base de datos):
 
 1. **Catálogo de prestaciones** (``/prestaciones``): código único (``409``) y baja
    lógica (``DELETE`` → ``activa = false``); una práctica dada de baja no se puede
@@ -14,6 +14,10 @@ Cubren las cuatro piezas del módulo de punta a punta (API + base de datos):
 4. **Liquidaciones**: la presentación del período de una obra social (``PENDIENTE``
    → ``EN_PROCESO_LIQUIDACION``, con cobros y débitos individuales) y el reporte
    de producción/honorarios por odontólogo (dueño, comisión o sueldo).
+5. **Caja por medio de pago**: el cierre de visita guarda si el coseguro se cobró
+   en efectivo o por transferencia, el resumen separa ambos importes y suma los
+   **cobros de cuentas corrientes** del período (``monto_cc``): ``total_ingresos``
+   es la plata que entró en el día, sin contar lo que todavía debe la obra social.
 
 Además se verifica que el esquema siga siendo **compatible con PostgreSQL** (el
 DDL de las tablas nuevas compila con el dialecto) y que el panel tenga la sección
@@ -133,6 +137,15 @@ def _facturar_ok(client, turno_id: int, prestaciones, **extra) -> dict:
 def _contar(db_session, modelo) -> int:
     """Cantidad de filas de un modelo."""
     return int(db_session.execute(select(func.count()).select_from(modelo)).scalar())
+
+
+def _pagar_cc(client, paciente_id: int, monto, **overrides) -> dict:
+    """Registra un cobro en la cuenta corriente del paciente (Módulo 5)."""
+    payload = {"paciente_id": paciente_id, "monto": monto}
+    payload.update(overrides)
+    r = client.post(f"{API}/finanzas/pagar", json=payload)
+    assert r.status_code == 201, r.text
+    return r.json()
 
 
 # ---------------------------------------------------------------------------
@@ -653,6 +666,169 @@ def test_resumen_de_la_caja_del_dia(client, doctor):
     assert datos["monto_pendiente_os"] == 9000     # sólo lo presentado a la OS
     assert datos["monto_cobrado_os"] == 0
     assert datos["monto_debitado_os"] == 0
+
+
+def test_la_caja_separa_el_efectivo_de_las_transferencias(client, doctor, paciente):
+    """El cierre de visita guarda el medio y el resumen lo desglosa."""
+    prestacion = _crear_prestacion(client, valor_base=15000)
+    turno_efectivo = _crear_turno(client, doctor.id, paciente.id)
+    turno_transferencia = _crear_turno(
+        client, doctor.id, paciente.id, inicio=DIA + timedelta(hours=2)
+    )
+
+    en_efectivo = _facturar_ok(
+        client,
+        turno_efectivo["id"],
+        [{"prestacion_id": prestacion["id"]}],
+        fecha="2026-11-03T12:00:00",
+    )
+    por_transferencia = _facturar_ok(
+        client,
+        turno_transferencia["id"],
+        [{"prestacion_id": prestacion["id"]}],
+        fecha="2026-11-03T14:00:00",
+        medio_pago="TRANSFERENCIA",
+    )
+
+    assert en_efectivo["medio_pago"] == "EFECTIVO"          # valor por defecto
+    assert por_transferencia["medio_pago"] == "TRANSFERENCIA"
+
+    datos = client.get(
+        f"{API}/movimientos-caja/resumen?desde=2026-11-03&hasta=2026-11-03"
+    ).json()
+    assert datos["monto_efectivo"] == 15000
+    assert datos["monto_transferencia"] == 15000
+    assert datos["monto_cobrado_paciente"] == 30000
+    assert datos["total_ingresos"] == 30000
+
+    # La caja del día muestra el medio de cada cierre.
+    lista = client.get(f"{API}/movimientos-caja?desde=2026-11-03&hasta=2026-11-03").json()
+    assert {m["id"]: m["medio_pago"] for m in lista} == {
+        en_efectivo["id"]: "EFECTIVO",
+        por_transferencia["id"]: "TRANSFERENCIA",
+    }
+
+
+def test_el_resumen_suma_los_cobros_de_las_cuentas_corrientes(client, paciente):
+    """Lo cobrado por entrega/cuota entra en la caja aunque no haya visitas."""
+    _pagar_cc(
+        client,
+        paciente.id,
+        20000,
+        medio_pago="TRANSFERENCIA",
+        fecha="2026-11-03T10:00:00",
+    )
+    _pagar_cc(client, paciente.id, 5000, fecha="2026-11-03T11:00:00")
+    # Un cobro de otro día no entra en la caja del 3.
+    _pagar_cc(client, paciente.id, 9999, fecha="2026-11-02T11:00:00")
+
+    datos = client.get(
+        f"{API}/movimientos-caja/resumen?desde=2026-11-03&hasta=2026-11-03"
+    ).json()
+
+    assert datos["cantidad_movimientos"] == 0
+    assert datos["monto_cobrado_paciente"] == 0
+    assert datos["cantidad_cobros_cc"] == 2
+    assert datos["monto_cc"] == 25000
+    assert datos["monto_cc_efectivo"] == 5000
+    assert datos["monto_cc_transferencia"] == 20000
+    assert datos["total_ingresos"] == 25000
+
+    cobros = client.get(
+        f"{API}/finanzas/cobros-cuenta-corriente?desde=2026-11-03&hasta=2026-11-03"
+    ).json()
+    assert cobros["cantidad"] == 2
+    assert cobros["cobros"][0]["paciente_id"] == paciente.id
+    assert cobros["cobros"][0]["medio_pago"] == "EFECTIVO"
+
+
+def test_el_total_del_dia_suma_mostrador_y_cuentas_corrientes(client, doctor, paciente):
+    """``total_ingresos`` es la plata que entró: mostrador + cuentas corrientes."""
+    prestacion = _crear_prestacion(client, valor_base=15000)
+    turno = _crear_turno(client, doctor.id, paciente.id)
+    _facturar_ok(
+        client,
+        turno["id"],
+        [{"prestacion_id": prestacion["id"]}],
+        fecha="2026-11-03T12:00:00",
+    )
+    _pagar_cc(
+        client,
+        paciente.id,
+        30000,
+        medio_pago="TRANSFERENCIA",
+        fecha="2026-11-03T13:00:00",
+    )
+
+    datos = client.get(
+        f"{API}/movimientos-caja/resumen?desde=2026-11-03&hasta=2026-11-03"
+    ).json()
+
+    assert datos["monto_cobrado_paciente"] == 15000
+    assert datos["monto_cc"] == 30000
+    assert datos["total_ingresos"] == 45000
+
+
+def test_eliminar_un_movimiento_de_caja_borra_el_detalle_y_permite_refacturar(
+    client, db_session, doctor
+):
+    """El borrado de un cierre elimina su detalle y deja el turno sin facturar."""
+    datos = _escenario_caja(client, doctor)
+    movimiento_id = datos["mov_os"]["id"]
+    assert _contar(db_session, DetalleMovimientoCaja) == 2  # una práctica por visita
+
+    r = client.delete(f"{API}/movimientos-caja/{movimiento_id}")
+
+    assert r.status_code == 200, r.text
+    borrado = r.json()
+    assert borrado["id"] == movimiento_id
+    assert borrado["turno_id"] == datos["turno_os"]["id"]
+    assert borrado["paciente_nombre"] == "Con Cobertura"
+    assert borrado["monto_efectivo"] == 1000
+    assert borrado["monto_pendiente_os"] == 9000
+    assert borrado["monto_total"] == 10000
+    assert borrado["estado_pago"] == EstadoPagoMovimiento.PENDIENTE.value
+    assert borrado["cantidad_practicas"] == 1
+
+    # El movimiento y su detalle desaparecieron; el otro cierre sigue intacto.
+    assert _contar(db_session, MovimientoCaja) == 1
+    assert _contar(db_session, DetalleMovimientoCaja) == 1
+    assert (
+        client.get(f"{API}/movimientos-caja/{movimiento_id}").status_code == 404
+    )
+
+    # El turno vuelve a quedar facturable (no se toca su estado).
+    estado = client.get(f"{API}/turnos/{datos['turno_os']['id']}/facturacion").json()
+    assert estado["facturado"] is False
+    refacturado = _facturar_ok(
+        client,
+        datos["turno_os"]["id"],
+        [{"prestacion_id": datos["prestacion"]["id"]}],
+        fecha="2026-11-03T13:00:00",
+    )
+    assert refacturado["monto_efectivo"] == 1000
+
+
+def test_la_caja_del_dia_se_actualiza_al_eliminar_un_movimiento(client, doctor):
+    """Los totales de la caja y el resumen se recalculan sin el cierre borrado."""
+    datos = _escenario_caja(client, doctor)
+
+    client.delete(f"{API}/movimientos-caja/{datos['mov_particular']['id']}")
+
+    lista = client.get(f"{API}/movimientos-caja?desde=2026-11-03&hasta=2026-11-03")
+    assert [m["id"] for m in lista.json()] == [datos["mov_os"]["id"]]
+    resumen = client.get(
+        f"{API}/movimientos-caja/resumen?desde=2026-11-03&hasta=2026-11-03"
+    ).json()
+    assert resumen["cantidad_movimientos"] == 1
+    assert resumen["monto_efectivo"] == 1000          # sólo el coseguro del paciente con OS
+    assert resumen["monto_pendiente_os"] == 9000
+
+
+def test_eliminar_un_movimiento_de_caja_inexistente_es_404(client):
+    """Un id que no existe no rompe nada: responde 404 y la caja queda igual."""
+    assert client.delete(f"{API}/movimientos-caja/999999").status_code == 404
+
 
 
 def test_cobrar_movimiento_admite_un_importe_distinto_al_presentado(client, doctor):
@@ -1214,6 +1390,7 @@ def test_las_columnas_del_modulo_estan_en_el_esquema():
         "fecha",
         "monto_efectivo",
         "monto_pendiente_os",
+        "medio_pago",
         "estado_pago",
     }
     assert set(Doctor.__table__.c.keys()) >= {"tipo_pago", "valor_pago"}
@@ -1315,5 +1492,38 @@ def test_la_hoja_de_estilos_tiene_los_estilos_del_modulo(client):
         ".fact-med",
     ):
         assert clase in css
+
+
+def test_el_panel_de_la_caja_muestra_el_medio_y_los_cobros_de_cuentas_corrientes(
+    client,
+):
+    """La *Caja del día* cierra por medio de pago e incluye las cuentas corrientes."""
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+
+    # KPIs del encabezado: efectivo, transferencias, cobros de CC y total del día.
+    for identificador in (
+        "fact-kpi-efectivo",
+        "fact-kpi-transferencia",
+        "fact-kpi-cc",
+        "fact-kpi-total",
+        "fact-lista-cc",
+        "fact-cc-efectivo",
+        "fact-cc-transferencia",
+        "fact-cc-total",
+    ):
+        assert f'id="{identificador}"' in html, identificador
+
+    # Los tres formularios donde se elige el medio: cierre de visita, pago de la
+    # cuenta corriente y entrega inicial del plan de cuotas.
+    for identificador in ("fact-cobro-medio", "cc-pago-medio", "cc-plan-medio"):
+        assert f'id="{identificador}"' in html, identificador
+    assert html.count('<option value="TRANSFERENCIA">Transferencia</option>') >= 3
+
+    # El panel consume las dos fuentes de la caja y manda el medio de pago.
+    assert "/finanzas/cobros-cuenta-corriente" in js
+    assert 'medio_pago: valorDe("fact-cobro-medio")' in js
+    assert 'medio_pago: valorDe("cc-pago-medio")' in js
+    assert 'medio_pago: valorDe("cc-plan-medio")' in js
 
 

@@ -150,7 +150,50 @@ def test_el_calendario_lee_la_agenda_semanal_de_la_api(client):
     assert "AGENDA_SEMANAL" not in r.text
 
 
-def test_los_estados_del_turno_tienen_color_en_el_frontend(client):
+def test_los_bloques_no_disponibles_del_calendario_explican_el_motivo(client):
+    """Un bloque gris también responde al clic: dice por qué no se agenda.
+
+    Antes los bloques no disponibles se pintaban con ``disabled``, así que el
+    navegador se comía el clic y la secretaría no recibía ninguna reacción (el
+    panel parecía roto cuando el día elegido era hoy o estaba lleno). Ahora se
+    marcan con ``aria-disabled`` + ``data-motivo`` y el clic muestra un aviso.
+    """
+    calendario = client.get("/static/calendar.js").text
+
+    assert 'aria-disabled="${deshabilitado ? "true" : "false"}"' in calendario
+    assert 'data-motivo="${motivo}"' in calendario
+    assert "MOTIVO_TITULO" in calendario and "MOTIVO_DETALLE" in calendario
+    assert "avisarBloqueNoDisponible" in calendario
+    # Los tres motivos previstos y el atajo para pedir el turno a mano.
+    for motivo in ("pasado", "ocupado", "fuera"):
+        assert f'"{motivo}"' in calendario
+    assert "data-nuevo-turno" in calendario
+    # El bloque libre sigue abriendo el formulario con la hora ya cargada.
+    assert "agendarEnSlot(btn.dataset.slot, btn.dataset.doctor)" in calendario
+    # Ya no se usa el atributo `disabled`, que impide enterarse del clic.
+    assert 'deshabilitado ? "disabled"' not in calendario
+
+
+def test_el_panel_de_horarios_avisa_cuando_no_queda_ningun_bloque_libre(client):
+    """Sin bloques libres el panel lo dice y ofrece el formulario igual."""
+    calendario = client.get("/static/calendar.js").text
+
+    assert "function diaTerminado(" in calendario
+    assert "los horarios de este día ya pasaron" in calendario.lower()
+    assert 'class="cal-aviso"' in calendario
+    assert 'data-nuevo-turno="1"' in calendario
+
+    css = client.get("/static/styles.css").text
+    assert ".cal-slot-off" in css
+    assert '.cal-slot[aria-disabled="true"]' in css
+    assert ".cal-aviso" in css and ".cal-aviso-btn" in css
+
+    html = client.get("/").text
+    # La ayuda del panel explica qué significan los bloques grises.
+    assert "Los bloques en gris no se pueden" in html
+
+
+
     """CONFIRMADO verde, CANCELADO gris y PENDIENTE con el color del odontólogo."""
     calendario = client.get("/static/calendar.js").text
     assert "bg-green-500 text-white" in calendario
@@ -505,6 +548,54 @@ def test_al_elegir_un_plan_el_pago_precarga_el_valor_de_la_cuota(client):
     assert "El importe supera la deuda:" in js
 
 
+def test_el_nombre_del_paciente_se_destaca_en_la_cuenta_corriente(client):
+    """El paciente elegido es el identificador de la vista: negrita y +20 %.
+
+    ``.field`` fija la letra en ``.925rem``; el nombre va en negrita y a
+    ``1.11rem`` (un 20 % más) para encontrarlo de un vistazo en el mostrador.
+    """
+    html = client.get("/").text
+
+    assert 'id="cc-paciente" class="field font-bold text-slate-900"' in html
+    assert "font-size: 1.11rem;" in html
+
+
+def test_el_boton_de_informe_abre_el_consolidado_de_todas_las_cuentas(client):
+    """El informe muestra el plan, lo pagado, lo que se debe y la deuda total."""
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+
+    # El botón vive en el encabezado de la vista y el informe en su modal.
+    assert 'id="cc-informe"' in html
+    assert 'id="modal-informe-cc"' in html
+    for control in (
+        "informe-cc-filas",
+        "informe-cc-pie",
+        "informe-cc-deuda",
+        "informe-cc-cobrado",
+        "informe-cc-favor",
+        "informe-cc-imprimir",
+    ):
+        assert f'id="{control}"' in html, control
+
+    # Una sola llamada trae el consolidado del servidor (que es el que suma).
+    assert "/finanzas/cuentas-corrientes" in js
+    assert "function abrirInformeCC(" in js
+    assert "function renderInformeCC(" in js
+    assert 'ccInformeBtn.addEventListener("click", abrirInformeCC)' in js
+    # Cada fila muestra el plan con sus cuotas, lo que pagó y lo que debe.
+    assert "plan.monto_por_cuota" in js or "planTexto(p)" in js
+    assert "cuenta.total_creditos" in js
+    assert "cuenta.saldo_actual" in js
+    # Al pie, la deuda total de los pacientes y los totales del consultorio.
+    assert "Deuda total de los pacientes" in js
+    assert "datos.deuda_total" in js
+    assert "datos.total_debitado" in js
+    # Se puede imprimir: el informe sale en una pestaña con su propia hoja.
+    assert "function imprimirInformeCC(" in js
+    assert "ventana.print()" in js
+
+
 def test_los_controles_de_la_cuenta_corriente_que_usa_el_js_existen_en_el_html(
     client,
 ):
@@ -515,6 +606,14 @@ def test_los_controles_de_la_cuenta_corriente_que_usa_el_js_existen_en_el_html(
     assert usados, "app.js debe manejar los controles de la cuenta corriente"
     faltantes = sorted(i for i in usados if f'id="{i}"' not in html)
     assert not faltantes, f"ids usados por app.js sin HTML: {faltantes}"
+
+    # El informe consolidado sigue la misma regla (ids ``informe-cc-*``).
+    usados_informe = set(
+        re.findall(r'getElementById\("((?:modal-)?informe-cc[a-z0-9-]*)"\)', js)
+    )
+    assert usados_informe, "app.js debe manejar el modal del informe"
+    faltantes = sorted(i for i in usados_informe if f'id="{i}"' not in html)
+    assert not faltantes, f"ids del informe usados por app.js sin HTML: {faltantes}"
 
 
 def test_el_panel_y_sus_estaticos_se_revalidan_en_cada_carga(client):
@@ -557,5 +656,79 @@ def test_el_panel_avisa_si_el_navegador_sirvio_un_javascript_viejo(client):
     # El JS deja rastro en la consola si llega una vista desconocida.
     js = client.get("/static/app.js").text
     assert "Vista desconocida en esta versión del panel:" in js
+
+
+def test_dashboard_incluye_el_modulo_de_borrado_de_movimientos(client):
+    """La pestaña «Borrar movimientos» viaja en el menú con sus dos paneles.
+
+    Es la interfaz de depuración: sin ella, borrar un cierre de caja o un
+    movimiento del libro mayor sólo se podía hacer por API.
+    """
+    html = client.get("/").text
+    assert 'data-view="borrar-movimientos"' in html
+    assert "Borrar movimientos" in html
+    assert 'id="view-borrar-movimientos"' in html
+    # Panel de caja, panel de cuenta corriente y la advertencia de que no se
+    # puede deshacer.
+    for control in (
+        "dep-caja-desde",
+        "dep-caja-hasta",
+        "dep-caja-buscar",
+        "dep-caja-todos",
+        "dep-caja-filas",
+        "dep-caja-contador",
+        "dep-caja-eliminar",
+        "dep-cc-paciente",
+        "dep-cc-desde",
+        "dep-cc-hasta",
+        "dep-cc-tipo",
+        "dep-cc-todos",
+        "dep-cc-filas",
+        "dep-cc-contador",
+        "dep-cc-eliminar",
+        "dep-refrescar",
+    ):
+        assert f'id="{control}"' in html, control
+    assert "No se puede deshacer" in html
+
+
+def test_el_javascript_del_modulo_de_borrado_usa_los_delete_de_la_api(client):
+    """Los botones «Eliminar» pegan contra los ``DELETE`` del backend."""
+    js = client.get("/static/app.js").text
+    # Caja: DELETE /movimientos-caja/{id} y libro mayor: DELETE /finanzas/...
+    assert 'method: "DELETE"' in js
+    assert "`${RUTA_CAJA}/${id}`" in js
+    assert "/finanzas/cuenta-corriente/transacciones" in js
+    assert "/finanzas/transacciones" in js
+    # La vista se carga al entrar y tiene sus funciones de datos.
+    assert 'v === "borrar-movimientos"' in js
+    assert "function cargarModuloBorrado(" in js
+    assert "function cargarCajaDep(" in js
+    assert "function cargarTransaccionesDep(" in js
+    # Antes de borrar se pide confirmación con el detalle del movimiento.
+    assert "function borrarMovimientoCajaDep(" in js
+    assert "function borrarTransaccionCCDep(" in js
+    assert "¿Eliminar el cierre de caja #" in js
+    assert "¿Eliminar este movimiento de la cuenta corriente?" in js
+    # El resultado informa el saldo recalculado por el servidor.
+    assert "datos.saldo_actual" in js
+    assert "datos.cuenta_eliminada" in js
+    # Se puede borrar de a uno o lo tildado en lote.
+    assert "function borrarSeleccionadosDep(" in js
+    assert "data-dep-borrar-caja" in js
+    assert "data-dep-borrar-cc" in js
+
+
+def test_los_controles_del_modulo_de_borrado_que_usa_el_js_existen_en_el_html(
+    client,
+):
+    """Ningún ``getElementById`` del módulo de borrado apunta a un id inexistente."""
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+    usados = set(re.findall(r'getElementById\("(dep-[a-z0-9-]+)"\)', js))
+    assert usados, "app.js debe manejar los controles del módulo de borrado"
+    faltantes = sorted(i for i in usados if f'id="{i}"' not in html)
+    assert not faltantes, f"ids usados por app.js sin HTML: {faltantes}"
+
 
 

@@ -534,6 +534,28 @@
     return slot.inicio < ini + dur && ini < slot.fin;
   }
 
+  /* Por qué un bloque de "Horarios disponibles" no se puede agendar. Se usa en
+     el `title` del botón y en el aviso que aparece al hacerle clic: un bloque
+     gris que no reacciona deja a la secretaría sin saber qué pasó. */
+  const MOTIVO_TITULO = {
+    pasado: "Ese horario ya pasó",
+    ocupado: "Ya hay un turno en ese horario",
+    fuera: "Ningún odontólogo atiende en ese horario",
+  };
+  const MOTIVO_DETALLE = {
+    pasado: "Hoy esa hora ya pasó. Elegí un bloque libre o cambiá de día.",
+    ocupado: "Podés cancelarlo o moverlo desde «Turnos ocupados».",
+    fuera: "La agenda semanal de los odontólogos no cubre ese bloque.",
+  };
+
+  function avisarBloqueNoDisponible(btn) {
+    const A = app();
+    if (!A || typeof A.toast !== "function") return;
+    const motivo = btn.dataset.motivo || "fuera";
+    const titulo = MOTIVO_TITULO[motivo] || "Bloque no disponible";
+    A.toast("info", `${titulo} (${btn.dataset.slot})`, MOTIVO_DETALLE[motivo] || "");
+  }
+
   function renderDisponibles() {
     const A = app();
     const cont = $id("cal-disponibles");
@@ -596,7 +618,7 @@
     const ahora = Date.now();
     let libres = 0;
 
-    cont.innerHTML = slots
+    const botones = slots
       .map(function (slot) {
         const ocupados = delDia.filter(
           (t) => t.estado_turno !== "CANCELADO" && solapaSlot(slot, t, iso)
@@ -611,6 +633,13 @@
         const deshabilitado = paso || !libresDocs.length;
         if (!deshabilitado) libres += 1;
 
+        /* Motivo del bloque gris: se muestra en el texto, en el `title` y en el
+           aviso del clic. Sin esto el botón no dice *por qué* no se puede
+           agendar y el usuario no sabe si el panel está roto. */
+        let motivo = "";
+        if (paso) motivo = "pasado";
+        else if (!libresDocs.length) motivo = ocupados.length ? "ocupado" : "fuera";
+
         let marcas;
         if (libresDocs.length) {
           marcas = libresDocs
@@ -623,15 +652,19 @@
             .join("");
         } else if (paso) {
           marcas = `<span class="text-[11px] text-slate-400">Hora pasada</span>`;
+        } else if (motivo === "ocupado") {
+          marcas = `<span class="text-[11px] text-slate-400">Ocupado</span>`;
         } else {
-          marcas = `<span class="text-[11px] text-slate-400">Fuera de agenda u ocupado</span>`;
+          marcas = `<span class="text-[11px] text-slate-400">Fuera de agenda</span>`;
         }
 
         return (
-          `<button type="button" class="cal-slot" data-slot="${hhmm(slot.inicio)}" ` +
+          `<button type="button" class="cal-slot${deshabilitado ? " cal-slot-off" : ""}" ` +
+          `data-slot="${hhmm(slot.inicio)}" ` +
           `data-doctor="${libresDocs.length ? libresDocs[0].id : ""}" ` +
-          `${deshabilitado ? "disabled" : ""} ` +
-          `title="${deshabilitado ? "Bloque no disponible" : "Agendar a las " + hhmm(slot.inicio)}">` +
+          (motivo ? `data-motivo="${motivo}" ` : "") +
+          `aria-disabled="${deshabilitado ? "true" : "false"}" ` +
+          `title="${deshabilitado ? MOTIVO_TITULO[motivo] : "Agendar a las " + hhmm(slot.inicio)}">` +
           `<span class="cal-slot-hora">${hhmm(slot.inicio)}` +
           `<small>a ${hhmm(slot.fin)}</small></span>` +
           `<span class="cal-slot-docs">${marcas}</span>` +
@@ -640,7 +673,31 @@
       })
       .join("");
 
+    /* Cuando no queda ningún bloque libre se dice arriba de la lista, con el
+       atajo al formulario: el día puede estar lleno o fuera de la agenda y la
+       secretaría tiene que poder pedir el turno igual. */
+    const aviso =
+      libres === 0
+        ? `<div class="cal-aviso">` +
+          `<p>${diaTerminado(iso, slots)
+            ? "Los horarios de este día ya pasaron."
+            : "Ningún horario libre con la agenda actual o con los turnos ya cargados."}</p>` +
+          `<button type="button" class="cal-aviso-btn" data-nuevo-turno="1">` +
+          `Solicitar el turno a mano</button>` +
+          `</div>`
+        : "";
+
+    cont.innerHTML = aviso + botones;
     if (resumen) resumen.textContent = String(libres);
+  }
+
+  /* ¿Todos los bloques del día son de horas ya pasadas? Distingue un día
+     terminado de un día lleno en el aviso del panel. */
+  function diaTerminado(iso, slots) {
+    const ahora = Date.now();
+    return slots.every(
+      (slot) => new Date(`${iso}T${hhmm(slot.inicio)}:00`).getTime() <= ahora
+    );
   }
 
   /* --------------------- Selección de día y de mes ----------------------- */
@@ -872,8 +929,23 @@
     const disp = $id("cal-disponibles");
     if (disp) {
       disp.addEventListener("click", function (e) {
+        /* Atajo del aviso "sin horarios libres": abre el formulario igual, con
+           la fecha del día y el odontólogo del filtro ya cargados. */
+        const aMano = e.target.closest("[data-nuevo-turno]");
+        if (aMano) {
+          const A = app();
+          if (A && typeof A.abrirModal === "function") A.abrirModal();
+          return;
+        }
         const btn = e.target.closest("[data-slot]");
-        if (btn && !btn.disabled) agendarEnSlot(btn.dataset.slot, btn.dataset.doctor);
+        if (!btn) return;
+        /* El bloque gris no agenda, pero tampoco queda mudo: explica el motivo
+           (hora pasada, ocupado o fuera de agenda). */
+        if (btn.getAttribute("aria-disabled") === "true") {
+          avisarBloqueNoDisponible(btn);
+          return;
+        }
+        agendarEnSlot(btn.dataset.slot, btn.dataset.doctor);
       });
     }
   }

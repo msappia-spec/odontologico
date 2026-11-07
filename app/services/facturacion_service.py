@@ -52,7 +52,7 @@ from app.core.exceptions import (
     ValidacionError,
 )
 from app.core.money import multiplicar_monto, redondear_monto, sumar_montos
-from app.models.enums import EstadoPagoMovimiento, EstadoTurno
+from app.models.enums import EstadoPagoMovimiento, EstadoTurno, MedioPago
 from app.models.movimiento_caja import DetalleMovimientoCaja, MovimientoCaja
 from app.models.paciente import Paciente
 from app.models.turno import Turno
@@ -60,6 +60,7 @@ from app.schemas.facturacion import (
     CobrarMovimientoRequest,
     DebitarMovimientoRequest,
     FacturarTurnoRequest,
+    MovimientoCajaEliminadoRead,
     MovimientoCajaRead,
     PresupuestoCobroRead,
     PrestacionFacturadaCalculadaRead,
@@ -203,8 +204,16 @@ def resumen_caja(
 ) -> ResumenCajaRead:
     """Totales de la caja de un rango (lo que entra en efectivo y lo que debe la OS).
 
-    ``monto_pendiente_os`` suma sólo los movimientos **abiertos** (``PENDIENTE`` y
-    ``EN_PROCESO_LIQUIDACION``): es la plata que todavía no se acreditó.
+    ``monto_efectivo`` y ``monto_transferencia`` desglosan lo cobrado **en el
+    mostrador** según el ``medio_pago`` del cierre de visita; su suma es
+    ``monto_cobrado_paciente``. ``monto_pendiente_os`` suma sólo los movimientos
+    **abiertos** (``PENDIENTE`` y ``EN_PROCESO_LIQUIDACION``): es la plata que
+    todavía no se acreditó.
+
+    Los cobros de **cuentas corrientes** (entregas iniciales, cuotas y pagos a
+    cuenta) no viven en esta tabla: los agrega el endpoint de la caja del día con
+    :func:`app.services.finanzas_service.cobros_del_periodo`, que es quien sabe
+    leer el libro mayor. Acá sólo queda el subconjunto del mostrador.
     """
     movimientos = listar_movimientos(
         db,
@@ -229,11 +238,25 @@ def resumen_caja(
         m for m in movimientos if m.estado_pago == EstadoPagoMovimiento.DEBITADO_OS
     ]
 
+    monto_efectivo = sumar_montos(
+        m.monto_efectivo
+        for m in movimientos
+        if m.medio_pago is MedioPago.EFECTIVO
+    )
+    monto_transferencia = sumar_montos(
+        m.monto_efectivo
+        for m in movimientos
+        if m.medio_pago is MedioPago.TRANSFERENCIA
+    )
+    monto_cobrado_paciente = sumar_montos([monto_efectivo, monto_transferencia])
+
     return ResumenCajaRead(
         desde=desde,
         hasta=hasta,
         cantidad_movimientos=len(movimientos),
-        monto_efectivo=sumar_montos(m.monto_efectivo for m in movimientos),
+        monto_efectivo=monto_efectivo,
+        monto_transferencia=monto_transferencia,
+        monto_cobrado_paciente=monto_cobrado_paciente,
         monto_pendiente_os=sumar_montos(
             m.monto_pendiente_os - (m.monto_cobrado_os or 0) for m in abiertos
         ),
@@ -244,6 +267,8 @@ def resumen_caja(
         monto_debitado_os=sumar_montos(
             m.monto_pendiente_os - (m.monto_cobrado_os or 0) for m in debitados
         ),
+        # Los cobros de cuentas corrientes los completa el endpoint de la caja.
+        total_ingresos=monto_cobrado_paciente,
     )
 
 
@@ -468,7 +493,9 @@ def facturar_turno(
     * un turno ya facturado responde **409** (un turno tiene un único cierre: el
       índice ``uq_movimiento_caja_turno`` lo garantiza también en la base);
     * el movimiento nace ``PENDIENTE`` si le queda saldo a la obra social y
-      ``COBRADO`` si no hay nada que presentar (paciente particular).
+      ``COBRADO`` si no hay nada que presentar (paciente particular);
+    * se guarda el ``medio_pago`` del coseguro (efectivo o transferencia) para
+      poder cerrar la caja del día por medio de pago.
     """
     turno = _obtener_turno(db, turno_id)
     if turno.estado_turno == EstadoTurno.CANCELADO:
@@ -499,6 +526,7 @@ def facturar_turno(
         # ``None``: todavía no entró nada de la OS. Cuando no hay saldo que
         # presentar (particular) queda en 0: no hay nada que cobrarle a nadie.
         monto_cobrado_os=None if pendiente_os > 0 else 0.0,
+        medio_pago=data.medio_pago,
         estado_pago=_estado_inicial(pendiente_os),
         observaciones=observaciones,
         detalles=[
@@ -624,6 +652,75 @@ def debitar_movimiento(
         movimiento.monto_cobrado_os or 0,
     )
     return movimiento
+
+
+def eliminar_movimiento(
+    db: Session, movimiento_id: int
+) -> MovimientoCajaEliminadoRead:
+    """Borra el cierre de caja de una visita (módulo de depuración).
+
+    Es la operación de **corrección** del circuito: se usa cuando una visita se
+    facturó dos veces, con las prácticas equivocadas o con importes que no
+    corresponden. A diferencia del resto del Módulo 3 —donde el movimiento es un
+    comprobante y se corrige con otro movimiento—, acá el borrado es **físico**:
+
+    * se eliminan primero las prácticas del detalle y después el movimiento (el
+      ``ON DELETE CASCADE`` de la clave foránea sólo aplica en PostgreSQL;
+      SQLite —desarrollo y pruebas— no valida claves foráneas, así que el
+      borrado explícito deja el mismo resultado en los dos motores);
+    * el turno queda **sin facturar** y se puede volver a cobrar con las
+      prácticas correctas. No se toca ``estado_turno``: el sistema no sabe si
+      estaba ``PENDIENTE`` antes del cierre y adivinarlo sería peor;
+    * se acepta borrar un cierre ya ``COBRADO`` o ``DEBITADO_OS``: la operación
+      existe justamente para deshacer una presentación cargada por error. Queda
+      registrado en el log con el detalle completo (qué, de quién y cuánto).
+
+    Raises:
+        RecursoNoEncontradoError: el movimiento no existe (404).
+    """
+    movimiento = obtener_movimiento(db, movimiento_id)
+
+    # Foto del comprobante ANTES del ``DELETE``: una vez borrado (y commiteado)
+    # los datos ya no están en la base y la respuesta quedaría vacía.
+    turno = movimiento.turno
+    paciente = turno.paciente if turno is not None else None
+    monto_efectivo = redondear_monto(movimiento.monto_efectivo)
+    monto_pendiente_os = redondear_monto(movimiento.monto_pendiente_os)
+    resumen = MovimientoCajaEliminadoRead(
+        id=movimiento.id,
+        turno_id=movimiento.turno_id,
+        paciente_id=paciente.id if paciente is not None else None,
+        paciente_nombre=paciente.nombre if paciente is not None else None,
+        fecha=movimiento.fecha,
+        monto_efectivo=monto_efectivo,
+        monto_pendiente_os=monto_pendiente_os,
+        monto_cobrado_os=(
+            None
+            if movimiento.monto_cobrado_os is None
+            else redondear_monto(movimiento.monto_cobrado_os)
+        ),
+        monto_total=sumar_montos([monto_efectivo, monto_pendiente_os]),
+        estado_pago=movimiento.estado_pago,
+        cantidad_practicas=len(movimiento.detalles),
+    )
+
+    for detalle in list(movimiento.detalles):
+        db.delete(detalle)
+    db.delete(movimiento)
+    db.commit()
+
+    logger.warning(
+        "Movimiento de caja eliminado: id=%s turno_id=%s paciente_id=%s "
+        "efectivo=%.2f pendiente_os=%.2f estado=%s practicas=%s",
+        resumen.id,
+        resumen.turno_id,
+        resumen.paciente_id,
+        resumen.monto_efectivo,
+        resumen.monto_pendiente_os,
+        resumen.estado_pago,
+        resumen.cantidad_practicas,
+    )
+    return resumen
 
 
 def _presentacion(

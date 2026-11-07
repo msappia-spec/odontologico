@@ -88,6 +88,15 @@
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 2v20M12 7h5M12 11h5"/></svg>
           <span class="flex-1">Cuenta corriente</span>
         </a>
+        <a class="nav-link" data-view="egresos">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9.5 14.5 2.5-2.5 2.5 2.5"/></svg>
+          <span class="flex-1">Proveedores y egresos</span>
+          <span id="nav-egresos-deuda" class="nav-badge hide">0</span>
+        </a>
+        <a class="nav-link" data-view="borrar-movimientos">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+          <span class="flex-1">Borrar movimientos</span>
+        </a>
         <p class="px-3 pt-4 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Registros</p>
         <a class="nav-link" data-view="doctores">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3v0"/><path d="M10 10.6V16a2 2 0 0 0 2 2"/><circle cx="12" cy="7" r="4"/><path d="M9 21v-2a4 4 0 0 1 4-4"/></svg>
@@ -416,7 +425,8 @@
                 </div>
                 <p class="text-[11px] text-slate-400 mb-3">
                   Bloques de 30 minutos seg&uacute;n la agenda de cada odont&oacute;logo. Hac&eacute; clic en uno libre
-                  para agendar el turno con la fecha y hora ya cargadas.
+                  para agendar el turno con la fecha y hora ya cargadas. Los bloques en gris no se pueden
+                  agendar y, al hacerles clic, indican el motivo (hora pasada, ocupado o fuera de agenda).
                 </p>
                 <div id="cal-disponibles" class="space-y-2 max-h-[540px] overflow-y-auto pr-1"></div>
               </div>
@@ -989,14 +999,27 @@
                   <input type="date" id="fact-fecha" class="field" />
                 </div>
                 <p class="text-[11px] text-slate-400 flex-1">
-                  El efectivo del mostrador (coseguros y particulares) se cobra al cerrar cada visita.
+                  El mostrador (coseguros y particulares) se cobra al cerrar cada visita con su medio de pago.
+                  Los cobros de cuentas corrientes (entregas y cuotas) se suman al total del día.
                   Lo que paga la obra social queda pendiente hasta la liquidación del período.
                 </p>
               </div>
               <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
                 <div class="fact-kpi">
-                  <p class="fact-kpi-titulo">Cobrado en efectivo</p>
+                  <p class="fact-kpi-titulo">Efectivo en el mostrador</p>
                   <p id="fact-kpi-efectivo" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Transferencias del mostrador</p>
+                  <p id="fact-kpi-transferencia" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Cobros de cuentas corrientes</p>
+                  <p id="fact-kpi-cc" class="fact-kpi-valor">&mdash;</p>
+                </div>
+                <div class="fact-kpi">
+                  <p class="fact-kpi-titulo">Total ingresado del día</p>
+                  <p id="fact-kpi-total" class="fact-kpi-valor">&mdash;</p>
                 </div>
                 <div class="fact-kpi">
                   <p class="fact-kpi-titulo">Pendiente de obras sociales</p>
@@ -1007,7 +1030,7 @@
                   <p id="fact-kpi-cobrado" class="fact-kpi-valor">&mdash;</p>
                 </div>
                 <div class="fact-kpi">
-                  <p class="fact-kpi-titulo">Visitadas cerradas</p>
+                  <p class="fact-kpi-titulo">Visitas cerradas</p>
                   <p id="fact-kpi-cantidad" class="fact-kpi-valor">&mdash;</p>
                 </div>
               </div>
@@ -1026,11 +1049,42 @@
                   <thead>
                     <tr>
                       <th>Hora</th><th>Paciente</th><th>Cobertura</th><th>Profesional</th>
-                      <th>Prácticas</th><th class="text-right">Efectivo</th>
+                      <th>Prácticas</th><th class="text-right">Cobrado</th><th>Medio</th>
                       <th class="text-right">OS</th><th>Estado</th><th class="text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody id="fact-lista-caja"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Cobros de cuentas corrientes: entregas iniciales, cuotas y pagos
+                 a cuenta. No pasan por el cierre de una visita, pero son plata
+                 que entró en el día: se suman al total de la caja. -->
+            <div class="card overflow-hidden">
+              <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 class="font-bold text-slate-900">Cobros de cuentas corrientes</h2>
+                  <p class="text-[11px] text-slate-400">
+                    Entregas iniciales de planes, cuotas y pagos a cuenta del día, con su medio de pago.
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                  <span class="badge badge-slate">Efectivo <span id="fact-cc-efectivo">$0,00</span></span>
+                  <span class="badge badge-slate">Transferencia <span id="fact-cc-transferencia">$0,00</span></span>
+                  <span class="badge badge-brand">Total <span id="fact-cc-total">$0,00</span></span>
+                  <span id="fact-cc-contador" class="badge badge-brand">0</span>
+                </div>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Hora</th><th>Paciente</th><th>Concepto</th><th>Medio</th>
+                      <th class="text-right">Importe</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fact-lista-cc"></tbody>
                 </table>
               </div>
             </div>
@@ -1362,6 +1416,11 @@
                   Saldo deudor del paciente, historial de movimientos y planes de cuotas de los tratamientos financiados.
                 </p>
               </div>
+              <button type="button" id="cc-informe" class="btn btn-soft btn-sm"
+                      title="Informe de todos los pacientes: el plan, lo que pagó y lo que debe">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>
+                Informe
+              </button>
               <button type="button" id="cc-refrescar" class="btn btn-soft btn-sm" title="Volver a consultar el saldo del paciente">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
                 Actualizar
@@ -1371,7 +1430,12 @@
             <div class="flex flex-wrap items-end gap-3 mt-4">
               <div class="min-w-[240px] flex-1">
                 <label class="field-label" for="cc-paciente">Paciente</label>
-                <select id="cc-paciente" class="field"></select>
+                <!-- El nombre del paciente consultado identifica la vista entera:
+                     va en negrita y un 20 % más grande que el resto de los campos
+                     (.925rem → 1.11rem). El tamaño va en línea para que no dependa
+                     del orden en que Tailwind y styles.css aplican sus clases. -->
+                <select id="cc-paciente" class="field font-bold text-slate-900"
+                        style="font-size: 1.11rem;"></select>
               </div>
               <p class="text-[11px] text-slate-400 flex-1">
                 El saldo se reconstruye sumando el libro mayor: en positivo es deuda del paciente y en negativo,
@@ -1441,7 +1505,7 @@
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th>Fecha</th><th>Movimiento</th><th>Concepto</th>
+                    <th>Fecha</th><th>Movimiento</th><th>Concepto</th><th>Medio</th>
                     <th class="text-right">Importe</th>
                   </tr>
                 </thead>
@@ -1482,6 +1546,13 @@
                        class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" checked />
                 <span class="text-sm text-slate-600">Cobrar la entrega inicial en este momento</span>
               </label>
+              <div>
+                <label class="field-label" for="cc-plan-medio">Medio de la entrega</label>
+                <select id="cc-plan-medio" class="field">
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                </select>
+              </div>
               <button type="submit" id="cc-plan-guardar" class="btn btn-primary w-full">Abrir el plan</button>
             </form>
 
@@ -1509,6 +1580,13 @@
                   <input type="text" id="cc-pago-concepto" class="field" maxlength="120" placeholder="Cuota 2 · transferencia" />
                 </div>
                 <div>
+                  <label class="field-label" for="cc-pago-medio">Medio de pago</label>
+                  <select id="cc-pago-medio" class="field">
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="TRANSFERENCIA">Transferencia</option>
+                  </select>
+                </div>
+                <div>
                   <label class="field-label" for="cc-pago-fecha">Fecha del cobro</label>
                   <input type="date" id="cc-pago-fecha" class="field" />
                 </div>
@@ -1520,6 +1598,305 @@
               </p>
               <button type="submit" id="cc-pago-guardar" class="btn btn-primary w-full">Registrar el pago</button>
             </form>
+          </div>
+        </section>
+
+        <!-- ===================== MÓDULO: BORRAR MOVIMIENTOS ===================== -->
+        <section id="view-borrar-movimientos" class="anim-fade space-y-5 hide">
+
+          <!-- Encabezado: qué hace el módulo y la advertencia de que no se deshace -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="w-11 h-11 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center flex-none">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-extrabold tracking-tight text-slate-900">Borrar movimientos</h2>
+                <p class="text-xs text-slate-500">
+                  Depuración de la caja y de las cuentas corrientes: eliminá un cierre de visita o un débito/crédito
+                  cargado por error.
+                </p>
+              </div>
+              <button type="button" id="dep-refrescar" class="btn btn-soft btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Actualizar
+              </button>
+            </div>
+            <p class="mt-3 text-[11px] leading-snug text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+              <strong>No se puede deshacer.</strong> En la caja, el turno vuelve a quedar sin facturar (se puede cobrar
+              de nuevo); en la cuenta corriente, el saldo se reconstruye desde el libro mayor y los planes de cuotas se
+              re-sincronizan solos.
+            </p>
+          </div>
+
+          <!-- PANEL 1 · Movimientos de caja -->
+          <div class="card overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold text-slate-900">Movimientos de caja</h2>
+                <p class="text-[11px] text-slate-400">
+                  Cierres de visita del período. Al borrar uno, su detalle de prácticas se elimina con él.
+                </p>
+              </div>
+              <span id="dep-caja-contador" class="badge badge-brand">0</span>
+            </div>
+            <div class="px-5 py-3 flex flex-wrap items-end gap-3 border-b border-slate-100">
+              <div class="min-w-[140px]">
+                <label class="field-label" for="dep-caja-desde">Desde</label>
+                <input type="date" id="dep-caja-desde" class="field" />
+              </div>
+              <div class="min-w-[140px]">
+                <label class="field-label" for="dep-caja-hasta">Hasta</label>
+                <input type="date" id="dep-caja-hasta" class="field" />
+              </div>
+              <div class="min-w-[180px] flex-1">
+                <label class="field-label" for="dep-caja-buscar">Paciente o DNI</label>
+                <input type="search" id="dep-caja-buscar" class="field" placeholder="Filtrar la lista del período" />
+              </div>
+              <button type="button" id="dep-caja-buscar-btn" class="btn btn-soft btn-sm">Buscar</button>
+              <button type="button" id="dep-caja-eliminar" class="btn btn-danger-soft btn-sm" disabled>
+                Eliminar seleccionados
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="w-10"><input type="checkbox" id="dep-caja-todos" class="fact-check" title="Tildar todas" /></th>
+                    <th>Fecha</th><th>Paciente</th><th>Cobertura</th>
+                    <th class="text-right">Efectivo</th><th class="text-right">OS</th>
+                    <th>Estado</th><th class="text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="dep-caja-filas"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PANEL 2 · Movimientos de cuenta corriente -->
+          <div class="card overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold text-slate-900">Movimientos de cuenta corriente</h2>
+                <p class="text-[11px] text-slate-400">
+                  Débitos (deuda) y créditos (pagos) del libro mayor. Al borrar uno, el saldo se recalcula solo.
+                </p>
+              </div>
+              <span id="dep-cc-contador" class="badge badge-brand">0</span>
+            </div>
+            <div class="px-5 py-3 flex flex-wrap items-end gap-3 border-b border-slate-100">
+              <div class="min-w-[190px]">
+                <label class="field-label" for="dep-cc-paciente">Paciente</label>
+                <select id="dep-cc-paciente" class="field">
+                  <option value="">Todos los pacientes</option>
+                </select>
+              </div>
+              <div class="min-w-[140px]">
+                <label class="field-label" for="dep-cc-desde">Desde</label>
+                <input type="date" id="dep-cc-desde" class="field" />
+              </div>
+              <div class="min-w-[140px]">
+                <label class="field-label" for="dep-cc-hasta">Hasta</label>
+                <input type="date" id="dep-cc-hasta" class="field" />
+              </div>
+              <div class="min-w-[150px]">
+                <label class="field-label" for="dep-cc-tipo">Tipo</label>
+                <select id="dep-cc-tipo" class="field">
+                  <option value="">Débitos y créditos</option>
+                  <option value="DEBITO">Sólo débitos</option>
+                  <option value="CREDITO">Sólo créditos</option>
+                </select>
+              </div>
+              <button type="button" id="dep-cc-buscar-btn" class="btn btn-soft btn-sm">Buscar</button>
+              <button type="button" id="dep-cc-eliminar" class="btn btn-danger-soft btn-sm" disabled>
+                Eliminar seleccionados
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="w-10"><input type="checkbox" id="dep-cc-todos" class="fact-check" title="Tildar todos" /></th>
+                    <th>Fecha</th><th>Paciente</th><th>Movimiento</th><th>Concepto</th>
+                    <th class="text-right">Importe</th><th class="text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="dep-cc-filas"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= VISTA: PROVEEDORES Y EGRESOS ================= -->
+        <section id="view-egresos" class="anim-fade space-y-5 hide">
+
+          <!-- Tablero de cuentas por pagar: lo que el consultorio debe hoy -->
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-none">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9.5 14.5 2.5-2.5 2.5 2.5"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-extrabold tracking-tight text-slate-900">Proveedores y cuentas por pagar</h2>
+                <p class="text-xs text-slate-500">
+                  Facturas recibidas de mec&aacute;nicos dentales, insumos y servicios: qu&eacute; se debe, qu&eacute; venci&oacute; y qu&eacute; se pag&oacute;.
+                </p>
+              </div>
+              <button type="button" id="egr-refrescar" class="btn btn-soft btn-sm"
+                      title="Volver a consultar el tablero, los proveedores y las facturas">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Actualizar
+              </button>
+              <button type="button" id="egr-nueva-factura" class="btn btn-primary btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                Registrar factura
+              </button>
+            </div>
+
+            <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Deuda total</p>
+                <p id="egr-kpi-deuda" class="fact-kpi-valor">&mdash;</p>
+              </div>
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Deuda vencida</p>
+                <p id="egr-kpi-vencida" class="fact-kpi-valor">&mdash;</p>
+              </div>
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Facturas abiertas</p>
+                <p id="egr-kpi-facturas" class="fact-kpi-valor">&mdash;</p>
+              </div>
+              <div class="fact-kpi">
+                <p class="fact-kpi-titulo">Proveedores</p>
+                <p id="egr-kpi-proveedores" class="fact-kpi-valor">&mdash;</p>
+              </div>
+            </div>
+            <!-- Desglose de la deuda por rubro (mec&aacute;nico dental, insumos, servicios) -->
+            <div id="egr-por-tipo" class="flex flex-wrap gap-2 mt-3"></div>
+            <p id="egr-nota" class="mt-2 text-[11px] text-slate-400">
+              La deuda total es la suma de los saldos de las facturas abiertas y coincide con la suma de los saldos de los proveedores.
+            </p>
+          </div>
+
+          <!-- Alta de un proveedor: el saldo nace en cero y s&oacute;lo lo mueven las facturas y los pagos -->
+          <form id="form-proveedor-egreso" class="card p-4 sm:p-5" autocomplete="off">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="w-9 h-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center flex-none">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="font-bold text-slate-900">Nuevo proveedor</h2>
+                <p class="text-[11px] text-slate-400">Mec&aacute;nico dental, insumos o servicios e impuestos.</p>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-end gap-3">
+              <div class="min-w-[220px] flex-1">
+                <label class="field-label" for="egr-prov-nombre">Nombre o raz&oacute;n social</label>
+                <input id="egr-prov-nombre" class="field" placeholder="Ej.: Laboratorio Sonrisa" required maxlength="150" />
+              </div>
+              <div class="min-w-[170px]">
+                <label class="field-label" for="egr-prov-tipo">Rubro</label>
+                <select id="egr-prov-tipo" class="field">
+                  <option value="MECANICO_DENTAL">Mec&aacute;nico dental</option>
+                  <option value="INSUMOS">Insumos</option>
+                  <option value="SERVICIOS_IMPUESTOS">Servicios e impuestos</option>
+                </select>
+              </div>
+              <div class="min-w-[170px]">
+                <label class="field-label" for="egr-prov-telefono">Tel&eacute;fono <span class="text-slate-400 normal-case">(opcional)</span></label>
+                <input id="egr-prov-telefono" class="field" placeholder="Ej.: +54 9 11 5555-0000" maxlength="50" />
+              </div>
+              <button type="submit" id="egr-prov-guardar" class="btn btn-primary btn-sm">Guardar proveedor</button>
+            </div>
+            <div id="egr-prov-error" class="hide mt-3 text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+          </form>
+
+          <!-- Proveedores con su saldo, su deuda vencida y sus facturas abiertas -->
+          <div class="card overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold text-slate-900">Proveedores</h2>
+                <p class="text-[11px] text-slate-400">El saldo se actualiza solo con cada factura y cada pago.</p>
+              </div>
+              <span id="egr-prov-contador" class="badge badge-brand">0</span>
+            </div>
+            <div class="px-5 py-3 flex flex-wrap items-end gap-3 border-b border-slate-100">
+              <div class="min-w-[170px]">
+                <label class="field-label" for="egr-prov-filtro-tipo">Rubro</label>
+                <select id="egr-prov-filtro-tipo" class="field">
+                  <option value="">Todos los rubros</option>
+                  <option value="MECANICO_DENTAL">Mec&aacute;nico dental</option>
+                  <option value="INSUMOS">Insumos</option>
+                  <option value="SERVICIOS_IMPUESTOS">Servicios e impuestos</option>
+                </select>
+              </div>
+              <label class="flex items-center gap-2.5 cursor-pointer select-none pb-2">
+                <input id="egr-prov-solo-deuda" type="checkbox"
+                       class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+                <span class="text-sm text-slate-600">S&oacute;lo los que tienen deuda</span>
+              </label>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Proveedor</th><th>Rubro</th><th>Tel&eacute;fono</th>
+                    <th class="text-right">Saldo</th><th class="text-right">Vencido</th>
+                    <th class="text-center">Facturas</th><th class="text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="egr-proveedores"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Cartera de facturas recibidas, ordenada por vencimiento -->
+          <div class="card overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold text-slate-900">Facturas recibidas</h2>
+                <p class="text-[11px] text-slate-400">
+                  Primero lo que vence antes. El pago descuenta la factura y el saldo del proveedor en la misma operaci&oacute;n.
+                </p>
+              </div>
+              <span id="egr-fact-contador" class="badge badge-brand">0</span>
+            </div>
+            <div class="px-5 py-3 flex flex-wrap items-end gap-3 border-b border-slate-100">
+              <div class="min-w-[190px] flex-1">
+                <label class="field-label" for="egr-fact-proveedor">Proveedor</label>
+                <select id="egr-fact-proveedor" class="field">
+                  <option value="">Todos los proveedores</option>
+                </select>
+              </div>
+              <div class="min-w-[150px]">
+                <label class="field-label" for="egr-fact-estado">Estado</label>
+                <select id="egr-fact-estado" class="field">
+                  <option value="">Todos los estados</option>
+                  <option value="PENDIENTE">Pendientes</option>
+                  <option value="PARCIAL">Parciales</option>
+                  <option value="PAGADO">Pagadas</option>
+                </select>
+              </div>
+              <label class="flex items-center gap-2.5 cursor-pointer select-none pb-2">
+                <input id="egr-fact-vencidas" type="checkbox"
+                       class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+                <span class="text-sm text-slate-600">S&oacute;lo vencidas</span>
+              </label>
+              <button type="button" id="egr-fact-buscar" class="btn btn-soft btn-sm">Buscar</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Proveedor</th><th>Concepto</th><th>Emisi&oacute;n</th><th>Vencimiento</th>
+                    <th class="text-right">Total</th><th class="text-right">Pagado</th>
+                    <th class="text-right">Saldo</th><th>Estado</th>
+                    <th class="text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="egr-facturas"></tbody>
+              </table>
+            </div>
           </div>
         </section>
 
@@ -1827,9 +2204,20 @@
           </span>
         </label>
 
-        <div>
-          <label class="field-label" for="fact-cobro-obs">Observaciones <span class="text-slate-400 normal-case">(opcional)</span></label>
-          <input id="fact-cobro-obs" class="field" maxlength="2000" placeholder="Ej.: se cobró coseguro en efectivo" />
+        <!-- Medio con el que se cobra el mostrador: la caja del día se cierra
+             por medio de pago (efectivo vs. transferencia). -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="field-label" for="fact-cobro-medio">Medio de pago</label>
+            <select id="fact-cobro-medio" class="field">
+              <option value="EFECTIVO">Efectivo</option>
+              <option value="TRANSFERENCIA">Transferencia</option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="field-label" for="fact-cobro-obs">Observaciones <span class="text-slate-400 normal-case">(opcional)</span></label>
+            <input id="fact-cobro-obs" class="field" maxlength="2000" placeholder="Ej.: pagó la mitad por transferencia" />
+          </div>
         </div>
 
         <div id="fact-cobro-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
@@ -2062,6 +2450,168 @@
           <button type="button" id="enviar-ficha-copiar" class="btn btn-primary flex-1">Copiar mensaje</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ========== MODAL: INFORME DE CUENTAS CORRIENTES (Módulo 5) ========== -->
+  <!-- Informe consolidado para la cobranza: todos los pacientes con cuenta, sus
+       planes de cuotas, lo que pagó cada uno y lo que debe, con la deuda total
+       del consultorio al pie. Se arma con una sola llamada
+       (GET /finanzas/cuentas-corrientes) y se puede imprimir. -->
+  <div id="modal-informe-cc" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-5xl p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h3 class="text-lg font-extrabold text-slate-900">Informe de cuentas corrientes</h3>
+          <p id="informe-cc-sub" class="text-xs text-slate-500">
+            Todos los pacientes con cuenta corriente: el plan, lo que pagó y lo que debe.
+          </p>
+        </div>
+        <button type="button" id="modal-informe-cc-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <p id="informe-cc-cargando" class="text-sm text-slate-500">Consultando las cuentas corrientes…</p>
+      <div id="informe-cc-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+
+      <div id="informe-cc-cuerpo" class="hide">
+        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <div class="fact-kpi">
+            <p class="fact-kpi-titulo">Pacientes con cuenta</p>
+            <p id="informe-cc-pacientes" class="fact-kpi-valor">&mdash;</p>
+          </div>
+          <div class="fact-kpi">
+            <p class="fact-kpi-titulo">Deuda total</p>
+            <p id="informe-cc-deuda" class="fact-kpi-valor">&mdash;</p>
+          </div>
+          <div class="fact-kpi">
+            <p class="fact-kpi-titulo">Total cobrado</p>
+            <p id="informe-cc-cobrado" class="fact-kpi-valor">&mdash;</p>
+          </div>
+          <div class="fact-kpi">
+            <p class="fact-kpi-titulo">Saldo a favor</p>
+            <p id="informe-cc-favor" class="fact-kpi-valor">&mdash;</p>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto mt-4 rounded-xl border border-slate-100">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Paciente</th>
+                <th>Plan y cuotas</th>
+                <th class="text-right">Total debitado</th>
+                <th class="text-right">Pagó</th>
+                <th class="text-right">Debe</th>
+              </tr>
+            </thead>
+            <tbody id="informe-cc-filas"></tbody>
+            <tfoot id="informe-cc-pie"></tfoot>
+          </table>
+        </div>
+
+        <p id="informe-cc-nota" class="mt-3 text-[11px] text-slate-400"></p>
+      </div>
+
+      <div class="flex gap-3 pt-4">
+        <button type="button" id="modal-informe-cc-cancel" class="btn btn-ghost flex-1">Cerrar</button>
+        <button type="button" id="informe-cc-imprimir" class="btn btn-soft flex-1" disabled>Imprimir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: FACTURA DE UN PROVEEDOR ===================== -->
+  <div id="modal-factura-egreso" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-lg p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-5">
+        <div>
+          <h3 id="egr-fact-titulo" class="text-lg font-extrabold text-slate-900">Registrar factura</h3>
+          <p class="text-xs text-slate-500">La factura aumenta el saldo del proveedor en el acto.</p>
+        </div>
+        <button type="button" id="modal-factura-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-factura-egreso" class="space-y-4" autocomplete="off">
+        <div>
+          <label class="field-label" for="egr-fact-proveedor-modal">Proveedor</label>
+          <select id="egr-fact-proveedor-modal" class="field" required></select>
+        </div>
+        <div>
+          <label class="field-label" for="egr-fact-concepto">Concepto</label>
+          <input id="egr-fact-concepto" class="field" placeholder="Ej.: Corona de porcelana del molar 36"
+                 required maxlength="255" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="field-label" for="egr-fact-monto">Importe total ($)</label>
+            <input id="egr-fact-monto" type="number" min="0.01" step="0.01" class="field" placeholder="0.00" required />
+          </div>
+          <div>
+            <label class="field-label" for="egr-fact-emision">Emisi&oacute;n</label>
+            <input id="egr-fact-emision" type="date" class="field" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="field-label" for="egr-fact-vencimiento">Vencimiento</label>
+            <input id="egr-fact-vencimiento" type="date" class="field" />
+            <p class="mt-1 text-[11px] text-slate-400">Si lo dej&aacute;s vac&iacute;o son 30 d&iacute;as desde la emisi&oacute;n.</p>
+          </div>
+          <div>
+            <label class="field-label" for="egr-fact-paciente">Paciente</label>
+            <select id="egr-fact-paciente" class="field"></select>
+            <p id="egr-fact-paciente-nota" class="mt-1 text-[11px] text-slate-400">S&oacute;lo para mec&aacute;nico dental.</p>
+          </div>
+        </div>
+        <div id="egr-fact-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-factura-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-factura-save" class="btn btn-primary flex-1">Guardar factura</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: PAGO DE UNA FACTURA RECIBIDA ===================== -->
+  <div id="modal-pago-egreso" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-md p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <h3 id="egr-pago-titulo" class="text-lg font-extrabold text-slate-900">Pagar factura</h3>
+          <p class="text-xs text-slate-500">El pago descuenta la factura y el saldo del proveedor.</p>
+        </div>
+        <button type="button" id="modal-pago-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p id="egr-pago-detalle" class="text-sm text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 mb-4"></p>
+      <form id="form-pago-egreso" class="space-y-4" autocomplete="off">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="field-label" for="egr-pago-monto">Importe a pagar ($)</label>
+            <input id="egr-pago-monto" type="number" min="0.01" step="0.01" class="field" required />
+          </div>
+          <div>
+            <label class="field-label" for="egr-pago-metodo">Medio de pago</label>
+            <select id="egr-pago-metodo" class="field">
+              <option value="EFECTIVO">Efectivo</option>
+              <option value="TRANSFERENCIA">Transferencia</option>
+              <option value="TARJETA">Tarjeta</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="egr-pago-fecha">Fecha del pago</label>
+          <input id="egr-pago-fecha" type="date" class="field" />
+        </div>
+        <div id="egr-pago-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-pago-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-pago-save" class="btn btn-primary flex-1">Registrar pago</button>
+        </div>
+      </form>
     </div>
   </div>
 

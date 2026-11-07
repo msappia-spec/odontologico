@@ -33,6 +33,10 @@ Notas de diseño
 * **Importes ``Numeric(10, 2)``**: a diferencia del Módulo 3 (que usa
   ``Float``), acá no se admite error de redondeo. SQLAlchemy entrega y acepta
   ``Decimal`` de Python en los dos motores soportados.
+* **``medio_pago``** (``EFECTIVO`` / ``TRANSFERENCIA``) viaja en cada
+  ``CREDITO`` —pago de cuota, pago a cuenta o entrega inicial— para que la caja
+  del día pueda separar lo cobrado en efectivo de lo transferido. Los
+  ``DEBITO`` lo dejan en ``NULL``: son deuda, no un cobro.
 * ``ondelete="RESTRICT"`` en ``paciente_id``: un paciente con cuenta corriente
   no se puede borrar (el registro contable tiene valor de comprobante). En
   cambio, los movimientos y los planes **sí** acompañan a su cuenta
@@ -63,7 +67,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.datetime_utils import utcnow
 from app.db.base_class import Base
 from app.db.types import UTCDateTime
-from app.models.enums import EstadoPlanCuotas, TipoMovimientoCC
+from app.models.enums import EstadoPlanCuotas, MedioPago, TipoMovimientoCC
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.paciente import Paciente
@@ -161,6 +165,24 @@ class TransaccionCC(Base):
     )
     monto: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     descripcion: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # Medio con el que el paciente pagó el movimiento. Sólo tiene sentido en los
+    # ``CREDITO`` (un ``DEBITO`` es deuda, no un cobro), por eso la columna es
+    # anulable: los cargos quedan en ``None``. Las filas anteriores a esta
+    # columna también quedan en ``None`` y la caja las cuenta como efectivo, que
+    # era la única forma de cobro que el sistema suponía hasta entonces.
+    medio_pago: Mapped[Optional[MedioPago]] = mapped_column(
+        SAEnum(
+            MedioPago,
+            name="medio_pago_transaccion_cc",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            length=15,
+        ),
+        nullable=True,
+    )
+
     fecha: Mapped[datetime] = mapped_column(
         UTCDateTime, nullable=False, default=utcnow, server_default=func.now()
     )

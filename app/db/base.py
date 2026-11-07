@@ -12,6 +12,7 @@ from app.models.cuenta_corriente import CuentaCorriente, PlanCuotas, Transaccion
 from app.models.disponibilidad import DisponibilidadDoctor
 from app.models.disponibilidad_especifica import DisponibilidadEspecifica
 from app.models.doctor import Doctor
+from app.models.egreso import GastoFactura, PagoEgreso, Proveedor
 from app.models.evolucion_medica import EvolucionMedica
 from app.models.historia_clinica import HistoriaClinica
 from app.models.movimiento_caja import DetalleMovimientoCaja, MovimientoCaja
@@ -32,6 +33,7 @@ __all__ = [
     "DisponibilidadDoctor",
     "DisponibilidadEspecifica",
     "Doctor",
+    "GastoFactura",
     "EvolucionMedica",
     "HistoriaClinica",
     "MovimientoCaja",
@@ -40,8 +42,10 @@ __all__ = [
     "Odontograma",
     "OdontogramaDiente",
     "Paciente",
+    "PagoEgreso",
     "PlanCuotas",
     "Prestacion",
+    "Proveedor",
     "TransaccionCC",
     "Turno",
 ]

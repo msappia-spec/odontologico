@@ -10,7 +10,8 @@ Rutas (prefijo ``/api/v1``):
 * **Caja**: ``GET /movimientos-caja`` (caja diaria con filtros),
   ``GET /movimientos-caja/resumen`` (totales), ``GET /movimientos-caja/{id}`` y
   los cierres individuales ``POST /movimientos-caja/{id}/cobrar`` y
-  ``POST /movimientos-caja/{id}/debitar``.
+  ``POST /movimientos-caja/{id}/debitar``, más el ``DELETE
+  /movimientos-caja/{id}`` del módulo de borrado del panel.
 * **Liquidación de obras sociales**: ``GET /liquidaciones/obras-sociales``
   (presentación del período con el estado de cada orden) y
   ``POST /liquidaciones/obras-sociales`` (genera la presentación del mes).
@@ -30,6 +31,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.datetime_utils import rango_del_dia, utcnow
+from app.core.money import sumar_montos
 from app.db.session import get_db
 from app.models.enums import EstadoPagoMovimiento
 from app.models.movimiento_caja import MovimientoCaja
@@ -40,6 +42,7 @@ from app.schemas.facturacion import (
     FacturarTurnoRequest,
     LiquidacionObraSocialRequest,
     LiquidacionProfesionalesRead,
+    MovimientoCajaEliminadoRead,
     MovimientoCajaRead,
     PresupuestoCobroRead,
     PresentacionObraSocialRead,
@@ -48,6 +51,7 @@ from app.schemas.facturacion import (
 )
 from app.services import (
     facturacion_service,
+    finanzas_service,
     liquidacion_service,
     reporte_pdf_service,
 )
@@ -164,9 +168,12 @@ def facturacion_del_turno(
     response_model=ResumenCajaRead,
     summary="Totales de la caja del día",
     description=(
-        "Totales del rango consultado (por defecto, **hoy**): lo cobrado en "
-        "efectivo, lo que sigue pendiente de la obra social, lo acreditado y lo "
-        "debitado. Es el encabezado de la *Caja del día* del panel."
+        "Totales del rango consultado (por defecto, **hoy**): lo cobrado en el "
+        "mostrador separado por medio de pago (efectivo y transferencia), lo que "
+        "sigue pendiente de la obra social, lo acreditado, lo debitado y los "
+        "**cobros de cuentas corrientes** del período (entregas iniciales, cuotas "
+        "y pagos a cuenta), con `total_ingresos` como la suma de todo lo que "
+        "entró en el día. Es el encabezado de la *Caja del día* del panel."
     ),
 )
 def resumen_caja(
@@ -177,8 +184,24 @@ def resumen_caja(
     db: Session = Depends(get_db),
 ) -> ResumenCajaRead:
     inicio, fin = _rango(desde, hasta)
-    return facturacion_service.resumen_caja(
+    resumen = facturacion_service.resumen_caja(
         db, inicio, fin, obra_social_id=obra_social_id, doctor_id=doctor_id
+    )
+    # La caja del día tiene dos fuentes: los cierres de visita (``movimientos_caja``,
+    # que ya están en ``resumen``) y los cobros de cuentas corrientes (el libro
+    # mayor del Módulo 5). Se componen acá, en el endpoint, para que cada servicio
+    # siga siendo dueño de su tabla.
+    cobros = finanzas_service.cobros_del_periodo(db, inicio, fin)
+    return resumen.model_copy(
+        update={
+            "monto_cc": cobros.total,
+            "monto_cc_efectivo": cobros.total_efectivo,
+            "monto_cc_transferencia": cobros.total_transferencia,
+            "cantidad_cobros_cc": cobros.cantidad,
+            "total_ingresos": sumar_montos(
+                [resumen.monto_cobrado_paciente, cobros.total]
+            ),
+        }
     )
 
 
@@ -271,6 +294,27 @@ def debitar_movimiento(
     db: Session = Depends(get_db),
 ) -> MovimientoCaja:
     return facturacion_service.debitar_movimiento(db, movimiento_id, payload)
+
+
+@router.delete(
+    "/movimientos-caja/{movimiento_id}",
+    response_model=MovimientoCajaEliminadoRead,
+    summary="Eliminar un movimiento de caja",
+    description=(
+        "Borra **físicamente** el cierre de caja de una visita, con su detalle de "
+        "prácticas, y devuelve el comprobante de lo que se eliminó. Es la "
+        "operación de corrección del módulo de borrado del panel: se usa cuando "
+        "una visita se facturó dos veces o con importes equivocados. El turno "
+        "vuelve a quedar **sin facturar** y se puede cobrar de nuevo; el estado "
+        "del turno no se modifica. Se acepta borrar un cierre ya `COBRADO` o "
+        "`DEBITADO_OS` (el caso típico es una presentación cargada por error). No "
+        "se puede deshacer; un movimiento inexistente responde **404**."
+    ),
+)
+def eliminar_movimiento(
+    movimiento_id: int, db: Session = Depends(get_db)
+) -> MovimientoCajaEliminadoRead:
+    return facturacion_service.eliminar_movimiento(db, movimiento_id)
 
 
 @router.get(

@@ -27,7 +27,7 @@ from pydantic import (
 
 from app.core.datetime_utils import to_naive_utc
 from app.core.money import sumar_montos
-from app.models.enums import EstadoPagoMovimiento, TipoPagoDoctor
+from app.models.enums import EstadoPagoMovimiento, MedioPago, TipoPagoDoctor
 
 # Texto libre para el motivo del débito o la nota del cobro.
 _MAX_OBSERVACIONES = 2000
@@ -61,6 +61,14 @@ class FacturarTurnoRequest(BaseModel):
         ),
     )
     observaciones: Optional[str] = Field(None, max_length=_MAX_OBSERVACIONES)
+    medio_pago: MedioPago = Field(
+        MedioPago.EFECTIVO,
+        description=(
+            "Medio con el que el paciente pagó el coseguro del mostrador "
+            "(``EFECTIVO`` o ``TRANSFERENCIA``). La caja del día se cierra por "
+            "medio de pago."
+        ),
+    )
     permitir_particular: bool = Field(
         False,
         description=(
@@ -177,6 +185,10 @@ class MovimientoCajaRead(BaseModel):
     monto_efectivo: float
     monto_pendiente_os: float
     monto_cobrado_os: Optional[float] = None
+    medio_pago: MedioPago = Field(
+        MedioPago.EFECTIVO,
+        description="Medio con el que se cobró el importe del mostrador.",
+    )
     monto_total: float = Field(
         0, description="Efectivo del mostrador + saldo presentado a la OS."
     )
@@ -237,6 +249,31 @@ class MovimientoCajaRead(BaseModel):
         """Completa el total facturado del movimiento."""
         self.monto_total = sumar_montos([self.monto_efectivo, self.monto_pendiente_os])
         return self
+
+
+class MovimientoCajaEliminadoRead(BaseModel):
+    """Comprobante del borrado de un cierre de caja (módulo de depuración).
+
+    El ``DELETE`` devuelve los datos del movimiento **tal como estaba** antes de
+    borrarlo —paciente, importes, estado del cobro y cantidad de prácticas— para
+    que el panel pueda confirmar qué se eliminó. El borrado es físico y en
+    cascada sobre el detalle: el turno vuelve a quedar sin facturar y se puede
+    cobrar de nuevo si la visita existió de verdad.
+    """
+
+    id: int
+    turno_id: int
+    paciente_id: Optional[int] = Field(None, description="Paciente de la visita.")
+    paciente_nombre: Optional[str] = None
+    fecha: datetime
+    monto_efectivo: float
+    monto_pendiente_os: float
+    monto_cobrado_os: Optional[float] = None
+    monto_total: float = Field(0, description="efectivo + pendiente de la OS.")
+    estado_pago: EstadoPagoMovimiento
+    cantidad_practicas: int = Field(
+        0, description="Filas del detalle que se borraron junto al movimiento."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -353,15 +390,35 @@ class DebitarMovimientoRequest(BaseModel):
 
 
 class ResumenCajaRead(BaseModel):
-    """Totales de la caja de un rango de fechas (por defecto, el día)."""
+    """Totales de la caja de un rango de fechas (por defecto, el día).
+
+    El desglose por medio de pago es lo que permite **cerrar la caja contra la
+    caja física y el banco**: ``monto_efectivo`` y ``monto_transferencia`` son
+    los coseguros/particulares cobrados en el mostrador, y ``monto_cc*`` lo que
+    ingresó por cuentas corrientes (entregas iniciales, cuotas y pagos a
+    cuenta). ``total_ingresos`` es la suma de los cuatro: la plata que entró en
+    el día, sin contar lo que todavía le debe la obra social.
+    """
 
     desde: datetime
     hasta: datetime
     cantidad_movimientos: int
-    monto_efectivo: float
+    #: Cobrado en efectivo en el mostrador.
+    monto_efectivo: float = 0
+    #: Cobrado por transferencia en el mostrador.
+    monto_transferencia: float = 0
+    #: Lo cobrado al paciente en el mostrador (efectivo + transferencia).
+    monto_cobrado_paciente: float = 0
     monto_pendiente_os: float
     monto_cobrado_os: float
     monto_debitado_os: float
+    #: Cobros de cuentas corrientes del período (entregas, cuotas y pagos).
+    monto_cc: float = 0
+    monto_cc_efectivo: float = 0
+    monto_cc_transferencia: float = 0
+    cantidad_cobros_cc: int = 0
+    #: Total ingresado en el día: mostrador + cuentas corrientes.
+    total_ingresos: float = 0
 
 
 # ---------------------------------------------------------------------------

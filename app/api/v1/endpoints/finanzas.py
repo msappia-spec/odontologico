@@ -6,6 +6,9 @@ Rutas (prefijo ``/api/v1``):
   de movimientos del paciente (del más nuevo al más viejo). Si el paciente
   todavía no tuvo movimientos responde ``existe_cuenta = false`` con saldo
   ``0.00``; nunca abre la cuenta desde un ``GET``.
+* ``GET  /finanzas/cuentas-corrientes`` — informe consolidado: todos los
+  pacientes con cuenta, sus planes, lo que pagaron, lo que deben y la deuda
+  total del consultorio.
 * ``POST /finanzas/plan-cuotas`` — abre un tratamiento financiado: calcula la
   entrega inicial (50 % por defecto) y las cuotas mensuales, y registra la deuda
   (más el pago de la entrega, si se cobró en el momento).
@@ -14,26 +17,41 @@ Rutas (prefijo ``/api/v1``):
 * ``PATCH /finanzas/plan-cuotas/{plan_id}/estado`` — pasa un plan a
   ``RECOBRABLE`` (cobranza) o lo devuelve a ``ACTIVO``. ``FINALIZADO`` lo pone el
   sistema cuando la cuenta queda saldada.
+* ``GET /finanzas/transacciones`` y
+  ``DELETE /finanzas/cuenta-corriente/transacciones/{transaccion_id}``: módulo de
+  borrado, listan los movimientos de todas las cuentas y eliminan uno,
+  recalculando el saldo y el estado de los planes.
+* ``GET /finanzas/cobros-cuenta-corriente`` — cobros del período (entregas
+  iniciales, cuotas y pagos a cuenta) con el total por medio de pago: es la
+  segunda mitad de la *Caja del día* del Módulo 3.
 
 Todos los importes viajan como número JSON y se calculan en ``Decimal`` en el
 servidor; el detalle de las reglas contables está en
 :mod:`app.services.finanzas_service`.
 """
 
+from datetime import date as Date
+from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.datetime_utils import rango_del_dia, utcnow
 from app.db.session import get_db
+from app.models.enums import MedioPago, TipoMovimientoCC
 from app.schemas.finanzas import (
     AbrirPlanCuotasRequest,
+    CobrosCuentaCorrienteRead,
     CuentaCorrienteRead,
+    InformeCuentasCorrientesRead,
     PagoRegistradoRead,
     PlanCuotasAbiertoRead,
     PlanCuotasEstadoUpdate,
     PlanCuotasRead,
     RegistrarPagoRequest,
+    TransaccionCCListadoRead,
+    TransaccionEliminadaRead,
 )
 from app.services import finanzas_service
 
@@ -58,6 +76,28 @@ def obtener_cuenta_corriente(
     paciente_id: int, db: Session = Depends(get_db)
 ) -> CuentaCorrienteRead:
     return finanzas_service.obtener_cuenta_corriente(db, paciente_id)
+
+
+@router.get(
+    "/cuentas-corrientes",
+    response_model=InformeCuentasCorrientesRead,
+    summary="Informe de todas las cuentas corrientes",
+    description=(
+        "Devuelve una fila por paciente con cuenta corriente —ordenadas por "
+        "nombre— con sus planes de cuotas, el total debitado, el total cobrado "
+        "(lo que pagó) y el saldo: positivo es deuda y negativo, saldo a favor. "
+        "Al pie viajan los totales del consultorio: `deuda_total` suma **sólo** "
+        "los saldos deudores (el saldo a favor de un paciente no compensa la "
+        "deuda de otro, se informa en `saldo_a_favor_total`), más "
+        "`total_debitado`, `total_cobrado` y los conteos de pacientes y planes. "
+        "Es de sólo lectura: los pacientes sin movimientos no aparecen porque "
+        "todavía no tienen plan, pago ni deuda."
+    ),
+)
+def informe_cuentas_corrientes(
+    db: Session = Depends(get_db),
+) -> InformeCuentasCorrientesRead:
+    return finanzas_service.informe_cuentas_corrientes(db)
 
 
 @router.post(
@@ -120,3 +160,102 @@ def cambiar_estado_plan(
     plan_id: UUID, payload: PlanCuotasEstadoUpdate, db: Session = Depends(get_db)
 ) -> PlanCuotasRead:
     return finanzas_service.cambiar_estado_plan(db, plan_id, payload.estado)
+
+
+# --------------------------------------------------------------------------- #
+# Caja del día: cobros de cuentas corrientes del período
+# --------------------------------------------------------------------------- #
+@router.get(
+    "/cobros-cuenta-corriente",
+    response_model=CobrosCuentaCorrienteRead,
+    summary="Cobros de cuentas corrientes del período",
+    description=(
+        "Devuelve los **créditos** del libro mayor del rango consultado (por "
+        "defecto, **hoy**) —entregas iniciales de planes, cuotas y pagos a "
+        "cuenta— con el paciente, el concepto y el medio de pago, más los totales "
+        "`total`, `total_efectivo` y `total_transferencia`. Es la mitad de la "
+        "*Caja del día* que no pasa por los cierres de visita: sin estos cobros "
+        "el día quedaría subvaluado. Los pagos cargados antes de existir el campo "
+        "se informan como `EFECTIVO` (era el único medio que el sistema suponía). "
+        "`medio_pago` filtra el listado y los totales; los débitos nunca aparecen "
+        "(son deuda, no ingreso)."
+    ),
+)
+def cobros_cuenta_corriente(
+    desde: Optional[Date] = Query(None, description="Primer día (AAAA-MM-DD)."),
+    hasta: Optional[Date] = Query(None, description="Último día (AAAA-MM-DD)."),
+    medio_pago: Optional[MedioPago] = Query(
+        None, description="``EFECTIVO`` o ``TRANSFERENCIA``."
+    ),
+    db: Session = Depends(get_db),
+) -> CobrosCuentaCorrienteRead:
+    hoy = utcnow().date()
+    inicio = rango_del_dia(desde or hoy)[0]
+    fin = rango_del_dia(hasta or desde or hoy)[1]
+    return finanzas_service.cobros_del_periodo(
+        db, inicio, fin, medio_pago=medio_pago
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Depuración: listado global y borrado de movimientos del libro mayor
+# --------------------------------------------------------------------------- #
+@router.get(
+    "/transacciones",
+    response_model=List[TransaccionCCListadoRead],
+    summary="Listar los movimientos de todas las cuentas corrientes",
+    description=(
+        "Devuelve los movimientos del libro mayor de **todas** las cuentas, del "
+        "más nuevo al más viejo, con el paciente al que pertenecen. Es la tabla "
+        "del módulo de borrado del panel: se filtran por paciente (`paciente_id`), "
+        "por rango de días (`desde`/`hasta`, fechas `AAAA-MM-DD`) y por tipo "
+        "(`DEBITO`/`CREDITO`). Pagina con `skip`/`limit` (200 filas por defecto, "
+        "500 como máximo). Es de sólo lectura: no abre cuentas. Un paciente "
+        "inexistente en el filtro responde **404**."
+    ),
+)
+def listar_transacciones(
+    paciente_id: Optional[int] = Query(None, gt=0),
+    desde: Optional[Date] = Query(None, description="Primer día (AAAA-MM-DD)."),
+    hasta: Optional[Date] = Query(None, description="Último día (AAAA-MM-DD)."),
+    tipo_movimiento: Optional[TipoMovimientoCC] = Query(
+        None, description="``DEBITO`` (deuda) o ``CREDITO`` (pago)."
+    ),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> List[TransaccionCCListadoRead]:
+    """Listado de movimientos para el módulo de borrado (sólo lectura)."""
+    inicio = rango_del_dia(desde)[0] if desde else None
+    fin = rango_del_dia(hasta)[1] if hasta else None
+    return finanzas_service.listar_transacciones(
+        db,
+        paciente_id=paciente_id,
+        desde=inicio,
+        hasta=fin,
+        tipo_movimiento=tipo_movimiento,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.delete(
+    "/cuenta-corriente/transacciones/{transaccion_id}",
+    response_model=TransaccionEliminadaRead,
+    summary="Eliminar un movimiento de cuenta corriente",
+    description=(
+        "Borra **físicamente** un movimiento del libro mayor (un débito o un "
+        "crédito cargado por error) y devuelve el movimiento eliminado junto con "
+        "el **saldo recalculado**: el saldo se reconstruye sumando el libro mayor, "
+        "nunca se resta a mano. Los planes de cuotas se re-sincronizan en la misma "
+        "transacción (un plan saldado vuelve a `ACTIVO` si al sacar el pago queda "
+        "deuda). Si era el último movimiento y no hay planes, se borra también la "
+        "cuenta (`cuenta_eliminada: true`) y el paciente vuelve a quedar «sin "
+        "cuenta corriente». No se puede deshacer; un movimiento inexistente "
+        "responde **404**."
+    ),
+)
+def eliminar_transaccion(
+    transaccion_id: UUID, db: Session = Depends(get_db)
+) -> TransaccionEliminadaRead:
+    return finanzas_service.eliminar_transaccion(db, transaccion_id)
