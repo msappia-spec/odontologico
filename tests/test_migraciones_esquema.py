@@ -121,6 +121,44 @@ def test_agrega_los_filiatorios_del_paciente(tmp_path):
     engine.dispose()
 
 
+def test_agrega_la_categoria_del_paciente(tmp_path):
+    """Las fichas anteriores a la categoría quedan «sin categorizar»."""
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'categoria_paciente.db').as_posix()}", future=True
+    )
+    with engine.begin() as conexion:
+        conexion.exec_driver_sql(
+            "CREATE TABLE pacientes ("
+            "id INTEGER PRIMARY KEY, "
+            "nombre VARCHAR(120) NOT NULL, "
+            "telefono VARCHAR(30) NOT NULL)"
+        )
+        conexion.exec_driver_sql(
+            "INSERT INTO pacientes (nombre, telefono) "
+            "VALUES ('Paciente previo', '+5491100000000')"
+        )
+
+    aplicadas = aplicar_columnas_faltantes(engine)
+
+    assert "pacientes.categoria" in aplicadas
+    assert "pacientes.categoria_observaciones" in aplicadas
+    with engine.connect() as conexion:
+        fila = conexion.exec_driver_sql(
+            "SELECT nombre, categoria, categoria_observaciones FROM pacientes"
+        ).one()
+    assert tuple(fila) == ("Paciente previo", "SIN_CATEGORIZAR", None)
+
+    columna = next(
+        c
+        for c in COLUMNAS_NUEVAS
+        if c.tabla == "pacientes" and c.columna == "categoria"
+    )
+    sentencia = _sentencia_alter(columna, "postgresql")
+    assert "ADD COLUMN IF NOT EXISTS" in sentencia
+    assert "VARCHAR(20) NOT NULL DEFAULT 'SIN_CATEGORIZAR'" in sentencia
+    engine.dispose()
+
+
 def test_init_db_aplica_la_migracion_antes_de_sembrar(monkeypatch):
     """``init_db`` invoca la migración aditiva en cada arranque."""
 
@@ -221,3 +259,39 @@ def test_postgres_agrega_el_medio_de_pago_con_default_efectivo():
 
     assert "ADD COLUMN IF NOT EXISTS" in sentencia
     assert "VARCHAR(15) NOT NULL DEFAULT 'EFECTIVO'" in sentencia
+
+
+def test_agrega_el_codigo_de_prestacion_a_los_presupuestos(tmp_path):
+    """Una base con ``presupuesto_items`` anterior recibe el código opcional."""
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'presupuestos.db').as_posix()}", future=True
+    )
+    with engine.begin() as conexion:
+        conexion.exec_driver_sql(
+            "CREATE TABLE presupuesto_items ("
+            "id INTEGER PRIMARY KEY, "
+            "presupuesto_id INTEGER NOT NULL, "
+            "orden INTEGER NOT NULL DEFAULT 0, "
+            "detalle TEXT NOT NULL, "
+            "precio FLOAT NOT NULL, "
+            "entrega FLOAT)"
+        )
+        conexion.exec_driver_sql(
+            "INSERT INTO presupuesto_items "
+            "(presupuesto_id, orden, detalle, precio, entrega) "
+            "VALUES (1, 0, 'Corona vieja', 1000, NULL)"
+        )
+
+    aplicadas = aplicar_columnas_faltantes(engine)
+
+    assert "presupuesto_items.codigo" in aplicadas
+    columnas = {
+        c["name"] for c in inspect(engine).get_columns("presupuesto_items")
+    }
+    assert "codigo" in columnas
+    with engine.connect() as conexion:
+        fila = conexion.exec_driver_sql(
+            "SELECT detalle, codigo FROM presupuesto_items"
+        ).one()
+    assert tuple(fila) == ("Corona vieja", None)
+    engine.dispose()

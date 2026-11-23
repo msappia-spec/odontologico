@@ -68,37 +68,19 @@ def _crear_opcion(client, **overrides) -> dict:
 
 
 def _payload_texto(
-    texto: str, *, telefono: str = TELEFONO, wamid: str = "wamid.MENU.1"
+    texto: str, *, telefono: str = TELEFONO, wamid: str = "waha.MENU.1"
 ) -> dict:
-    """Payload de Meta para un mensaje de texto del paciente."""
+    """Evento de WAHA con un mensaje de texto del paciente."""
     return {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "WABA_ID",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "metadata": {
-                                "display_phone_number": "5493510000000",
-                                "phone_number_id": "PHONE_ID",
-                            },
-                            "messages": [
-                                {
-                                    "from": telefono,
-                                    "id": wamid,
-                                    "timestamp": "1712345678",
-                                    "type": "text",
-                                    "text": {"body": texto},
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
+        "event": "message",
+        "session": "default",
+        "payload": {
+            "id": wamid,
+            "from": f"{telefono}@c.us",
+            "fromMe": False,
+            "body": texto,
+            "type": "chat",
+        },
     }
 
 
@@ -402,10 +384,11 @@ def test_el_bot_respeta_el_orden_los_tipos_y_los_numeros_configurados(
     assert manual.respuesta is None
     assert len(envios) == enviados_antes
 
-    # Una tecla que ya no existe en el menú también deriva a atención manual.
+    # Una tecla que ya no existe en el menú también vuelve al menú principal.
     inexistente = whatsapp_bot_service.responder_mensaje(db_session, TELEFONO, "9")
-    assert inexistente.atencion_manual is True
-    assert inexistente.opcion == "9"
+    assert inexistente.tipo == "MENU"
+    assert inexistente.atencion_manual is False
+    assert inexistente.respuesta == saludo.respuesta
 
 
 def test_si_todas_las_opciones_estan_de_baja_el_bot_pide_atencion_manual(

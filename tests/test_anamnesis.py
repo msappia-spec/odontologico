@@ -480,10 +480,10 @@ def test_recordatorio_agrega_el_enlace_solo_mientras_falta_la_ficha(
     datos = validar_token_anamnesis(enlace.rsplit("/", 1)[1])
     assert (datos.turno_id, datos.paciente_id) == (turno.id, paciente.id)
 
-    # El cuarto parámetro de la plantilla de Cloud API también lleva el enlace.
+    # El mensaje de WAHA es texto libre y también lleva el enlace.
     payload = whatsapp_service.construir_payload_recordatorio(turno)
-    parametros = payload["template"]["components"][0]["parameters"]
-    assert "/anamnesis/" in parametros[3]["text"]
+    assert "/anamnesis/" in payload["text"]
+    assert payload["chatId"].endswith("@c.us")
 
     token = firmar_token_anamnesis(turno.id, paciente.id)
     assert client.post(f"{API}/anamnesis/{token}", json={}).status_code == 200
@@ -492,7 +492,7 @@ def test_recordatorio_agrega_el_enlace_solo_mientras_falta_la_ficha(
     turno_recargado = db_session.get(Turno, turno.id)
     completo = whatsapp_service.construir_mensaje_recordatorio(turno_recargado)
     assert "/anamnesis/" not in completo
-    assert completo.endswith("¡Muchas gracias!")
+    assert "Respondé *1* (o *SI*) para confirmar" in completo
 
 
 # ---------------------------------------------------------------------------
@@ -709,7 +709,10 @@ def test_el_panel_tiene_el_formulario_interno_para_cargar_la_ficha(client):
     assert "function guardarFichaSalud(" in app_js
     assert "FICHA_MEDICA.renderFormulario" in app_js
     assert "FICHA_MEDICA.leerFormulario" in app_js
-    assert "data-odontograma=" in app_js
+    assert "data-ficha-medica=" in app_js
+    assert "Ficha médica</button>" in app_js
+    assert 'data-ficha-medica="${p.id}"' in app_js
+    assert "editarPaciente" in app_js
     assert 'data-ficha-editar="${esc(f.turno_id)}"' in app_js
     assert "`/anamnesis/panel/${turnoId}`" in app_js
     assert 'method: "PUT"' in app_js
@@ -718,6 +721,25 @@ def test_el_panel_tiene_el_formulario_interno_para_cargar_la_ficha(client):
     assert "renderFormulario" in ficha_js
     assert "padre_vive" in ficha_js
     assert "diagnostico_presuntivo" in ficha_js
+
+    # El botón «Ficha médica» abre la hoja completa: datos, odontograma
+    # (permanente y temporario), estado bucal y libro «Trabajo realizado».
+    hoja_js = client.get("/static/odontograma.js").text
+    assert "modal-ficha-medica" in hoja_js
+    assert "Trabajo realizado" in hoja_js
+    assert "fm-trabajos" in hoja_js
+    assert "temp-sup-der" in hoja_js
+    assert "fm-periodontal" in hoja_js
+    assert "/ficha-medica" in hoja_js
+    assert "/odontograma" in hoja_js
+    # Los filiatorios se piden también al paciente para que el nombre y los
+    # datos del alta se vean aunque la ficha todavía no exista.
+    assert "pedirPaciente" in hoja_js
+    assert "aplicarFiliatorios" in hoja_js
+    # El botón «Editar datos» de la hoja reutiliza el formulario de pacientes
+    # del panel (no duplica la validación ni el alta de filiatorios).
+    assert "fm-editar-paciente" in hoja_js
+    assert "window.OdontoApp.editarPaciente" in hoja_js
 
     odonto_js = client.get("/static/odontograma.js").text
     assert "EXISTENTE" in odonto_js

@@ -72,7 +72,16 @@
     agendaFecha: hoyISO(),
     agendaDoctor: "",
     turnoEditId: null,
+    // Turno que espera la confirmación de la secretaría porque el paciente está
+    // categorizado como MALO (ver `mostrarAlertaPacienteMalo`).
+    turnoAlertaPendiente: null,
     pacienteEditId: null,
+    // Historial de turnos del paciente abierto en el modal de «Pacientes
+    // registrados» y número de carga vigente (descarta respuestas viejas si se
+    // abre otro paciente mientras la consulta anterior sigue en curso).
+    turnosPaciente: [],
+    turnosPacienteId: null,
+    turnosPacienteCarga: 0,
     // Módulo 2: paciente cuya historia clínica se consulta en el Panel Principal
     // (sólo lectura; el alta de evoluciones vive en la vista móvil del odontólogo).
     histPaciente: null,
@@ -307,6 +316,27 @@
     CANCELADO: { texto: "Cancelado", clase: "badge-red", icono: ICON.x },
   };
 
+  /* Categoría administrativa del paciente. «Malo» dispara el aviso previo al
+     alta de un turno y muestra las observaciones cargadas en la ficha. */
+  const CATEGORIA_PACIENTE = {
+    SIN_CATEGORIZAR: { texto: "Sin categorizar", clase: "badge-slate", icono: "" },
+    EXCELENTE: { texto: "Excelente", clase: "badge-green", icono: ICON.check },
+    MALO: { texto: "Malo", clase: "badge-red", icono: ICON.alerta },
+  };
+
+  function categoriaPaciente(categoria) {
+    return CATEGORIA_PACIENTE[categoria] || CATEGORIA_PACIENTE.SIN_CATEGORIZAR;
+  }
+
+  function badgeCategoria(categoria, observaciones) {
+    const meta = categoriaPaciente(categoria);
+    const titulo = observaciones || meta.texto;
+    return (
+      `<span class="badge ${meta.clase}" title="${esc(titulo)}">` +
+      `${meta.icono}${esc(meta.texto)}</span>`
+    );
+  }
+
   function badge(meta) {
     return `<span class="badge ${meta.clase}">${meta.icono}${esc(meta.texto)}</span>`;
   }
@@ -452,21 +482,26 @@
 
   function turnoCard(t) {
     const paciente = nombrePaciente(t.paciente_id);
+    const fichaPaciente = porId(state.pacientes, t.paciente_id);
+    const telefonoPaciente = fichaPaciente ? fichaPaciente.telefono || "" : "";
     const doctor = porId(state.doctores, t.doctor_id);
     const esp = doctor ? doctor.especialidad : "";
     const dur = duracionTexto(t.fecha_hora_inicio, t.fecha_hora_fin);
     const cancelado = t.estado_turno === "CANCELADO";
     const puedeResponder =
-      t.whatsapp_mensaje_id && t.estado_whatsapp === "ENVIADO" && !cancelado;
+      t.whatsapp_mensaje_id &&
+      t.estado_whatsapp === "ENVIADO" &&
+      !cancelado &&
+      telefonoPaciente;
 
     const color = clasesHora(t);
     const accionesPanel = panelAccionesTurno(t);
     const acciones = puedeResponder
       ? `<div class="flex flex-wrap items-center gap-2 mt-3">
-           <button class="btn btn-soft btn-sm" data-simular="confirmar_turno" data-wamid="${esc(t.whatsapp_mensaje_id)}">
+           <button class="btn btn-soft btn-sm" data-simular="confirmar_turno" data-telefono="${esc(telefonoPaciente)}">
              Responder: Confirma
            </button>
-           <button class="btn btn-danger-soft btn-sm" data-simular="cancelar_turno" data-wamid="${esc(t.whatsapp_mensaje_id)}">
+           <button class="btn btn-danger-soft btn-sm" data-simular="cancelar_turno" data-telefono="${esc(telefonoPaciente)}">
              Responder: Cancela
            </button>
          </div>`
@@ -893,7 +928,7 @@
     document.getElementById("count-pacientes").textContent = state.pacientes.length;
     const tbody = document.getElementById("lista-pacientes");
     if (!state.pacientes.length) {
-      tbody.innerHTML = `<tr><td colspan="7">${vacio("Aún no hay pacientes registrados")}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8">${vacio("Aún no hay pacientes registrados")}</td></tr>`;
       return;
     }
     const guion = '<span class="text-slate-400">—</span>';
@@ -923,18 +958,141 @@
           `<td class="font-mono text-xs">${p.dni ? esc(p.dni) : guion}</td>` +
           `<td class="font-mono text-xs">${esc(p.telefono)}</td>` +
           `<td>${cobertura}</td>` +
+          `<td>${badgeCategoria(p.categoria, p.categoria_observaciones)}</td>` +
           `<td>${p.email ? esc(p.email) : guion}</td>` +
-          `<td><span class="badge badge-brand">${n}</span></td>` +
+          `<td><button type="button" class="badge badge-brand cursor-pointer hover:brightness-95" ` +
+          `data-turnos-paciente="${p.id}" aria-label="Ver los turnos de ${esc(p.nombre)}" ` +
+          `title="Ver todos los turnos de ${esc(p.nombre)}">${n}</button></td>` +
           `<td class="text-right">` +
           `<div class="flex items-center justify-end gap-2">` +
           `<button type="button" class="btn btn-ghost btn-sm" data-historia="${p.id}" ` +
           `title="Ver la historia clínica de ${esc(p.nombre)}">Historia</button>` +
+          `<button type="button" class="btn btn-soft btn-sm" data-ficha-medica="${p.id}" ` +
+          `data-ficha-medica-nombre="${esc(p.nombre)}" ` +
+          `title="Abrir y editar la ficha médica de ${esc(p.nombre)}">Ficha médica</button>` +
           `<button type="button" class="btn btn-ghost btn-sm" data-editar-paciente="${p.id}" ` +
           `title="Editar los datos de ${esc(p.nombre)}">Editar</button>` +
           `</div></td></tr>`
         );
       })
       .join("");
+  }
+
+  /* ------------------ Historial de turnos de un paciente ------------------ */
+  /* La columna «Turnos» de la tabla de pacientes cuenta los turnos que hay en
+     la agenda cargada; al hacer clic se pide el historial completo con
+     ``GET /turnos?paciente_id=...`` y se listan todos —pasados, próximos y
+     cancelados— del más reciente al más antiguo. La API pagina de a 500, así
+     que se piden páginas hasta traerlos todos. */
+  function pluralTurnos(n, singular, plural) {
+    return `${n} ${n === 1 ? singular : plural}`;
+  }
+
+  function abrirTurnosPaciente(id) {
+    const paciente = porId(state.pacientes, Number(id));
+    if (!paciente) {
+      toast("error", "No se encontró el paciente", "Actualizá la lista e intentá de nuevo.");
+      return;
+    }
+    state.turnosPacienteId = paciente.id;
+    state.turnosPaciente = [];
+    const carga = ++state.turnosPacienteCarga;
+    document.getElementById("modal-turnos-paciente-titulo").textContent =
+      `Turnos de ${paciente.nombre}`;
+    document.getElementById("modal-turnos-paciente-sub").textContent =
+      "Consultando el historial completo…";
+    document.getElementById("modal-turnos-paciente-lista").innerHTML = "";
+    document.getElementById("modal-turnos-paciente-cargando").classList.remove("hide");
+    ocultarAviso("modal-turnos-paciente-error");
+    mostrarModal("modal-turnos-paciente");
+    cargarTurnosPaciente(paciente.id, carga);
+  }
+
+  async function cargarTurnosPaciente(pacienteId, carga) {
+    const vigente = () =>
+      carga === state.turnosPacienteCarga &&
+      String(state.turnosPacienteId) === String(pacienteId);
+    try {
+      const turnos = [];
+      const TAMANO_PAGINA = 500; // máximo que acepta GET /turnos (le=500)
+      for (let salto = 0; ; salto += TAMANO_PAGINA) {
+        const pagina = await api(
+          `/turnos?paciente_id=${pacienteId}&skip=${salto}&limit=${TAMANO_PAGINA}`
+        );
+        const filas = Array.isArray(pagina) ? pagina : [];
+        turnos.push(...filas);
+        if (filas.length < TAMANO_PAGINA) break;
+      }
+      if (!vigente()) return;
+      state.turnosPaciente = turnos;
+      renderTurnosPaciente();
+    } catch (err) {
+      if (!vigente()) return;
+      document.getElementById("modal-turnos-paciente-cargando").classList.add("hide");
+      mostrarAviso(
+        "modal-turnos-paciente-error",
+        `No se pudieron cargar los turnos: ${err.message}`
+      );
+    }
+  }
+
+  function turnoHistorialFila(t) {
+    const duracion = duracionTexto(t.fecha_hora_inicio, t.fecha_hora_fin);
+    return (
+      `<div class="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-100 px-3 py-2.5` +
+      (t.estado_turno === "CANCELADO" ? " opacity-70" : "") +
+      `">` +
+      `<div class="min-w-0">` +
+      `<p class="text-sm font-semibold text-slate-800">${esc(fechaHora(t.fecha_hora_inicio))}</p>` +
+      `<p class="text-[11px] text-slate-400">${esc(nombreDoctor(t.doctor_id))}` +
+      (duracion ? ` · ${esc(duracion)}` : "") +
+      `</p></div>` +
+      `<div class="flex flex-wrap items-center justify-end gap-1.5">` +
+      `${badgeTurno(t.estado_turno)}${badgeWhatsApp(t)}</div>` +
+      `</div>`
+    );
+  }
+
+  function renderTurnosPaciente() {
+    const lista = document.getElementById("modal-turnos-paciente-lista");
+    const sub = document.getElementById("modal-turnos-paciente-sub");
+    const turnos = state.turnosPaciente;
+    document.getElementById("modal-turnos-paciente-cargando").classList.add("hide");
+
+    const contar = (estado) => turnos.filter((t) => t.estado_turno === estado).length;
+    const resumen = [pluralTurnos(turnos.length, "turno", "turnos")];
+    if (contar("CONFIRMADO")) {
+      resumen.push(pluralTurnos(contar("CONFIRMADO"), "confirmado", "confirmados"));
+    }
+    if (contar("PENDIENTE")) {
+      resumen.push(pluralTurnos(contar("PENDIENTE"), "pendiente", "pendientes"));
+    }
+    if (contar("CANCELADO")) {
+      resumen.push(pluralTurnos(contar("CANCELADO"), "cancelado", "cancelados"));
+    }
+    sub.textContent = `${resumen.join(" · ")} (del más reciente al más antiguo).`;
+
+    if (!turnos.length) {
+      sub.textContent = "Historial completo de turnos.";
+      lista.innerHTML = vacio(
+        "Este paciente todavía no tuvo turnos",
+        "Agendá el primero desde «Nuevo turno»."
+      );
+      return;
+    }
+    // La API devuelve por fecha de inicio ascendente; el historial se lee al
+    // revés para tener primero la atención más reciente.
+    const ordenados = turnos
+      .slice()
+      .sort((a, b) => String(b.fecha_hora_inicio).localeCompare(String(a.fecha_hora_inicio)));
+    lista.innerHTML = ordenados.map(turnoHistorialFila).join("");
+  }
+
+  function cerrarTurnosPaciente() {
+    state.turnosPacienteId = null;
+    state.turnosPaciente = [];
+    state.turnosPacienteCarga += 1;
+    ocultarModal("modal-turnos-paciente");
   }
 
   /* ================== Módulo 2 · Historia clínica (sólo lectura) =========== */
@@ -1056,18 +1214,21 @@
   /* El paciente completa la ficha desde el enlace público de WhatsApp y el
      odontólogo la ve acá, junto a la línea de tiempo, antes de atender. Los
      antecedentes de riesgo se resaltan y disparan un aviso flotante que se
-     puede cerrar. El detalle lo arma ``FICHA_MEDICA.renderResumen``. */
+     puede cerrar. El detalle lo arma ``FICHA_MEDICA.renderResumen``.
+     El botón «Ficha médica» abre la hoja de papel completa (datos del
+     paciente, odontograma y libro «Trabajo realizado») con ``odontograma.js``. */
 
   /* Tarjeta con la declaración del paciente. Si todavía no la envió, se
      explica cómo se completa: el enlace sale en el recordatorio de WhatsApp. */
   function antecedentesSaludHTML(detalle) {
     const a = detalle && detalle.antecedentes_salud;
     const pacienteId = detalle && detalle.paciente_id;
-    const botonOdonto = pacienteId
-      ? `<button type="button" class="salud-btn-odonto"` +
-        ` data-odontograma="${esc(pacienteId)}"` +
-        ` data-odontograma-nombre="${esc((detalle && detalle.paciente_nombre) || "")}">` +
-        `Odontograma</button>`
+    const botonFicha = pacienteId
+      ? `<button type="button" class="salud-btn-ficha"` +
+        ` data-ficha-medica="${esc(pacienteId)}"` +
+        ` data-ficha-medica-nombre="${esc((detalle && detalle.paciente_nombre) || "")}"` +
+        ` title="Abrir la ficha médica (datos, odontograma y trabajo realizado)">` +
+        `Ficha médica</button>`
       : "";
     /* La Historia Clínica General se imprime sobre la plantilla de papel: el
        navegador abre el PDF en otra pestaña para imprimirlo o guardarlo. */
@@ -1092,7 +1253,7 @@
         `</div>` +
         `<div class="salud-acciones">` +
         `<span class="badge badge-slate">Pendiente</span>` +
-        botonOdonto +
+        botonFicha +
         botonPdf +
         `</div>` +
         `</div>` +
@@ -1122,7 +1283,7 @@
       `</div>` +
       `<div class="salud-acciones">` +
       `<span class="badge ${alerta ? "badge-red" : "badge-green"}">${alerta ? "Alerta médica" : "Sin alertas"}</span>` +
-      botonOdonto +
+      botonFicha +
       botonPdf +
       `</div>` +
       `</div>` +
@@ -1282,6 +1443,7 @@
 
     if (valPac) selPac.value = valPac;
     if (valDoc) selDoc.value = valDoc;
+    actualizarAlertaPacienteTurno();
   }
 
   function renderTodo() {
@@ -5874,7 +6036,7 @@
   /* ------------------------------ Navegación ----------------------------- */
   const VISTAS = {
     dashboard: ["Panel Principal", "Resumen del consultorio y estado de los recordatorios"],
-    calendario: ["Calendario", "Calendario mensual de turnos y disponibilidad por día"],
+    calendario: ["Calendario", "Calendario mensual y semanal por odontólogo, con disponibilidad por día"],
     disponibilidad: [
       "Disponibilidad médica",
       "Agenda semanal por odontólogo: rangos de mañana y tarde para cada día",
@@ -5897,6 +6059,10 @@
     facturacion: [
       "Facturación y Caja",
       "Cierre de visitas, coseguros del mostrador y liquidación de obras sociales y profesionales",
+    ],
+    presupuestos: [
+      "Presupuestos",
+      "Cotizaciones de tratamientos con el mismo diseño del documento del consultorio, listas para imprimir en PDF",
     ],
     "cuenta-corriente": [
       "Cuenta corriente",
@@ -5965,6 +6131,11 @@
       // Al entrar se refresca la caja del día y la pestaña que estaba activa
       // (cada una pide al servidor lo que muestra).
       cargarFacturacion();
+    }
+    if (v === "presupuestos" && window.PresupuestosApp) {
+      // La pestaña vive en presupuestos.js: al entrar se actualizan pacientes y
+      // presupuestos para no trabajar con una lista vieja.
+      window.PresupuestosApp.cargar();
     }
     if (v === "cuenta-corriente") {
       // El saldo se vuelve a pedir al entrar: es un libro mayor y puede haber
@@ -6532,11 +6703,24 @@
     sel.appendChild(opt);
   }
 
+  /* Muestra las observaciones únicamente cuando la categoría elegida es MALO.
+     El texto no se borra al ocultarlo: si la secretaría vuelve a elegir MALO
+     recupera lo que había escrito y, al guardar otra categoría, el backend lo
+     descarta. */
+  function sincronizarCategoriaPaciente() {
+    const sel = document.getElementById("pac-categoria");
+    const bloque = document.getElementById("pac-categoria-observaciones-bloque");
+    if (!sel || !bloque) return;
+    bloque.classList.toggle("hide", sel.value !== "MALO");
+  }
+
   function modoEdicionPaciente(paciente) {
     const titulo = document.getElementById("pac-form-titulo");
     const sub = document.getElementById("pac-form-sub");
     const texto = document.getElementById("pac-guardar-texto");
     const cancelar = document.getElementById("pac-cancelar-edicion");
+    const categoria = document.getElementById("pac-categoria");
+    const observaciones = document.getElementById("pac-categoria-observaciones");
 
     if (paciente) {
       document.getElementById("pac-nombre").value = paciente.nombre || "";
@@ -6557,6 +6741,9 @@
         ? String(paciente.obra_social_id)
         : "";
       document.getElementById("pac-numero-afiliado").value = paciente.numero_afiliado || "";
+      if (categoria) categoria.value = paciente.categoria || "SIN_CATEGORIZAR";
+      if (observaciones) observaciones.value = paciente.categoria_observaciones || "";
+      sincronizarCategoriaPaciente();
       state.pacienteEditId = paciente.id;
       if (titulo) titulo.textContent = "Editar paciente";
       if (sub) sub.textContent = "Modificá los datos del paciente y guardá los cambios.";
@@ -6564,6 +6751,9 @@
       if (cancelar) cancelar.classList.remove("hide");
     } else {
       state.pacienteEditId = null;
+      if (categoria) categoria.value = "SIN_CATEGORIZAR";
+      if (observaciones) observaciones.value = "";
+      sincronizarCategoriaPaciente();
       if (titulo) titulo.textContent = "Registrar paciente";
       if (sub) sub.textContent = "El teléfono se usa para los avisos de WhatsApp.";
       if (texto) texto.textContent = "Guardar paciente";
@@ -6614,6 +6804,13 @@
       lugar_trabajo:
         document.getElementById("pac-lugar-trabajo").value.trim() || null,
       jerarquia: document.getElementById("pac-jerarquia").value.trim() || null,
+      // Categoría administrativa y su motivo. El backend sólo acepta
+      // observaciones cuando la categoría es MALO.
+      categoria: document.getElementById("pac-categoria").value || "SIN_CATEGORIZAR",
+      categoria_observaciones:
+        document.getElementById("pac-categoria").value === "MALO"
+          ? document.getElementById("pac-categoria-observaciones").value.trim() || null
+          : null,
     };
 
     const editando = Boolean(state.pacienteEditId);
@@ -6661,12 +6858,14 @@
     // bloquea después si el turno proviene de una agenda filtrada. Si el panel
     // del día está filtrado, se preselecciona ese profesional.
     fijarDoctorTurno(state.agendaDoctor || "", false);
+    actualizarAlertaPacienteTurno();
     document.getElementById("modal-turno").classList.remove("hide");
   }
 
   function cerrarModal() {
     // Restablece el modal al modo "crear" por si quedó abierto en modo edición.
     state.turnoEditId = null;
+    cerrarAlertaPacienteMalo();
     const titulo = document.getElementById("modal-turno-titulo");
     if (titulo) titulo.textContent = "Nuevo turno";
     const guardar = document.getElementById("modal-turno-save");
@@ -6694,6 +6893,66 @@
     const nombre = document.getElementById("turno-doctor-hint-nombre");
     if (nombre) nombre.textContent = on ? nombreDoctor(parseInt(sel.value, 10)) : "";
     if (hint) hint.classList.toggle("hide", !on);
+  }
+
+  /* Muestra en el propio modal del turno el aviso con las observaciones cuando
+     el paciente seleccionado está categorizado como MALO. Se actualiza al
+     cambiar de paciente y también cuando calendar.js precarga uno al editar o
+     agendar desde un bloque. */
+  function actualizarAlertaPacienteTurno() {
+    const sel = document.getElementById("turno-paciente");
+    const box = document.getElementById("turno-alerta-paciente");
+    const nombre = document.getElementById("turno-alerta-paciente-nombre");
+    const obs = document.getElementById("turno-alerta-paciente-observaciones");
+    if (!sel || !box) return;
+
+    const paciente = porId(state.pacientes, Number(sel.value));
+    const esMalo = Boolean(paciente && paciente.categoria === "MALO");
+    box.classList.toggle("hide", !esMalo);
+    if (!esMalo) return;
+    if (nombre) nombre.textContent = paciente.nombre || "";
+    if (obs) {
+      obs.textContent =
+        paciente.categoria_observaciones || "Sin observaciones cargadas.";
+    }
+  }
+
+  /* Aviso previo al alta de un turno para un paciente MALO. Guarda el payload
+     validado para que el botón «Asignar turno igual» pueda reintentar el mismo
+     guardado sin volver a pedir confirmación. */
+  function mostrarAlertaPacienteMalo(paciente, payload) {
+    state.turnoAlertaPendiente = payload;
+    const nombre = document.getElementById("modal-alerta-paciente-nombre");
+    const obs = document.getElementById("modal-alerta-paciente-observaciones");
+    if (nombre) nombre.textContent = paciente.nombre || "";
+    if (obs) {
+      obs.textContent =
+        paciente.categoria_observaciones || "Sin observaciones cargadas.";
+    }
+    mostrarModal("modal-alerta-paciente");
+  }
+
+  function cerrarAlertaPacienteMalo() {
+    state.turnoAlertaPendiente = null;
+    ocultarModal("modal-alerta-paciente");
+  }
+
+  async function confirmarAlertaPacienteMalo() {
+    const payload = state.turnoAlertaPendiente;
+    const btn = document.getElementById("modal-alerta-paciente-ok");
+    if (!payload) {
+      cerrarAlertaPacienteMalo();
+      return;
+    }
+    // Se cierra el aviso antes de guardar: si la API rechaza el turno, el error
+    // aparece en el formulario que sigue abierto detrás.
+    cerrarAlertaPacienteMalo();
+    try {
+      bloquear(btn, true);
+      await guardarTurnoValidado(payload);
+    } finally {
+      bloquear(btn, false);
+    }
   }
 
   function mostrarErrorTurno(msg, titulo, detalle) {
@@ -6766,9 +7025,37 @@
     mostrarErrorTurno(mensaje);
   }
 
+  /* Guarda un turno ya validado (crear o editar). Lo usan tanto el submit del
+     formulario como la confirmación del aviso de paciente MALO. */
+  async function guardarTurnoValidado(payload) {
+    const btn = document.getElementById("modal-turno-save");
+    document.getElementById("turno-error").classList.add("hide");
+
+    try {
+      bloquear(btn, true);
+      const esEdicion = Boolean(state.turnoEditId);
+      const t = await api(esEdicion ? `/turnos/${state.turnoEditId}` : "/turnos", {
+        method: esEdicion ? "PATCH" : "POST",
+        body: JSON.stringify(payload),
+      });
+      cerrarModal();
+      state.agendaFecha = parteFecha(t.fecha_hora_inicio);
+      toast(
+        "exito",
+        esEdicion ? "Turno actualizado" : "Turno agendado",
+        `${nombrePaciente(t.paciente_id)} · ${fechaCorta(t.fecha_hora_inicio)} ${parteHora(t.fecha_hora_inicio)}`
+      );
+      await cargarTodo();
+      if (state.vista === "calendario") cambiarVista("calendario");
+    } catch (err) {
+      alertaErrorTurno(err, payload);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
   async function crearTurno(ev) {
     ev.preventDefault();
-    const btn = document.getElementById("modal-turno-save");
     document.getElementById("turno-error").classList.add("hide");
 
     const pacienteId = parseInt(document.getElementById("turno-paciente").value, 10);
@@ -6798,27 +7085,16 @@
       fecha_hora_fin: isoLocal(fin),
     };
 
-    try {
-      bloquear(btn, true);
-      const esEdicion = Boolean(state.turnoEditId);
-      const t = await api(esEdicion ? `/turnos/${state.turnoEditId}` : "/turnos", {
-        method: esEdicion ? "PATCH" : "POST",
-        body: JSON.stringify(payload),
-      });
-      cerrarModal();
-      state.agendaFecha = parteFecha(t.fecha_hora_inicio);
-      toast(
-        "exito",
-        esEdicion ? "Turno actualizado" : "Turno agendado",
-        `${nombrePaciente(t.paciente_id)} · ${fechaCorta(t.fecha_hora_inicio)} ${parteHora(t.fecha_hora_inicio)}`
-      );
-      await cargarTodo();
-      if (state.vista === "calendario") cambiarVista("calendario");
-    } catch (err) {
-      alertaErrorTurno(err, payload);
-    } finally {
-      bloquear(btn, false);
+    /* Un turno NUEVO para un paciente MALO no se guarda directo: primero se
+       muestra la alerta con las observaciones para que la secretaría decida.
+       Al editar un turno existente no se vuelve a preguntar. */
+    const paciente = porId(state.pacientes, pacienteId);
+    if (!state.turnoEditId && paciente && paciente.categoria === "MALO") {
+      mostrarAlertaPacienteMalo(paciente, payload);
+      return;
     }
+
+    await guardarTurnoValidado(payload);
   }
 
   /* ---------------------------- Recordatorios ---------------------------- */
@@ -7484,39 +7760,20 @@
   }
 
   /* --------------------- Webhook: respuesta del paciente ------------------ */
-  async function responderWhatsApp(wamid, botonId) {
-    const esConfirmar = botonId === "confirmar_turno";
+  async function responderWhatsApp(telefono, accion) {
+    // WAHA entrega el mensaje como texto libre: "1" confirma y "2" cancela.
+    const respuesta = accion === "confirmar_turno" ? "1" : "2";
+    const numero = String(telefono || "").replace(/[^\d]/g, "");
     const payload = {
-      object: "whatsapp_business_account",
-      entry: [
-        {
-          id: "SIMULADO",
-          changes: [
-            {
-              field: "messages",
-              value: {
-                messaging_product: "whatsapp",
-                messages: [
-                  {
-                    from: "+5491100000000",
-                    id: "wamid.SIM." + Date.now(),
-                    timestamp: String(Math.floor(Date.now() / 1000)),
-                    type: "interactive",
-                    context: { id: wamid },
-                    interactive: {
-                      type: "button_reply",
-                      button_reply: {
-                        id: botonId,
-                        title: esConfirmar ? "Confirmar" : "Cancelar",
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      ],
+      event: "message",
+      session: "default",
+      payload: {
+        id: "waha.SIM." + Date.now(),
+        from: `${numero}@c.us`,
+        fromMe: false,
+        body: respuesta,
+        type: "chat",
+      },
     };
 
     try {
@@ -7587,6 +7844,11 @@
         abrirHistoriaPanel(ficha.dataset.histPaciente);
         return;
       }
+      const turnosPaciente = e.target.closest("[data-turnos-paciente]");
+      if (turnosPaciente) {
+        abrirTurnosPaciente(turnosPaciente.dataset.turnosPaciente);
+        return;
+      }
       const boton = e.target.closest("[data-historia]");
       if (boton) {
         // Desde la tabla de pacientes: se abre el Panel Principal con la ficha.
@@ -7605,6 +7867,24 @@
     document.getElementById("modal-turno").addEventListener("click", function (e) {
       if (e.target.id === "modal-turno") cerrarModal();
     });
+    // Aviso previo al turno de un paciente MALO: el select actualiza el detalle
+    // en pantalla y el guardado pide confirmación explícita.
+    const selPacienteTurno = document.getElementById("turno-paciente");
+    if (selPacienteTurno) {
+      selPacienteTurno.addEventListener("change", actualizarAlertaPacienteTurno);
+    }
+    document.getElementById("modal-alerta-paciente-close").addEventListener("click", cerrarAlertaPacienteMalo);
+    document.getElementById("modal-alerta-paciente-cancel").addEventListener("click", cerrarAlertaPacienteMalo);
+    document.getElementById("modal-alerta-paciente-ok").addEventListener("click", confirmarAlertaPacienteMalo);
+    document.getElementById("modal-alerta-paciente").addEventListener("click", function (e) {
+      if (e.target.id === "modal-alerta-paciente") cerrarAlertaPacienteMalo();
+    });
+    // Historial de turnos del paciente: se abre desde la columna «Turnos».
+    document.getElementById("modal-turnos-paciente-close").addEventListener("click", cerrarTurnosPaciente);
+    document.getElementById("modal-turnos-paciente-cancel").addEventListener("click", cerrarTurnosPaciente);
+    document.getElementById("modal-turnos-paciente").addEventListener("click", function (e) {
+      if (e.target.id === "modal-turnos-paciente") cerrarTurnosPaciente();
+    });
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
       cerrarModal();
@@ -7617,9 +7897,11 @@
       cerrarModalOpcionMenu();
       cerrarModalFicha();
       cerrarModalEnviarFicha();
+      cerrarTurnosPaciente();
       cerrarInformeCC();
       cerrarModalFacturaEgreso();
       cerrarModalPagoEgreso();
+      cerrarAlertaPacienteMalo();
     });
 
     document.getElementById("form-doctor").addEventListener("submit", crearDoctor);
@@ -7698,6 +7980,7 @@
 
     document.getElementById("form-paciente").addEventListener("submit", crearPaciente);
     document.getElementById("pac-cancelar-edicion").addEventListener("click", cancelarEdicionPaciente);
+    document.getElementById("pac-categoria").addEventListener("change", sincronizarCategoriaPaciente);
     document.getElementById("form-turno").addEventListener("submit", crearTurno);
 
     document.getElementById("btn-recordatorios").addEventListener("click", function () {
@@ -7961,7 +8244,7 @@
     // Delegación: botones "Responder: Confirma/Cancela" de las tarjetas de turno.
     document.addEventListener("click", function (e) {
       const btn = e.target.closest("[data-simular]");
-      if (btn) responderWhatsApp(btn.dataset.wamid, btn.dataset.simular);
+      if (btn) responderWhatsApp(btn.dataset.telefono, btn.dataset.simular);
     });
 
     // Delegación: botón verde de WhatsApp de cada recordatorio pendiente. El <a>
@@ -8594,6 +8877,7 @@
     colorDe,
     nombreDoctor,
     nombrePaciente,
+    editarPaciente,
     isoDe,
     hoyISO,
     ahoraISO,
@@ -8609,6 +8893,7 @@
     abrirModal,
     cerrarModal,
     fijarDoctorTurno,
+    actualizarAlertaPacienteTurno,
     mostrarErrorTurno,
     bloquear,
     cambiarVista,

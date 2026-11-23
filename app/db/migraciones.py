@@ -198,6 +198,23 @@ COLUMNAS_NUEVAS: tuple[ColumnaNueva, ...] = (
     ColumnaNueva("pacientes", "dni", "VARCHAR(20)", "VARCHAR(20)"),
     ColumnaNueva("pacientes", "obra_social_id", "INTEGER", "INTEGER"),
     ColumnaNueva("pacientes", "numero_afiliado", "VARCHAR(60)", "VARCHAR(60)"),
+    # Categoría administrativa del paciente y el motivo cuando es MALO. Las
+    # fichas históricas quedan SIN_CATEGORIZAR y sin observaciones.
+    ColumnaNueva(
+        "pacientes",
+        "categoria",
+        "VARCHAR(20) NOT NULL DEFAULT 'SIN_CATEGORIZAR'",
+        "VARCHAR(20) NOT NULL DEFAULT 'SIN_CATEGORIZAR'",
+    ),
+    ColumnaNueva("pacientes", "categoria_observaciones", "TEXT", "TEXT"),
+    # Presupuestos: código de nomenclador de cada trabajo. Es una copia del
+    # catálogo de prestaciones y las filas viejas quedan sin código.
+    ColumnaNueva(
+        "presupuesto_items",
+        "codigo",
+        "VARCHAR(30)",
+        "VARCHAR(30)",
+    ),
     # Datos filiatorios de la Historia Clínica General (los carga la ficha
     # médica y se sincronizan en el paciente). Aditivos y anulables.
     ColumnaNueva("pacientes", "fecha_nacimiento", "DATE", "DATE"),

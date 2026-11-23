@@ -20,9 +20,9 @@ precio, obras sociales, ubicación o derivar a una secretaria). Si la tabla est�
 vacía se usa el menú histórico de cuatro opciones como respaldo
 (``whatsapp_menu_service.opciones_por_defecto``).
 
-El envío hacia Meta no se duplica acá: lo hace
-``whatsapp_service.enviar_mensaje_texto`` (``POST`` **real** con ``httpx``
-cuando están las credenciales ``WHATSAPP_TOKEN``/``WHATSAPP_PHONE_NUMBER_ID``;
+El envío hacia WAHA no se duplica acá: lo hace
+``whatsapp_service.enviar_mensaje_texto`` (``POST`` **real** con ``httpx`` a
+``{WAHA_URL}/api/sendText`` cuando están ``WAHA_URL`` y ``WAHA_API_KEY``;
 **simulado** cuando no, igual que los recordatorios). Este módulo sólo decide
 *qué* contestar, de modo que el transporte quede en un único lugar y se pueda
 probar el árbol de respuestas sin tocar la red.
@@ -38,12 +38,17 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.money import redondear_monto
-from app.models.enums import TipoOpcionMenu
+from app.core.whatsapp_utils import (
+    formatear_fecha_recordatorio,
+    normalizar_telefono_waha,
+    profesional_con_articulo,
+)
+from app.models.enums import EstadoTurno, EstadoWhatsApp, TipoOpcionMenu
 from app.models.obra_social import ObraSocial
 from app.models.opcion_menu_whatsapp import OpcionMenuWhatsApp
 from app.models.prestacion import Prestacion
 from app.schemas.whatsapp import RespuestaBot
-from app.services import whatsapp_menu_service
+from app.services import whatsapp_conversacion_service, whatsapp_menu_service
 from app.services.whatsapp_service import enviar_mensaje_texto
 
 logger = logging.getLogger("app.services.whatsapp_bot")
@@ -113,6 +118,29 @@ MENSAJE_PRECIO_NO_DISPONIBLE = (
     "Escribí *4* y una secretaria te lo informa a la brevedad."
 )
 
+#: Respuestas aceptadas cuando hay un recordatorio esperando confirmación.
+RESPUESTAS_CONFIRMAR: frozenset[str] = frozenset(
+    {"1", "si", "confirmar", "confirmo", "confirmado"}
+)
+RESPUESTAS_CANCELAR: frozenset[str] = frozenset(
+    {"2", "no", "cancelar", "cancelo", "cancelado"}
+)
+
+TEXTO_CONFIRMACION_INVALIDA = (
+    "Para el turno del {fecha} a las {hora}:\n\n"
+    "Respondé *1* (o *SI*) para confirmar.\n"
+    "Respondé *2* (o *NO*) para cancelar."
+)
+TEXTO_TURNO_CONFIRMADO = (
+    "✅ *Turno confirmado*\n\n"
+    "{paciente}, te esperamos el {fecha} a las {hora} con {profesional}."
+)
+TEXTO_TURNO_CANCELADO = (
+    "❌ *Turno cancelado*\n\n"
+    "{paciente}, cancelamos el turno del {fecha} a las {hora} con {profesional}. "
+    "Si querés reprogramarlo, escribí *MENÚ* y elegí una opción."
+)
+
 
 # ===========================================================================
 #  Utilidades de texto, teléfono e importes
@@ -161,8 +189,8 @@ def es_saludo_inicial(texto_normalizado: str) -> bool:
 
 
 def normalizar_destinatario(telefono: Optional[str]) -> str:
-    """Deja sólo los dígitos del número, como exige la Cloud API de Meta."""
-    return "".join(c for c in (telefono or "") if c.isdigit())
+    """Deja el número en el formato canónico de WAHA (``549...``)."""
+    return normalizar_telefono_waha(telefono)
 
 
 def formatear_importe(valor: Optional[float]) -> str:
@@ -505,29 +533,161 @@ def _responder_opcion(
     )
 
 
+def _datos_del_turno(turno) -> dict:
+    """Datos que se muestran en los mensajes de confirmación/cancelación."""
+    return {
+        "paciente": (
+            (turno.paciente.nombre if turno.paciente else "").strip() or "paciente"
+        ),
+        "fecha": formatear_fecha_recordatorio(turno.fecha_hora_inicio),
+        "hora": turno.fecha_hora_inicio.strftime("%H:%M"),
+        "profesional": (
+            profesional_con_articulo(turno.doctor.nombre if turno.doctor else "")
+            or "tu profesional"
+        ),
+    }
+
+
+def _clasificar_confirmacion(texto_normalizado: str) -> Optional[str]:
+    """Devuelve ``'CONFIRMAR'``, ``'CANCELAR'`` o ``None``.
+
+    Acepta las formas que indica el recordatorio (``1``/``si`` y ``2``/``no``) y
+    sus variantes naturales («confirmo», «cancelar»). La comparación usa el
+    texto ya normalizado (sin acentos ni mayúsculas).
+    """
+    candidato = (texto_normalizado or "").strip(PUNTUACION_BORDES)
+    if not candidato:
+        return None
+
+    primera = candidato.split()[0]
+    for valor in (candidato, primera):
+        if valor in RESPUESTAS_CONFIRMAR:
+            return "CONFIRMAR"
+        if valor in RESPUESTAS_CANCELAR:
+            return "CANCELAR"
+
+    if candidato.startswith("confirm"):
+        return "CONFIRMAR"
+    if candidato.startswith("cancel"):
+        return "CANCELAR"
+    return None
+
+
+def _responder_confirmacion(
+    db: Session,
+    *,
+    destinatario: str,
+    texto_entrante: str,
+    texto_normalizado: str,
+    turno,
+) -> RespuestaBot:
+    """Resuelve la respuesta de texto de un recordatorio pendiente.
+
+    Si el paciente no escribió una opción válida se vuelve a preguntar y el
+    estado sigue en ``CONFIRMACION_TURNO``. Cuando confirma o cancela, se envía
+    el acuse **antes** de actualizar la base: si WAHA falla, el turno queda como
+    estaba y el paciente puede reintentar.
+    """
+    datos = _datos_del_turno(turno)
+    accion = _clasificar_confirmacion(texto_normalizado)
+
+    if accion is None:
+        respuesta = TEXTO_CONFIRMACION_INVALIDA.format(
+            fecha=datos["fecha"], hora=datos["hora"]
+        )
+        mensaje_id = enviar_mensaje_texto(destinatario, respuesta)
+        logger.info(
+            "FAQ Bot: respuesta de confirmación no reconocida de %s (turno=%s)",
+            destinatario,
+            turno.id,
+        )
+        return RespuestaBot(
+            telefono=destinatario,
+            texto_entrante=texto_entrante,
+            tipo="CONFIRMACION_PENDIENTE",
+            respuesta=respuesta,
+            mensaje_id_saliente=mensaje_id,
+            turno_id=turno.id,
+            estado_turno=turno.estado_turno,
+            estado_whatsapp=turno.estado_whatsapp,
+        )
+
+    if accion == "CONFIRMAR":
+        nuevo_estado = EstadoTurno.CONFIRMADO
+        tipo = "CONFIRMACION"
+        opcion = "1"
+        respuesta = TEXTO_TURNO_CONFIRMADO.format(**datos)
+    else:
+        nuevo_estado = EstadoTurno.CANCELADO
+        tipo = "CANCELACION"
+        opcion = "2"
+        respuesta = TEXTO_TURNO_CANCELADO.format(**datos)
+
+    mensaje_id = enviar_mensaje_texto(destinatario, respuesta)
+
+    turno.estado_turno = nuevo_estado
+    turno.estado_whatsapp = EstadoWhatsApp.RESPONDIDO
+    whatsapp_conversacion_service.cerrar_confirmacion(db, destinatario)
+
+    logger.info(
+        "FAQ Bot: turno id=%s -> %s por respuesta %r de %s",
+        turno.id,
+        nuevo_estado,
+        texto_entrante,
+        destinatario,
+    )
+    return RespuestaBot(
+        telefono=destinatario,
+        texto_entrante=texto_entrante,
+        tipo=tipo,
+        opcion=opcion,
+        respuesta=respuesta,
+        mensaje_id_saliente=mensaje_id,
+        turno_id=turno.id,
+        estado_turno=turno.estado_turno,
+        estado_whatsapp=turno.estado_whatsapp,
+    )
+
+
 def responder_mensaje(db: Session, telefono: str, texto: str) -> RespuestaBot:
     """Contesta un mensaje entrante de texto siguiendo el menú configurado.
 
     Los pasos, en orden:
 
     1. **Normaliza** el texto (minúsculas, sin acentos) y el teléfono (sólo dígitos).
-    2. Lee de la base el **menú vigente** (opciones activas). Si no hay ninguna
-       fila configurada usa las cuatro históricas por defecto.
-    3. Si el texto es una **opción del menú**, ejecuta la acción de esa opción:
-       texto libre, precio de la consulta, obras sociales, ubicación o derivar a
-       una secretaria.
-    4. Si es un **saludo o palabra clave** ("hola", "buenas", "info", "turnos",
-       "menú"…) envía el menú configurado.
-    5. En cualquier otro caso —una opción fuera del menú, texto libre o un
-       mensaje sin texto— **no responde** y registra la atención manual requerida.
+    2. Si el teléfono tiene una **confirmación pendiente** (se le envió un
+       recordatorio), interpreta ``1`` / ``si`` como confirmar y ``2`` / ``no``
+       como cancelar. Cualquier otra respuesta vuelve a preguntar por el turno.
+    3. Si no hay confirmación pendiente, lee el **menú vigente** (opciones
+       activas) y ejecuta la acción de la tecla elegida.
+    4. Un saludo o palabra clave envía el menú.
+    5. **Cualquier otro mensaje** también muestra el menú: es la forma de volver
+       al inicio cuando el paciente escribe algo que el bot no reconoce.
 
     :param db: sesión para leer el menú, ``Prestacion`` y ``ObraSocial``.
     :param telefono: número del remitente tal como llega en el webhook (``from``).
-    :param texto: cuerpo del mensaje (``text.body``).
+    :param texto: cuerpo del mensaje (``body``).
     """
     destinatario = normalizar_destinatario(telefono)
     normalizado = normalizar_texto(texto)
     logger.info("FAQ Bot: mensaje entrante de %s: %r", destinatario or "?", texto)
+
+    # --- ¿Está respondiendo un recordatorio? ---------------------------------
+    pendiente = whatsapp_conversacion_service.obtener_confirmacion_pendiente(
+        db, destinatario
+    )
+    if pendiente is not None:
+        _, turno = pendiente
+        return _responder_confirmacion(
+            db,
+            destinatario=destinatario,
+            texto_entrante=texto,
+            texto_normalizado=normalizado,
+            turno=turno,
+        )
+
+    # Sin confirmación pendiente se registra el estado de menú del paciente.
+    whatsapp_conversacion_service.marcar_menu(db, destinatario)
 
     if not normalizado:
         return _atencion_manual(
@@ -544,11 +704,23 @@ def responder_mensaje(db: Session, telefono: str, texto: str) -> RespuestaBot:
     if numero is not None:
         opcion = next((o for o in opciones if o.numero == numero), None)
         if opcion is None:
-            return _atencion_manual(
+            logger.info(
+                "FAQ Bot: la opción %s no existe en el menú; se muestra el menú a %s",
+                numero,
+                destinatario or "?",
+            )
+            if not opciones:
+                return _atencion_manual(
+                    destinatario=destinatario,
+                    texto_entrante=texto,
+                    opcion=numero,
+                    motivo="el menú no tiene opciones activas",
+                )
+            return _responder(
+                tipo="MENU",
                 destinatario=destinatario,
                 texto_entrante=texto,
-                opcion=numero,
-                motivo=f"la opción {numero} no existe en el menú",
+                respuesta=mensaje_menu(opciones),
             )
         logger.info(
             "FAQ Bot: opción %s (%s) elegida por %s",
@@ -580,10 +752,17 @@ def responder_mensaje(db: Session, telefono: str, texto: str) -> RespuestaBot:
             respuesta=mensaje_menu(opciones),
         )
 
-    # --- Texto libre no reconocido -------------------------------------------
-    return _atencion_manual(
+    # --- Texto libre no reconocido: se vuelve al menú ------------------------
+    if not opciones:
+        return _atencion_manual(
+            destinatario=destinatario,
+            texto_entrante=texto,
+            opcion=None,
+            motivo="el menú no tiene opciones activas",
+        )
+    return _responder(
+        tipo="MENU",
         destinatario=destinatario,
         texto_entrante=texto,
-        opcion=None,
-        motivo="texto libre que el bot no reconoce",
+        respuesta=mensaje_menu(opciones),
     )

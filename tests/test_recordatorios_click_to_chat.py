@@ -113,8 +113,11 @@ def test_construir_mensaje_y_enlace_no_rompen_la_url(db_session, doctor, pacient
     assert "con el Dr. House" in mensaje
     # El paciente todavía no tiene ficha de salud: el recordatorio suma el
     # enlace público firmado después del texto original.
-    cuerpo, bloque_salud = mensaje.split("\n\n", 1)
+    cuerpo, resto = mensaje.split("\n\n", 1)
     assert cuerpo.endswith("¡Muchas gracias!")
+    # Después del cuerpo vienen las instrucciones de confirmación y, al final,
+    # el bloque de la ficha de salud con el enlace.
+    _, bloque_salud = resto.split("\n\n", 1)
     assert bloque_salud.startswith("Antes de la consulta, completá tu ficha de salud")
     assert "/anamnesis/" in bloque_salud
     # El enlace cierra el mensaje en su propia línea: WhatsApp sólo lo muestra en

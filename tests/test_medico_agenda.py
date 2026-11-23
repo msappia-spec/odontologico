@@ -186,3 +186,20 @@ def test_las_clases_del_js_tienen_estilo_en_el_css(client):
 
     assert clases_js, "el JS debería construir elementos con clases propias"
     assert sorted(clases_js - clases_css) == []
+
+
+def test_la_agenda_movil_avisa_si_el_paciente_esta_categorizado_como_malo(client):
+    """En el celular el odontólogo ve el motivo y confirma antes de agendar."""
+    html = _html(client)
+    js = _js(client)
+    css = _css(client)
+
+    assert 'id="paciente-alerta-categoria"' in html
+    assert 'id="paciente-alerta-categoria-obs"' in html
+    assert "function actualizarAlertaCategoriaPaciente(" in js
+    assert "function ocultarAlertaCategoriaPaciente(" in js
+    assert 'paciente.categoria === "MALO"' in js
+    assert "window.confirm(" in js
+    assert "categorizado como MALO" in js
+    assert ".m-alerta-categoria" in css
+    assert ".m-alerta-categoria-obs" in css

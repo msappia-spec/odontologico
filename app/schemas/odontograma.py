@@ -3,7 +3,8 @@
 El odontograma reproduce el cuadro de la Historia Clínica General: el
 profesional elige un estado (**rojo** = prestación existente, **azul** =
 prestación requerida, **X** = ausente o a extraer) y lo aplica a cada diente en
-notación FDI (11 a 48).
+notación FDI. El formulario muestra la dentición permanente (11-48) y la
+temporaria (51-85), así el odontograma del papel queda completo.
 
 La lectura viaja con la cabecera (prótesis, coronas, cantidad de dientes) y un
 resumen de cuántos dientes hay en cada estado, para que la pantalla pinte la
@@ -23,7 +24,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.models.odontograma import DIENTES_PERMANENTES, MAX_TEXTO_ODONTOGRAMA
+from app.models.odontograma import DIENTES_VALIDOS, MAX_TEXTO_ODONTOGRAMA
 
 #: Estado de un diente, con el color que usa el PDF.
 EstadoDiente = Literal["EXISTENTE", "REQUERIDO", "AUSENTE"]
@@ -56,8 +57,8 @@ class OdontogramaDienteCreate(BaseModel):
     diente: int = Field(
         ...,
         description=(
-            "Número FDI del diente permanente: 11 a 18, 21 a 28, 31 a 38 o "
-            "41 a 48."
+            "Número FDI del diente: permanente 11-18, 21-28, 31-38 o 41-48, "
+            "o temporario 51-55, 61-65, 71-75 u 81-85."
         ),
     )
     estado: EstadoDiente = Field(
@@ -74,11 +75,11 @@ class OdontogramaDienteCreate(BaseModel):
     @field_validator("diente")
     @classmethod
     def _diente_fdi(cls, valor: int) -> int:
-        """Rechaza números que no correspondan a un diente permanente."""
-        if valor not in DIENTES_PERMANENTES:
+        """Rechaza números que no correspondan a un diente permanente/temporario."""
+        if valor not in DIENTES_VALIDOS:
             raise ValueError(
-                "El diente debe estar en notación FDI entre 11 y 48 "
-                "(por ejemplo 11, 26 o 47)."
+                "El diente debe estar en notación FDI: permanente 11-48 o "
+                "temporario 51-85 (por ejemplo 11, 26, 47 o 55)."
             )
         return valor
 

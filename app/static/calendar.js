@@ -10,6 +10,11 @@
        **PENDIENTE** mantiene el color del profesional y **CANCELADO** queda en
        gris atenuado (la paleta de odontólogos se reutiliza para los pendientes,
        de modo que leyenda y grilla coincidan siempre).
+     * Vista semanal por odontólogo (botones «Mes» / «Semana»): muestra de lunes
+       a viernes **todos los turnos** del profesional elegido. La semana se mueve
+       con las flechas de la barra superior y el selector «Odontólogo de la
+       semana» cambia de agenda sin mezclar profesionales. Al cambiar de semana
+       siempre se muestra la semana del odontólogo seleccionado.
      * Filtro por odontólogo en la parte superior: "Todos los odontólogos" más un
        botón por profesional, con el color que lo identifica y resaltado cuando
        está activo. Al elegir uno, la grilla, los turnos ocupados del día y los
@@ -26,6 +31,11 @@
        GET /doctores/{id}/disponibilidad): no hay horarios fijos en el código.
        Un profesional sin rangos para ese día no ofrece bloques, y cada bloque
        se descarta si algún odontólogo ya tiene un turno vigente que se cruza.
+     * **Impresión de la agenda del día**: el botón «Imprimir» del panel usa la
+       fecha y el odontólogo elegidos, y cada columna de la vista semanal imprime
+       su propio día. La hoja A4 se arma en `#agenda-impresion` con todos los
+       turnos (también los cancelados, atenuados) y sus datos de contacto; el
+       `@media print` de styles.css oculta el resto del panel.
 
    Endpoints de la API usados (vía OdontoApp.api → fetch a /api/v1):
      GET    /turnos                          lectura (ya cargada por app.js)
@@ -50,15 +60,27 @@
      la de JavaScript: 0 = domingo … 6 = sábado. */
   const SLOT_MIN = 30;        // duración de cada bloque de disponibilidad
   const MAX_EVENTOS_DIA = 3;  // turnos dibujados en la celda antes del "+N"
+  const DIAS_VISTA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
   const MESES = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
   ];
+  const ESTADO_IMPRESION = {
+    PENDIENTE: { texto: "Pendiente", clase: "pendiente" },
+    CONFIRMADO: { texto: "Confirmado", clase: "confirmado" },
+    CANCELADO: { texto: "Cancelado", clase: "cancelado" },
+  };
+  const ICONO_IMPRESORA =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>' +
+    '<path d="M6 14h12v8H6z"/></svg>';
 
   /* ------------------------------- Estado -------------------------------- */
   const cal = {
     anio: 0,
     mes: 0,          // 0 = enero
+    vista: "mes",    // "mes" | "semana"
     filtro: "",      // "" = todos los odontólogos; "<doctor_id>" = sólo ese profesional
     tooltip: null,
   };
@@ -91,6 +113,31 @@
     return `${h}:${m}`;
   }
 
+  /* Lunes de la semana que contiene la fecha. La vista semanal siempre arranca
+     un lunes y termina el viernes: el fin de semana no se dibuja. */
+  function lunesDe(d) {
+    const c = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    return moverDias(c, -((c.getDay() + 6) % 7));
+  }
+  function semanaInicioDe(iso) {
+    return lunesDe(fechaDe(iso));
+  }
+  function tituloSemana(inicio) {
+    const fin = moverDias(inicio, 4);
+    if (inicio.getFullYear() !== fin.getFullYear()) {
+      return `${inicio.getDate()} de ${MESES[inicio.getMonth()]} de ${inicio.getFullYear()} ` +
+        `al ${fin.getDate()} de ${MESES[fin.getMonth()]} de ${fin.getFullYear()}`;
+    }
+    if (inicio.getMonth() !== fin.getMonth()) {
+      return `${inicio.getDate()} de ${MESES[inicio.getMonth()]} al ` +
+        `${fin.getDate()} de ${MESES[fin.getMonth()]} de ${fin.getFullYear()}`;
+    }
+    return `${inicio.getDate()} al ${fin.getDate()} de ${MESES[fin.getMonth()]} de ${fin.getFullYear()}`;
+  }
+  function fechaCortaSemana(fecha) {
+    return `${fecha.getDate()} ${MESES[fecha.getMonth()].slice(0, 3)}`;
+  }
+
   /* ---------------------------- Datos del sitio -------------------------- */
   function turnos() { return (app() && app().state.turnos) || []; }
   function doctores() { return (app() && app().state.doctores) || []; }
@@ -106,6 +153,75 @@
     return turnos()
       .filter((t) => app().parteFecha(t.fecha_hora_inicio) === iso)
       .sort((a, b) => a.fecha_hora_inicio.localeCompare(b.fecha_hora_inicio));
+  }
+  function doctorPorId(id) {
+    return doctores().find((d) => String(d.id) === String(id)) || null;
+  }
+  function pacientePorId(id) {
+    const A = app();
+    return (A && A.state && A.state.pacientes || []).find(
+      (p) => String(p.id) === String(id)
+    ) || null;
+  }
+
+  /* Todos los turnos del odontólogo filtrado entre el lunes y el viernes de la
+     fecha seleccionada. La vista semanal nunca mezcla profesionales: si no hay
+     filtro se elige automáticamente el primer odontólogo activo. */
+  function turnosSemana() {
+    if (!cal.filtro) return [];
+    const inicio = semanaInicioDe(fechaSeleccionada());
+    const desde = isoDe(inicio);
+    const hasta = isoDe(moverDias(inicio, 4));
+    return turnos()
+      .filter(function (t) {
+        const dia = app().parteFecha(t.fecha_hora_inicio);
+        return String(t.doctor_id) === String(cal.filtro) && dia >= desde && dia <= hasta;
+      })
+      .sort((a, b) => a.fecha_hora_inicio.localeCompare(b.fecha_hora_inicio));
+  }
+
+  function asegurarDoctorSemana() {
+    if (cal.vista !== "semana") return;
+    const activos = doctoresActivos();
+    if (!activos.length) {
+      cal.filtro = "";
+      const A = app();
+      if (A && A.state.agendaDoctor) {
+        A.state.agendaDoctor = "";
+        if (typeof A.renderAgenda === "function") A.renderAgenda();
+      }
+      return;
+    }
+    if (!cal.filtro || !activos.some((d) => String(d.id) === String(cal.filtro))) {
+      cal.filtro = String(activos[0].id);
+      const A = app();
+      if (A) {
+        A.state.agendaDoctor = cal.filtro;
+        if (typeof A.renderAgenda === "function") A.renderAgenda();
+      }
+    }
+  }
+
+  function renderSemanaDoctorSelect() {
+    const A = app();
+    const select = $id("cal-semana-doctor");
+    if (!A || !select) return;
+    const activos = doctoresActivos();
+
+    if (!activos.length) {
+      select.innerHTML = `<option value="">Sin odontólogos activos</option>`;
+      select.disabled = true;
+      return;
+    }
+
+    select.disabled = false;
+    select.innerHTML = activos
+      .map(function (d) {
+        const esp = d.especialidad ? ` · ${A.esc(d.especialidad)}` : "";
+        return `<option value="${d.id}">${A.esc(d.nombre)}${esp}</option>`;
+      })
+      .join("");
+    select.value = cal.filtro;
   }
 
   /* ------------------------- Agenda de los médicos ------------------------ */
@@ -402,6 +518,419 @@
       .join("");
 
     cont.innerHTML = html;
+  }
+
+  /* --------------------------- Modo de vista ---------------------------- */
+  /* «Mes» y «Semana» comparten la barra superior. En la vista semanal se
+     esconde la grilla mensual y se muestra el tablero lunes-viernes; el panel
+     del día sigue disponible para editar, cancelar o cobrar el turno elegido. */
+  function aplicarModoVista() {
+    const semana = cal.vista === "semana";
+    const mesPanel = $id("cal-mes-panel");
+    const semanaPanel = $id("cal-semana-panel");
+    const leyenda = $id("cal-leyenda");
+    const doctorWrap = $id("cal-semana-doctor-wrap");
+
+    if (mesPanel) mesPanel.classList.toggle("hide", semana);
+    if (semanaPanel) semanaPanel.classList.toggle("hide", !semana);
+    if (leyenda) leyenda.classList.toggle("hide", semana);
+    if (doctorWrap) doctorWrap.classList.toggle("hide", !semana);
+
+    document.querySelectorAll("[data-cal-vista]").forEach(function (btn) {
+      const activo = btn.dataset.calVista === cal.vista;
+      btn.classList.toggle("activo", activo);
+      btn.setAttribute("aria-pressed", activo ? "true" : "false");
+    });
+
+    /* La vista semanal siempre muestra un solo odontólogo: en el selector del
+       panel del día se oculta «Todos» para no romper esa regla. */
+    const doctorDia = $id("agenda-doctor");
+    if (doctorDia && doctorDia.options.length > 1) {
+      doctorDia.options[0].hidden = semana;
+    }
+  }
+
+  function resumenTurnos(lista) {
+    const total = lista.length;
+    const cancelados = lista.filter((t) => t.estado_turno === "CANCELADO").length;
+    return (
+      `${total} turno${total === 1 ? "" : "s"}` +
+      (cancelados ? ` · ${cancelados} cancelado${cancelados === 1 ? "" : "s"}` : "")
+    );
+  }
+
+  function renderCabecera() {
+    const A = app();
+    if (!A) return;
+    const titulo = $id("cal-mes-titulo");
+    const sub = $id("cal-mes-sub");
+    const resumen = $id("cal-resumen");
+    const prev = $id("cal-prev");
+    const next = $id("cal-next");
+    const hoy = $id("cal-hoy");
+    const semana = cal.vista === "semana";
+
+    if (semana) {
+      const inicio = semanaInicioDe(fechaSeleccionada());
+      const doctor = doctorFiltrado();
+      if (titulo) titulo.textContent = tituloSemana(inicio);
+      if (sub) {
+        sub.textContent = doctor
+          ? `Semana de ${doctor.nombre} · lunes a viernes`
+          : "Elegí un odontólogo para ver su semana";
+      }
+      if (resumen) resumen.textContent = resumenTurnos(turnosSemana());
+      if (prev) {
+        prev.title = "Semana anterior";
+        prev.setAttribute("aria-label", "Semana anterior");
+      }
+      if (next) {
+        next.title = "Semana siguiente";
+        next.setAttribute("aria-label", "Semana siguiente");
+      }
+      if (hoy) hoy.textContent = "Semana actual";
+      return;
+    }
+
+    if (titulo) titulo.textContent = `${MESES[cal.mes]} de ${cal.anio}`;
+
+    const clave = `${cal.anio}-${String(cal.mes + 1).padStart(2, "0")}`;
+    const delMes = filtrados(turnos()).filter(
+      (t) => A.parteFecha(t.fecha_hora_inicio).slice(0, 7) === clave
+    );
+    if (resumen) resumen.textContent = resumenTurnos(delMes);
+
+    const doctor = doctorFiltrado();
+    if (sub) {
+      sub.textContent = doctor
+        ? `Mostrando sólo los turnos de ${doctor.nombre}`
+        : "Turnos del mes por odontólogo";
+    }
+    if (prev) {
+      prev.title = "Mes anterior";
+      prev.setAttribute("aria-label", "Mes anterior");
+    }
+    if (next) {
+      next.title = "Mes siguiente";
+      next.setAttribute("aria-label", "Mes siguiente");
+    }
+    if (hoy) hoy.textContent = "Mes actual";
+  }
+
+  /* --------------------------- Vista semanal ----------------------------- */
+  function tarjetaSemana(t) {
+    const A = app();
+    const paciente = A.nombrePaciente(t.paciente_id);
+    const color = A.colorDe(t.doctor_id);
+    const cancelado = t.estado_turno === "CANCELADO";
+    const confirmado = t.estado_turno === "CONFIRMADO";
+    const dur = A.duracionTexto(t.fecha_hora_inicio, t.fecha_hora_fin);
+    let clases = "cal-semana-turno";
+    if (confirmado) clases += " confirmado";
+    if (cancelado) clases += " cancelado";
+    const borde = confirmado ? "#15803d" : cancelado ? "#cbd5e1" : color;
+
+    const alterno = cancelado
+      ? `<button type="button" class="cal-semana-accion" data-reactivar-turno="${t.id}">Reactivar</button>`
+      : `<button type="button" class="cal-semana-accion cal-semana-accion-peligro" data-cancelar-turno="${t.id}">Cancelar</button>`;
+    const confirmar =
+      t.estado_turno === "PENDIENTE"
+        ? `<button type="button" class="cal-semana-accion" data-confirmar-turno="${t.id}">Confirmar</button>`
+        : "";
+
+    return (
+      `<article class="${clases}" data-semana-turno="${t.id}" style="border-left-color:${borde}">` +
+      `<button type="button" class="cal-semana-turno-info" data-ver-turno="${t.id}" ` +
+      `title="Ver ${A.esc(paciente)} en el panel del día">` +
+      `<span class="cal-semana-hora">${A.esc(A.parteHora(t.fecha_hora_inicio))}` +
+      `<small>${A.esc(A.parteHora(t.fecha_hora_fin))}${dur ? ` · ${A.esc(dur)}` : ""}</small></span>` +
+      `<span class="cal-semana-paciente">${A.esc(paciente)}</span>` +
+      `<span class="cal-semana-badges">${A.badgeTurno(t.estado_turno)}${A.badgeWhatsApp(t)}</span>` +
+      `</button>` +
+      `<div class="cal-semana-acciones">` +
+      `<button type="button" class="cal-semana-accion" data-editar-turno="${t.id}">Editar</button>` +
+      confirmar +
+      `<button type="button" class="cal-semana-accion" data-cobrar-turno="${t.id}">Cobrar</button>` +
+      alterno +
+      `</div></article>`
+    );
+  }
+
+  function renderSemana() {
+    const A = app();
+    const grid = $id("cal-semana-grid");
+    if (!A || !grid) return;
+
+    asegurarDoctorSemana();
+    renderSemanaDoctorSelect();
+    const doctor = doctorFiltrado();
+    if (!doctor) {
+      grid.innerHTML = A.vacio(
+        "Elegí un odontólogo",
+        "La vista semanal muestra la agenda de un solo profesional."
+      );
+      return;
+    }
+
+    const inicio = semanaInicioDe(fechaSeleccionada());
+    const mapa = {};
+    turnosSemana().forEach(function (t) {
+      const iso = A.parteFecha(t.fecha_hora_inicio);
+      (mapa[iso] = mapa[iso] || []).push(t);
+    });
+
+    const hoy = isoDe(new Date());
+    const seleccionado = fechaSeleccionada();
+    let html = "";
+    for (let i = 0; i < DIAS_VISTA.length; i += 1) {
+      const fecha = moverDias(inicio, i);
+      const iso = isoDe(fecha);
+      const lista = mapa[iso] || [];
+      const clases = ["cal-semana-dia"];
+      if (iso === hoy) clases.push("hoy");
+      if (iso === seleccionado) clases.push("seleccionado");
+      const conteo =
+        `${lista.length} turno${lista.length === 1 ? "" : "s"}`;
+      const etiquetaImpresion = `Imprimir la agenda del ${A.fechaLarga(iso)}`;
+
+      html +=
+        `<section class="${clases.join(" ")}" data-semana-dia="${iso}" ` +
+        `aria-label="${A.esc(DIAS_VISTA[i])} ${A.esc(A.fechaLarga(iso))}: ${A.esc(conteo)}">` +
+        `<header class="cal-semana-cabecera">` +
+        `<div><p class="cal-semana-dia-nombre">${A.esc(DIAS_VISTA[i])}</p>` +
+        `<p class="cal-semana-dia-fecha">${A.esc(fechaCortaSemana(fecha))}</p></div>` +
+        `<div class="cal-semana-cabecera-acciones">` +
+        `<span class="cal-semana-conteo">${lista.length}</span>` +
+        `<button type="button" class="cal-semana-imprimir" data-imprimir-dia="${iso}" ` +
+        `title="${A.esc(etiquetaImpresion)}" aria-label="${A.esc(etiquetaImpresion)}">` +
+        ICONO_IMPRESORA + `</button>` +
+        `</div>` +
+        `</header>` +
+        `<div class="cal-semana-lista">` +
+        (lista.length
+          ? lista.map(tarjetaSemana).join("")
+          : `<p class="cal-semana-vacio">Sin turnos</p>`) +
+        `</div></section>`;
+    }
+    grid.innerHTML = html;
+
+    /* El selector del panel del día y el de la semana son la misma agenda: se
+       sincronizan acá por si el odontólogo se eligió automáticamente. */
+    if (A.state.agendaDoctor !== cal.filtro) {
+      A.state.agendaDoctor = cal.filtro;
+      if (typeof A.renderAgenda === "function") A.renderAgenda();
+    }
+    const doctorDia = $id("agenda-doctor");
+    if (doctorDia && doctorDia.value !== cal.filtro) doctorDia.value = cal.filtro;
+  }
+
+  /* ------------------- Impresión de la agenda del día -------------------- */
+  /* La hoja se arma siempre con la fecha que se está imprimiendo y el filtro
+     recibido por parámetro: el botón del panel usa la fecha y el odontólogo
+     elegidos, y cada columna de la vista semanal pasa su propio día. */
+  function resumenEstados(lista) {
+    const confirmados = lista.filter((t) => t.estado_turno === "CONFIRMADO").length;
+    const pendientes = lista.filter((t) => t.estado_turno === "PENDIENTE").length;
+    const cancelados = lista.filter((t) => t.estado_turno === "CANCELADO").length;
+    const partes = [];
+    if (confirmados) partes.push(`${confirmados} confirmado${confirmados === 1 ? "" : "s"}`);
+    if (pendientes) partes.push(`${pendientes} pendiente${pendientes === 1 ? "" : "s"}`);
+    if (cancelados) partes.push(`${cancelados} cancelado${cancelados === 1 ? "" : "s"}`);
+    return partes.length ? partes.join(" · ") : "Sin turnos";
+  }
+
+  function gruposImpresion(iso, filtro) {
+    const A = app();
+    const todos = turnosDelDia(iso);
+    if (filtro) {
+      const propios = todos.filter((t) => String(t.doctor_id) === String(filtro));
+      const doctor = doctorPorId(filtro) || {
+        id: filtro,
+        nombre: A.nombreDoctor(filtro),
+        especialidad: "",
+      };
+      return [{ doctor: doctor, turnos: propios }];
+    }
+
+    const grupos = [];
+    doctores().forEach(function (d) {
+      const propios = todos.filter((t) => String(t.doctor_id) === String(d.id));
+      if (propios.length) grupos.push({ doctor: d, turnos: propios });
+    });
+    // Turnos de un profesional dado de baja que todavía tiene agenda: no se
+    // pierden al imprimir, aunque ya no esté en el selector.
+    todos.forEach(function (t) {
+      const id = String(t.doctor_id);
+      if (grupos.some((g) => String(g.doctor.id) === id)) return;
+      const doctor = doctorPorId(id) || {
+        id: t.doctor_id,
+        nombre: A.nombreDoctor(t.doctor_id),
+        especialidad: "",
+      };
+      grupos.push({
+        doctor: doctor,
+        turnos: todos.filter((x) => String(x.doctor_id) === id),
+      });
+    });
+    return grupos;
+  }
+
+  function filaImpresion(t) {
+    const A = app();
+    const paciente = pacientePorId(t.paciente_id);
+    const nombre = paciente ? paciente.nombre : A.nombrePaciente(t.paciente_id);
+    const dni = paciente && paciente.dni ? paciente.dni : "—";
+    const telefono = paciente && paciente.telefono ? paciente.telefono : "—";
+    const obra = paciente
+      ? (paciente.obra_social ||
+          (paciente.obra_social_id ? A.nombreObraSocial(paciente.obra_social_id) : ""))
+      : "";
+    const afiliado =
+      paciente && paciente.numero_afiliado
+        ? `<small>Nº ${A.esc(paciente.numero_afiliado)}</small>`
+        : "";
+    const edad =
+      paciente && paciente.edad !== null && paciente.edad !== undefined
+        ? `<small>${A.esc(paciente.edad)} años</small>`
+        : "";
+    const duracion = A.duracionTexto(t.fecha_hora_inicio, t.fecha_hora_fin);
+    const estado =
+      ESTADO_IMPRESION[t.estado_turno] ||
+      { texto: t.estado_turno || "—", clase: "pendiente" };
+    const cancelado = t.estado_turno === "CANCELADO" ? " cancelado" : "";
+
+    return (
+      `<tr class="agenda-impresion-fila${cancelado}">` +
+      `<td><strong>${A.esc(A.parteHora(t.fecha_hora_inicio))}</strong>` +
+      (duracion ? `<small>${A.esc(duracion)}</small>` : "") +
+      `</td>` +
+      `<td><strong>${A.esc(nombre)}</strong>${edad}</td>` +
+      `<td>${A.esc(dni)}</td>` +
+      `<td>${A.esc(telefono)}</td>` +
+      `<td>${obra ? `<strong>${A.esc(obra)}</strong>` : `<span class="agenda-impresion-tenue">—</span>`}` +
+      `${afiliado}</td>` +
+      `<td><span class="agenda-impresion-estado ${estado.clase}">${A.esc(estado.texto)}</span></td>` +
+      `</tr>`
+    );
+  }
+
+  function bloqueImpresion(grupo) {
+    const A = app();
+    const doctor = grupo.doctor || {};
+    const total = grupo.turnos.length;
+    const detalle = [
+      doctor.especialidad || "",
+      resumenEstados(grupo.turnos),
+    ].filter(Boolean).join(" · ");
+
+    return (
+      `<section class="agenda-impresion-bloque">` +
+      `<header class="agenda-impresion-bloque-cab">` +
+      `<div><h2>${A.esc(doctor.nombre || "Odontólogo")}</h2>` +
+      `<p>${A.esc(detalle)}</p></div>` +
+      `<span class="agenda-impresion-bloque-total">${total} turno${total === 1 ? "" : "s"}</span>` +
+      `</header>` +
+      (total
+        ? `<table class="agenda-impresion-tabla">` +
+          `<thead><tr><th>Hora</th><th>Paciente</th><th>DNI</th>` +
+          `<th>Teléfono</th><th>Cobertura</th><th>Estado</th></tr></thead>` +
+          `<tbody>${grupo.turnos.map(filaImpresion).join("")}</tbody></table>`
+        : `<p class="agenda-impresion-vacio">Sin turnos agendados para este profesional.</p>`) +
+      `</section>`
+    );
+  }
+
+  function documentoImpresion(iso, filtro) {
+    const A = app();
+    if (!A) return "";
+
+    const grupos = gruposImpresion(iso, filtro);
+    const total = grupos.reduce((suma, g) => suma + g.turnos.length, 0);
+    const cancelados = grupos.reduce(
+      (suma, g) => suma + g.turnos.filter((t) => t.estado_turno === "CANCELADO").length,
+      0
+    );
+    const doctor = filtro ? doctorPorId(filtro) : null;
+    const profesional = filtro
+      ? (doctor
+          ? `${doctor.nombre}${doctor.especialidad ? ` · ${doctor.especialidad}` : ""}`
+          : `Odontólogo #${filtro}`)
+      : "Todos los odontólogos";
+    const emitido = new Date().toLocaleString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const nota = cancelados
+      ? `<p class="agenda-impresion-nota">Los turnos cancelados se muestran atenuados y ` +
+        `siguen en la hoja para conservar el historial del día.</p>`
+      : "";
+    const bloques = grupos.length
+      ? grupos.map(bloqueImpresion).join("")
+      : `<p class="agenda-impresion-vacio">No hay turnos agendados para esta fecha` +
+        `${filtro ? " con el profesional seleccionado" : ""}.</p>`;
+
+    return (
+      `<header class="agenda-impresion-cab">` +
+      `<div class="agenda-impresion-marca">` +
+      `<svg class="agenda-impresion-logo" viewBox="0 0 140 180" role="img" aria-label="Franciosi Odontología">` +
+      `<g fill="none" stroke="#c99a96" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">` +
+      `<path d="M66 47C66 24 80 9 101 9c15 0 27 8 27 21 0 8-4 14-11 15"/>` +
+      `<path d="M66 47v99"/><path d="M42 154c14 0 23-6 26-16v16h26"/></g>` +
+      `<circle cx="117" cy="45" r="9" fill="#c99a96"/>` +
+      `<circle cx="101" cy="103" r="9" fill="#c99a96"/></svg>` +
+      `<div><p class="agenda-impresion-clinica">Franciosi Odontología</p>` +
+      `<p class="agenda-impresion-lema">Agenda diaria del consultorio</p></div></div>` +
+      `<div class="agenda-impresion-emitido"><span>Emitido</span>` +
+      `<strong>${A.esc(emitido)}</strong></div>` +
+      `</header>` +
+      `<section class="agenda-impresion-titulo">` +
+      `<div><p class="agenda-impresion-kicker">Agenda del día</p>` +
+      `<h1>${A.esc(A.fechaLarga(iso))}</h1>` +
+      `<p class="agenda-impresion-profesional">${A.esc(profesional)}</p></div>` +
+      `<div class="agenda-impresion-total"><strong>${total}</strong>` +
+      `<span>turno${total === 1 ? "" : "s"}</span></div>` +
+      `</section>` +
+      nota +
+      `<div class="agenda-impresion-bloques">${bloques}</div>` +
+      `<footer class="agenda-impresion-pie">` +
+      `<span>Panel Principal · Franciosi Odontología</span>` +
+      `<span>Agenda generada el ${A.esc(emitido)}</span>` +
+      `</footer>` +
+      `<div class="agenda-impresion-firma"><span>Firma y sello</span></div>`
+    );
+  }
+
+  function imprimirDia(iso, filtro) {
+    const A = app();
+    if (!A) return;
+    const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(iso || ""))
+      ? String(iso)
+      : fechaSeleccionada();
+    const doctorId = filtro === null || filtro === undefined ? "" : String(filtro);
+
+    let hoja = $id("agenda-impresion");
+    if (!hoja) {
+      hoja = document.createElement("div");
+      hoja.id = "agenda-impresion";
+      hoja.className = "agenda-impresion";
+      hoja.setAttribute("aria-hidden", "true");
+      document.body.appendChild(hoja);
+    }
+    hoja.innerHTML = documentoImpresion(fecha, doctorId);
+
+    // El nombre que el navegador propone para el PDF sale del <title>.
+    const tituloOriginal = document.title;
+    const doctor = doctorId ? doctorPorId(doctorId) : null;
+    document.title =
+      `Agenda ${doctor ? `de ${doctor.nombre}` : "del día"} · ${fecha}`;
+    const restaurarTitulo = function () { document.title = tituloOriginal; };
+    window.addEventListener("afterprint", restaurarTitulo, { once: true });
+
+    ocultarTooltip();
+    window.print();
   }
 
   function renderCalendario() {
@@ -705,11 +1234,16 @@
      así el calendario y la lista de turnos de app.js quedan siempre iguales. */
   function render() {
     if (!app()) return;
+    asegurarDoctorSemana();
+    aplicarModoVista();
     const d = fechaDe(fechaSeleccionada());
     cal.anio = d.getFullYear();
     cal.mes = d.getMonth();
     renderCalendario();
+    asegurarDoctorSemana();
+    renderSemana();
     renderDisponibles();
+    renderCabecera();
   }
 
   function seleccionarDia(iso) {
@@ -718,11 +1252,7 @@
     ocultarTooltip();
     A.state.agendaFecha = iso;
     if (typeof A.renderAgenda === "function") A.renderAgenda();
-    const d = fechaDe(iso);
-    cal.anio = d.getFullYear();
-    cal.mes = d.getMonth();
-    renderCalendario();
-    renderDisponibles();
+    render();
   }
 
   function moverMes(n) {
@@ -731,9 +1261,35 @@
     cal.mes = d.getMonth();
     ocultarTooltip();
     renderCalendario();
+    renderCabecera();
+  }
+
+  /* La barra superior mueve el período activo: un mes o una semana completa.
+     En la vista semanal se mueve también el día seleccionado para que el panel
+     inferior siga mostrando una fecha de la semana visible. */
+  function moverPeriodo(n) {
+    if (cal.vista === "semana") {
+      seleccionarDia(isoDe(moverDias(fechaDe(fechaSeleccionada()), n * 7)));
+      return;
+    }
+    moverMes(n);
+  }
+
+  function moverSemana(n) {
+    if (cal.vista !== "semana") return;
+    seleccionarDia(isoDe(moverDias(fechaDe(fechaSeleccionada()), n * 7)));
   }
 
   function irAlMesActual() { seleccionarDia(isoDe(new Date())); }
+
+  function cambiarVistaCalendario(vista) {
+    const nueva = vista === "semana" ? "semana" : "mes";
+    if (cal.vista === nueva) return;
+    cal.vista = nueva;
+    ocultarTooltip();
+    if (nueva === "semana") asegurarDoctorSemana();
+    render();
+  }
 
   /* -------------------- Filtro por odontólogo (chips) -------------------- */
   /* `cal.filtro` es la única fuente de verdad: los chips de la leyenda y el
@@ -741,7 +1297,16 @@
      desde acá, y los tres paneles del calendario se redibujan en consecuencia. */
   function cambiarFiltro(id) {
     const A = app();
-    cal.filtro = id ? String(id) : "";
+    let valor = id ? String(id) : "";
+    const activos = doctoresActivos();
+
+    /* La vista semanal es siempre de UN odontólogo: si no hay selección (o el
+       profesional ya no está activo) se elige el primero disponible. */
+    if (cal.vista === "semana" && (!valor || !activos.some((d) => String(d.id) === valor))) {
+      valor = activos.length ? String(activos[0].id) : "";
+    }
+
+    cal.filtro = valor;
     if (A) {
       A.state.agendaDoctor = cal.filtro;
       const select = $id("agenda-doctor");
@@ -749,8 +1314,7 @@
       if (typeof A.renderAgenda === "function") A.renderAgenda();
     }
     ocultarTooltip();
-    renderCalendario();
-    renderDisponibles();
+    render();
   }
 
   /* ------------------ Acciones sobre turnos (PATCH /turnos) -------------- */
@@ -844,6 +1408,10 @@
     A.state.turnoEditId = t.id;
     const guardar = $id("modal-turno-save");
     if (guardar) guardar.textContent = "Guardar cambios";
+    // El aviso de paciente MALO depende del paciente precargado.
+    if (typeof A.actualizarAlertaPacienteTurno === "function") {
+      A.actualizarAlertaPacienteTurno();
+    }
   }
 
   function agendarEnSlot(hora, doctorId) {
@@ -871,6 +1439,9 @@
 
     const guardar = $id("modal-turno-save");
     if (guardar) guardar.textContent = "Guardar turno";
+    if (typeof A.actualizarAlertaPacienteTurno === "function") {
+      A.actualizarAlertaPacienteTurno();
+    }
     const pac = $id("turno-paciente");
     if (pac && pac.focus) pac.focus();
   }
@@ -913,7 +1484,50 @@
     });
   }
 
+  function eventosSemana() {
+    const grid = $id("cal-semana-grid");
+    if (!grid) return;
+
+    grid.addEventListener("click", function (e) {
+      const ver = e.target.closest("[data-ver-turno]");
+      if (ver) {
+        const t = turnoPorId(ver.dataset.verTurno);
+        if (t) seleccionarDia(app().parteFecha(t.fecha_hora_inicio));
+        return;
+      }
+      // Los botones de acción (editar/cancelar/cobrar) los resuelve la
+      // delegación global; el resto de la tarjeta sólo selecciona el día.
+      if (e.target.closest("button")) return;
+      const dia = e.target.closest("[data-semana-dia]");
+      if (dia) seleccionarDia(dia.dataset.semanaDia);
+    });
+  }
+
   function eventosPanel() {
+    document.querySelectorAll("[data-cal-vista]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        cambiarVistaCalendario(btn.dataset.calVista);
+      });
+    });
+
+    const semanaDoctor = $id("cal-semana-doctor");
+    if (semanaDoctor) {
+      semanaDoctor.addEventListener("change", function () {
+        cambiarFiltro(semanaDoctor.value);
+      });
+    }
+
+    const imprimirPanel = $id("agenda-imprimir");
+    if (imprimirPanel) {
+      imprimirPanel.addEventListener("click", function () {
+        const select = $id("agenda-doctor");
+        const filtro = select
+          ? select.value
+          : (app() && app().state.agendaDoctor) || cal.filtro;
+        imprimirDia(fechaSeleccionada(), filtro);
+      });
+    }
+
     const leyenda = $id("cal-leyenda");
     if (leyenda) {
       leyenda.addEventListener("click", function (e) {
@@ -962,6 +1576,10 @@
       if (reactivar) { cambiarEstado(reactivar.dataset.reactivarTurno, "PENDIENTE", "Reactivar"); return; }
       const confirmar = e.target.closest("[data-confirmar-turno]");
       if (confirmar) confirmarAsistencia(confirmar.dataset.confirmarTurno);
+      const imprimir = e.target.closest("[data-imprimir-dia]");
+      if (imprimir) {
+        imprimirDia(imprimir.dataset.imprimirDia, cal.filtro);
+      }
     });
   }
 
@@ -995,14 +1613,15 @@
     cal.mes = hoy.getMonth();
 
     eventosGrilla();
+    eventosSemana();
     eventosPanel();
     eventosAcciones();
     eventosSincronizacion();
 
     const prev = $id("cal-prev");
-    if (prev) prev.addEventListener("click", function () { moverMes(-1); });
+    if (prev) prev.addEventListener("click", function () { moverPeriodo(-1); });
     const next = $id("cal-next");
-    if (next) next.addEventListener("click", function () { moverMes(1); });
+    if (next) next.addEventListener("click", function () { moverPeriodo(1); });
     const mesHoy = $id("cal-hoy");
     if (mesHoy) mesHoy.addEventListener("click", irAlMesActual);
 
@@ -1027,14 +1646,23 @@
     iniciar: iniciar,
     render: render,
     renderCalendario: renderCalendario,
+    renderSemana: renderSemana,
     renderDisponibles: renderDisponibles,
     seleccionarDia: seleccionarDia,
     irAlMesActual: irAlMesActual,
     moverMes: moverMes,
+    moverSemana: moverSemana,
+    moverPeriodo: moverPeriodo,
+    cambiarVista: cambiarVistaCalendario,
     cambiarFiltro: cambiarFiltro,
     filtroActual: function () { return cal.filtro; },
+    vistaActual: function () { return cal.vista; },
     abrirEdicion: abrirEdicion,
     cambiarEstado: cambiarEstado,
+    // Impresión de la agenda: el panel imprime la fecha/odontólogo elegidos y
+    // cada columna de la semana imprime su propio día.
+    imprimirDia: imprimirDia,
+    documentoImpresion: documentoImpresion,
     // Disponibilidad configurada (la agenda semanal vive en el backend; app.js
     // la cachea y este módulo sólo la lee para armar los bloques del día).
     rangosDe: rangosDe,

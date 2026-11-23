@@ -41,9 +41,18 @@ y no escribe nada.
 
 Uso (desde la raíz del proyecto, con el venv activo)::
 
-    python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://usuario:clave@ep-xxx.sa-east-1.aws.neon.tech/neondb?sslmode=require"
-    python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://..." --ejecutar
-    python -m scripts.migrar_sqlite_a_postgres --destino "postgresql://..." --modo agregar --ejecutar
+    python -m scripts.migrar_sqlite_a_postgres --origen sqlite:///./odontologico.db --destino "postgresql://usuario:clave@ep-xxx.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+    python -m scripts.migrar_sqlite_a_postgres --origen sqlite:///./odontologico.db --destino "postgresql://..." --ejecutar
+    python -m scripts.migrar_sqlite_a_postgres --origen sqlite:///./odontologico.db --destino "postgresql://..." --modo agregar --ejecutar
+
+También acepta la forma directa (el script agrega la raíz del proyecto al
+``sys.path`` para poder importar ``app``)::
+
+    python scripts/migrar_sqlite_a_postgres.py --origen sqlite:///./odontologico.db --ejecutar
+
+Cuando ``DATABASE_URL`` ya apunta a PostgreSQL, el origen hay que indicarlo con
+``--origen``: si no, ``settings.database_url`` (el origen por defecto) sería la
+misma base que el destino y el script aborta para no copiar sobre sí mismo.
 
 La cadena también se puede dejar en el ``.env`` local como ``DATABASE_URL_DESTINO``
 (ignorado por git) para no pegar el secreto en la línea de comandos::
@@ -62,7 +71,17 @@ que en Neon es UTC, de modo que el instante se conserva.
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# Permite ejecutar el script también como archivo
+# (``python scripts/migrar_sqlite_a_postgres.py``): en ese caso ``sys.path[0]``
+# es ``scripts/`` y ``from app.core.config import settings`` fallaría con
+# ``ModuleNotFoundError: No module named 'app'``. Con el bootstrap, ambas formas
+# (``-m scripts...`` y ruta directa) funcionan desde la raíz del proyecto.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import Engine, create_engine, delete, func, inspect, select
 from sqlalchemy.orm import Session, sessionmaker

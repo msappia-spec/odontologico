@@ -1,17 +1,17 @@
-"""Servicio de WhatsApp: envío saliente (recordatorios y respuestas del bot) y
-procesamiento del webhook.
+"""Servicio de WhatsApp sobre WAHA (WhatsApp HTTP API).
 
-Contiene tres responsabilidades claramente separadas:
+Contiene tres responsabilidades separadas:
 
 1. **Envío saliente** de recordatorios (tarea programada), que se puede
-   *simular* o *ejecutar* contra la WhatsApp Cloud API según configuración.
+   *simular* o *ejecutar* con ``POST {WAHA_URL}/api/sendText``.
 2. **Envío saliente de texto libre** (``enviar_mensaje_texto``), que reutiliza el
    FAQ Bot (``whatsapp_bot_service``) para contestar los mensajes del paciente.
-3. **Procesamiento entrante** del webhook con la respuesta de botón del
-   paciente, que actualiza el estado del turno.
+3. **Lectura del webhook** de WAHA: extrae el teléfono y el texto y los deriva
+   al bot, que decide si es una confirmación de turno o una opción del menú.
 """
 
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
@@ -21,21 +21,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.anamnesis_token import construir_enlace_anamnesis
-from app.core.config import URL_WHATSAPP_POR_DEFECTO, settings
+from app.core.config import settings
 from app.core.datetime_utils import rango_del_dia, to_naive_utc, utcnow
-from app.core.exceptions import (
-    RespuestaWebhookInvalidaError,
-    TurnoNoEncontradoError,
-    WhatsAppEnvioError,
-)
+from app.core.exceptions import WhatsAppEnvioError
 # Formato de teléfonos, fechas y enlaces wa.me: vive en ``app/core`` para que el
 # servicio de anamnesis también lo use. Se reexporta acá para no romper los
 # imports históricos (``from app.services.whatsapp_service import ...``).
 from app.core.whatsapp_utils import (  # noqa: F401
     DIAS_SEMANA,
     MESES,
+    construir_chat_id_waha,
     construir_enlace_click_to_chat,
     formatear_fecha_recordatorio,
+    normalizar_telefono_waha,
     normalizar_telefono_whatsapp,
     profesional_con_articulo,
     solo_digitos,
@@ -49,21 +47,16 @@ from app.schemas.whatsapp import (
     RecordatorioEnviado,
     RecordatorioPendiente,
     RecordatorioResultado,
-    WhatsAppButtonReply,
-    WhatsAppInboundMessage,
-    WhatsAppWebhookPayload,
+    WAHAWebhookPayload,
 )
+from app.services import whatsapp_conversacion_service
 from app.services.anamnesis_service import necesita_completar_anamnesis
 
 logger = logging.getLogger("app.services.whatsapp")
 
-# Mapeo "id (o título) del botón" -> nuevo estado del turno.
-BOTONES_ESTADO: dict[str, EstadoTurno] = {
-    "confirmar_turno": EstadoTurno.CONFIRMADO,
-    "confirmar": EstadoTurno.CONFIRMADO,
-    "cancelar_turno": EstadoTurno.CANCELADO,
-    "cancelar": EstadoTurno.CANCELADO,
-}
+#: Pausa antes de cada envío real. WAHA recomienda esperar para no saturar la
+#: sesión de WhatsApp y reducir el riesgo de bloqueos por ráfaga.
+PAUSA_ENVIO_WAHA = 1.5
 
 
 # ===========================================================================
@@ -102,110 +95,85 @@ def _agregar_enlace_anamnesis(texto: str, turno: Turno) -> str:
 
 
 def construir_payload_recordatorio(turno: Turno) -> dict:
-    """Arma el mensaje de plantilla para un recordatorio proactivo.
+    """Arma el mensaje de texto del recordatorio para WAHA.
 
-    Los mensajes libres o ``interactive`` sólo se permiten dentro de las 24 h
-    desde el último mensaje del paciente. Esta plantilla ``Utility`` aprobada
-    permite enviar el recordatorio aunque esa ventana ya haya vencido.
+    WAHA no usa plantillas ni botones: el recordatorio es texto libre con la
+    instrucción de responder ``1`` / ``si`` para confirmar o ``2`` / ``no`` para
+    cancelar. El teléfono se normaliza al formato argentino ``549...``.
     """
-    nombre = turno.paciente.nombre if turno.paciente else "paciente"
-    doctor = turno.doctor.nombre if turno.doctor else "su profesional"
-    inicio = turno.fecha_hora_inicio.strftime("%d/%m/%Y %H:%M")
-    enlace_anamnesis = _enlace_anamnesis_pendiente(turno)
-    indicacion_anamnesis = (
-        TEXTO_ANAMNESIS_PENDIENTE.format(enlace=enlace_anamnesis)
-        if enlace_anamnesis
-        else "No necesitás completar documentación previa para este turno."
-    )
+    telefono = turno.paciente.telefono if turno.paciente else ""
+    return construir_payload_texto(telefono, construir_mensaje_recordatorio(turno))
 
-    return {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": normalizar_telefono_whatsapp(
-            turno.paciente.telefono if turno.paciente else ""
-        ),
-        "type": "template",
-        "template": {
-            "name": settings.whatsapp_template_recordatorio,
-            "language": {"code": settings.whatsapp_template_idioma},
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [
-                        {"type": "text", "text": nombre},
-                        {"type": "text", "text": doctor},
-                        {"type": "text", "text": inicio},
-                        {"type": "text", "text": indicacion_anamnesis},
-                    ],
-                },
-                {
-                    "type": "button",
-                    "sub_type": "quick_reply",
-                    "index": "0",
-                    "parameters": [
-                        {"type": "payload", "payload": "confirmar_turno"}
-                    ],
-                },
-                {
-                    "type": "button",
-                    "sub_type": "quick_reply",
-                    "index": "1",
-                    "parameters": [
-                        {"type": "payload", "payload": "cancelar_turno"}
-                    ],
-                },
-            ],
-        },
-    }
+
+def _id_mensaje_waha(data: object) -> str:
+    """Extrae el identificador del mensaje de una respuesta de WAHA.
+
+    Según la versión, WAHA devuelve ``{"id": "..."}``, un objeto anidado en
+    ``_data`` o ``{"message": {"id": ...}}``. Si no viene ninguno se genera un
+    identificador local para no perder la trazabilidad del envío.
+    """
+    if isinstance(data, dict):
+        for contenedor in (data, data.get("message"), data.get("_data")):
+            if not isinstance(contenedor, dict):
+                continue
+            identificador = contenedor.get("id") or contenedor.get("messageId")
+            if isinstance(identificador, dict):
+                identificador = (
+                    identificador.get("_serialized") or identificador.get("id")
+                )
+            if identificador:
+                return str(identificador)
+    return f"waha.{uuid.uuid4().hex}"
+
+
+def _detalle_error_waha(respuesta: httpx.Response) -> str:
+    """Resume el error que devolvió WAHA (texto o JSON)."""
+    try:
+        data = respuesta.json()
+    except ValueError:
+        return (respuesta.text or "").strip() or "sin detalle"
+    if isinstance(data, dict):
+        error = data.get("error") or data.get("message") or data.get("detail")
+        if isinstance(error, dict):
+            error = error.get("message") or str(error)
+        if error:
+            return str(error)
+    return str(data)
 
 
 def _enviar_http_whatsapp(payload: dict) -> str:
-    """Envía el mensaje a la WhatsApp Cloud API y devuelve el ``wamid``."""
-    url = (
-        f"{(settings.whatsapp_api_url or URL_WHATSAPP_POR_DEFECTO).rstrip('/')}/"
-        f"{settings.whatsapp_phone_number_id}/messages"
-    )
+    """Envía el mensaje a WAHA con ``POST /api/sendText`` y devuelve su id."""
+    url = f"{settings.waha_url_base}/api/sendText"
     headers = {
-        "Authorization": f"Bearer {settings.whatsapp_access_token}",
+        "X-Api-Key": settings.waha_api_key or "",
         "Content-Type": "application/json",
     }
+
+    # WAHA recomienda espaciar los envíos para no saturar la sesión.
+    time.sleep(PAUSA_ENVIO_WAHA)
+
     try:
         respuesta = httpx.post(url, json=payload, headers=headers, timeout=10.0)
         respuesta.raise_for_status()
         data = respuesta.json()
-        return data["messages"][0]["id"]
     except httpx.HTTPStatusError as exc:
         respuesta_error = exc.response
-        try:
-            error_meta = respuesta_error.json().get("error", {})
-        except (ValueError, AttributeError):
-            error_meta = {}
-        codigo = error_meta.get("code", "sin código")
-        subcodigo = error_meta.get("error_subcode")
-        mensaje = error_meta.get("message") or respuesta_error.text or str(exc)
-        tipo_error = error_meta.get("type")
-        detalle_error = (error_meta.get("error_data") or {}).get("details")
-        fbtrace_id = error_meta.get("fbtrace_id")
-        detalle_subcodigo = f", subcode={subcodigo}" if subcodigo is not None else ""
-        detalle_tipo = f", type={tipo_error}" if tipo_error else ""
-        detalle_meta = f", details={detalle_error}" if detalle_error else ""
-        detalle_traza = f", fbtrace_id={fbtrace_id}" if fbtrace_id else ""
         raise WhatsAppEnvioError(
-            f"Meta rechazó el mensaje (HTTP {respuesta_error.status_code}, "
-            f"code={codigo}{detalle_subcodigo}{detalle_tipo}{detalle_meta}"
-            f"{detalle_traza}): {mensaje}"
+            f"WAHA rechazó el mensaje (HTTP {respuesta_error.status_code}): "
+            f"{_detalle_error_waha(respuesta_error)}"
         ) from exc
-    except (httpx.HTTPError, KeyError, ValueError) as exc:
-        raise WhatsAppEnvioError(f"Fallo el envío a WhatsApp: {exc}") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise WhatsAppEnvioError(f"Falló el envío a WAHA: {exc}") from exc
+
+    return _id_mensaje_waha(data)
 
 
 def _simular_http_whatsapp(payload: dict) -> str:
-    """Simula un ``POST`` HTTP a WhatsApp y devuelve un ``wamid`` ficticio."""
-    mensaje_id = f"wamid.SIMULADO.{uuid.uuid4().hex}"
+    """Simula un ``POST`` HTTP a WAHA y devuelve un identificador ficticio."""
+    mensaje_id = f"waha.SIMULADO.{uuid.uuid4().hex}"
     logger.info(
-        "SIMULACION HTTP POST WhatsApp -> to=%s | type=%s | message_id=%s",
-        payload.get("to"),
-        payload.get("type"),
+        "SIMULACIÓN HTTP POST WAHA /api/sendText -> chatId=%s | message_id=%s",
+        payload.get("chatId"),
         mensaje_id,
     )
     return mensaje_id
@@ -225,40 +193,39 @@ def enviar_mensaje_recordatorio(turno: Turno) -> str:
 def construir_payload_texto(
     telefono: str, texto: str, preview_url: bool = False
 ) -> dict:
-    """Arma el cuerpo JSON de un mensaje de **texto** saliente (``type`` = text).
+    """Arma el cuerpo JSON que espera ``POST /api/sendText`` de WAHA.
 
-    Es la forma más barata de contestarle al paciente: las respuestas del FAQ Bot
-    salen dentro de la *ventana de 24 horas* que abre su propio mensaje, así que
-    no requieren plantilla aprobada por Meta. ``preview_url`` queda en ``False``
-    por defecto para que WhatsApp no convierta en enlace la dirección del
-    consultorio; el envío de la ficha de salud pasa ``True`` porque ahí el enlace
-    es justamente lo que el paciente tiene que tocar.
+    El formato es el mínimo que documenta WAHA::
+
+        {"chatId": "549351...@c.us", "text": "mensaje", "session": "default"}
+
+    ``preview_url`` se mantiene en la firma por compatibilidad con el envío de la
+    ficha de salud, pero WAHA decide la vista previa del enlace por su cuenta.
     """
     return {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": telefono,
-        "type": "text",
-        "text": {"preview_url": preview_url, "body": texto},
+        "chatId": construir_chat_id_waha(telefono),
+        "text": texto,
+        "session": settings.waha_session,
     }
 
 
 def enviar_mensaje_texto(telefono: str, texto: str, preview_url: bool = False) -> str:
-    """Envía (o simula) un mensaje de texto al paciente y devuelve el ``wamid``.
+    """Envía (o simula) un mensaje de texto al paciente y devuelve su id.
 
-    Usa el envío **real** con ``httpx`` (``POST`` a la Graph API de Meta) cuando
-    están las credenciales (``WHATSAPP_TOKEN``/``WHATSAPP_ACCESS_TOKEN`` y
-    ``WHATSAPP_PHONE_NUMBER_ID``); si no, **simula** el ``POST`` y devuelve un
-    ``wamid`` ficticio, igual que los recordatorios. Es la función que usa el
+    Usa el envío **real** con ``httpx`` (``POST`` a ``{WAHA_URL}/api/sendText``)
+    cuando están configuradas ``WAHA_URL`` y ``WAHA_API_KEY``; si no, **simula**
+    el ``POST`` y devuelve un identificador ficticio. Es la función que usa el
     FAQ Bot (``whatsapp_bot_service``) para entregar sus respuestas.
 
-    :param preview_url: ``True`` para que WhatsApp arme la tarjeta de vista previa
-        del primer enlace del texto. Lo usa el envío de la ficha de salud; el bot
-        lo deja en ``False`` porque repite la dirección del consultorio.
+    :param preview_url: se conserva por compatibilidad; WAHA no recibe ese campo.
     """
     logger.info("Enviando WhatsApp (texto) a %s", telefono or "SIN_TELEFONO")
 
     payload = construir_payload_texto(telefono, texto, preview_url=preview_url)
+    if not payload["chatId"]:
+        raise WhatsAppEnvioError(
+            f"El teléfono {telefono!r} no tiene dígitos utilizables para WhatsApp."
+        )
     if settings.whatsapp_envio_real:
         return _enviar_http_whatsapp(payload)
     return _simular_http_whatsapp(payload)
@@ -288,6 +255,13 @@ def _procesar_envio_turno(db: Session, turno: Turno) -> RecordatorioEnviado:
     turno.estado_whatsapp = EstadoWhatsApp.ENVIADO
     turno.whatsapp_mensaje_id = mensaje_id
     db.commit()
+
+    # WAHA responde con texto libre: se guarda a qué turno corresponde para que
+    # el próximo "1" / "si" o "2" / "no" del paciente sepa qué confirmar.
+    telefono = turno.paciente.telefono if turno.paciente else ""
+    whatsapp_conversacion_service.marcar_confirmacion_pendiente(
+        db, telefono, turno.id, mensaje_id
+    )
     logger.info("Recordatorio enviado: turno id=%s mensaje_id=%s", turno.id, mensaje_id)
 
     return RecordatorioEnviado(
@@ -361,122 +335,76 @@ def enviar_recordatorios(
 # ===========================================================================
 
 
-def iterar_mensajes(payload: WhatsAppWebhookPayload):
-    """Recorre, en orden, los mensajes entrantes que trae el webhook."""
-    for entry in payload.entry:
-        for change in entry.changes:
-            for mensaje in change.value.messages or []:
-                yield mensaje
+def es_evento_de_mensaje(payload: WAHAWebhookPayload) -> bool:
+    """Indica si el evento de WAHA debe procesarse como mensaje del paciente.
 
+    Se descartan:
 
-def primer_mensaje(payload: WhatsAppWebhookPayload) -> Optional[WhatsAppInboundMessage]:
-    """Devuelve el primer mensaje entrante del payload (o ``None`` si no hay)."""
-    return next(iterar_mensajes(payload), None)
-
-
-def mensaje_de_texto(
-    payload: WhatsAppWebhookPayload,
-) -> Optional[WhatsAppInboundMessage]:
-    """Devuelve el primer mensaje de **texto** con cuerpo no vacío.
-
-    Es el disparador del FAQ Bot: un ``type: "text"`` con ``text.body`` es el
-    paciente escribiendo ("hola", "1", "¿atienden OSDE?"), mientras que un
-    ``type: "interactive"`` viene de los botones Confirmar/Cancelar.
+    * cualquier evento que no sea ``message`` (``session.status``, ``message.ack``
+      y el resto de los eventos de WAHA);
+    * los mensajes propios del consultorio (``fromMe``), para no responder al
+      bot con sus propias respuestas;
+    * los mensajes de grupos (``@g.us``) y de estados (``@broadcast``).
     """
-    for mensaje in iterar_mensajes(payload):
-        if mensaje.text and (mensaje.text.body or "").strip():
-            return mensaje
-    return None
+    if payload.event != "message" or payload.payload is None:
+        return False
+    if payload.payload.from_me:
+        return False
+    remitente = (payload.payload.from_ or "").strip().lower()
+    if not remitente:
+        return False
+    return not remitente.endswith(("@g.us", "@broadcast"))
 
 
-def _primer_mensaje_con_boton(payload: WhatsAppWebhookPayload) -> WhatsAppInboundMessage:
-    """Extrae el primer mensaje que contenga una respuesta de botón."""
-    for mensaje in iterar_mensajes(payload):
-        if mensaje.interactive and mensaje.interactive.button_reply:
-            return mensaje
-    raise RespuestaWebhookInvalidaError(
-        "El payload no contiene ninguna respuesta de botón (interactive.button_reply)."
-    )
+def telefono_de_chat(chat_id: Optional[str]) -> str:
+    """Extrae el número canónico del ``from`` de WAHA (``549...@c.us``)."""
+    crudo = (chat_id or "").strip()
+    if "@" in crudo:
+        crudo = crudo.split("@", 1)[0]
+    return normalizar_telefono_waha(crudo)
 
 
-def _mapear_boton_a_estado(button_reply: WhatsAppButtonReply) -> EstadoTurno:
-    """Traduce el botón presionado al nuevo estado del turno."""
-    for clave in (button_reply.id, button_reply.title):
-        if clave:
-            estado = BOTONES_ESTADO.get(clave.strip().lower())
-            if estado is not None:
-                return estado
-    raise RespuestaWebhookInvalidaError(
-        f"Botón no reconocido: id={button_reply.id!r} title={button_reply.title!r}."
-    )
+def extraer_mensaje(
+    payload: WAHAWebhookPayload,
+) -> Optional[Tuple[str, str, str]]:
+    """Devuelve ``(teléfono, texto, id_entrante)`` de un evento de WAHA.
 
-
-def procesar_respuesta_boton(
-    db: Session,
-    payload: WhatsAppWebhookPayload,
-) -> Tuple[Turno, WhatsAppInboundMessage, str]:
-    """Procesa la respuesta de botón y actualiza el turno correspondiente.
-
-    Pasos:
-      1. Extrae el mensaje con ``interactive.button_reply``.
-      2. Toma ``context.id`` (id del mensaje saliente original -> ``wamid``).
-      3. Busca el ``Turno`` por ``whatsapp_mensaje_id``.
-      4. Mapea el botón a ``CONFIRMADO`` / ``CANCELADO`` y marca el estado de
-         WhatsApp como ``RESPONDIDO``.
-
-    :returns: ``(turno_actualizado, mensaje_entrante, boton_id)``.
+    Aplica los filtros de :func:`es_evento_de_mensaje` y descarta los mensajes sin
+    remitente o sin texto: no hay nada que contestar y WAHA no debe reintentar.
     """
-    mensaje = _primer_mensaje_con_boton(payload)
-    button_reply = mensaje.interactive.button_reply  # type: ignore[union-attr]
-    assert button_reply is not None  # garantizado por el filtro anterior
+    if not es_evento_de_mensaje(payload):
+        return None
 
-    mensaje_contextual_id = mensaje.context.id if mensaje.context else None
-    if not mensaje_contextual_id:
-        raise RespuestaWebhookInvalidaError(
-            "El mensaje no incluye 'context.id'; no es posible correlacionar el turno."
-        )
-
-    nuevo_estado = _mapear_boton_a_estado(button_reply)
-
-    turno = db.execute(
-        select(Turno).where(Turno.whatsapp_mensaje_id == mensaje_contextual_id)
-    ).scalar_one_or_none()
-
-    if turno is None:
-        raise TurnoNoEncontradoError(
-            f"No se encontró un turno con whatsapp_mensaje_id={mensaje_contextual_id!r}."
-        )
-
-    turno.estado_turno = nuevo_estado
-    turno.estado_whatsapp = EstadoWhatsApp.RESPONDIDO
-    db.commit()
-    db.refresh(turno)
-
-    logger.info(
-        "Webhook procesado: turno id=%s -> estado_turno=%s (boton=%s)",
-        turno.id,
-        turno.estado_turno,
-        button_reply.id,
-    )
-
-    return turno, mensaje, button_reply.id
+    mensaje = payload.payload
+    assert mensaje is not None  # garantizado por es_evento_de_mensaje
+    telefono = telefono_de_chat(mensaje.from_)
+    texto = (mensaje.body or "").strip()
+    if not telefono or not texto:
+        return None
+    return telefono, texto, mensaje.id or ""
 
 
 # ===========================================================================
 #  3) RECORDATORIOS POR ENLACE "CLICK-TO-CHAT" (wa.me)
 # ===========================================================================
 #
-#  Alternativa 100 % gratuita al envío automático por la Cloud API: el backend
-#  arma el enlace oficial de WhatsApp con el mensaje ya redactado y codificado
-#  (URL Encoding) y la secretaría lo abre con un clic desde el panel. El mensaje
-#  sale del WhatsApp del consultorio: sin credenciales de Meta, sin plantillas
-#  aprobadas y sin costo por mensaje.
+#  Alternativa 100 % gratuita al envío automático por WAHA: el backend arma el
+#  enlace oficial de WhatsApp con el mensaje ya redactado y codificado (URL
+#  Encoding) y la secretaría lo abre con un clic desde el panel. El mensaje sale
+#  del WhatsApp del consultorio, sin credenciales adicionales.
 
 #: Texto del recordatorio; se completa con los datos reales del turno.
 PLANTILLA_RECORDATORIO = (
     "Hola {paciente}, te recordamos tu turno el día {fecha} a las {hora} con "
     "{profesional}. Por favor, confirmá tu asistencia respondiendo a este "
     "mensaje. ¡Muchas gracias!"
+)
+
+#: Instrucciones de respuesta: WAHA no tiene botones interactivos, así que el
+#: paciente contesta con números o palabras.
+INSTRUCCIONES_RESPUESTA = (
+    "Respondé *1* (o *SI*) para confirmar el turno.\n"
+    "Respondé *2* (o *NO*) para cancelarlo."
 )
 
 #: Se agrega al recordatorio mientras la ficha de salud siga pendiente. El
@@ -512,6 +440,7 @@ def construir_mensaje_recordatorio(turno: Turno) -> str:
         hora=turno.fecha_hora_inicio.strftime("%H:%M"),
         profesional=doctor or "tu profesional",
     )
+    texto = f"{texto}\n\n{INSTRUCCIONES_RESPUESTA}"
     return _agregar_enlace_anamnesis(texto, turno)
 
 

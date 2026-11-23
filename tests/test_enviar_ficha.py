@@ -125,17 +125,18 @@ def test_el_recordatorio_tambien_manda_el_enlace_en_su_propia_linea(
     assert lineas[-3].endswith("enlace:")
 
 
-def test_el_envio_por_api_pide_la_vista_previa_del_enlace():
-    """La Cloud API recibe ``preview_url`` para que el enlace se vea como enlace."""
+def test_el_envio_por_api_usa_el_payload_de_send_text_de_waha():
+    """WAHA recibe el texto en ``text`` y arma la vista previa por su cuenta."""
     preview = whatsapp_service.construir_payload_texto(
         "5491122334455", "Hola", preview_url=True
     )
-    assert preview["text"] == {"preview_url": True, "body": "Hola"}
-    # El bot sigue igual: contesta con la dirección del consultorio y sin tarjeta.
-    assert whatsapp_service.construir_payload_texto("5491122334455", "Hola")["text"] == {
-        "preview_url": False,
-        "body": "Hola",
+    assert preview == {
+        "chatId": "5491122334455@c.us",
+        "text": "Hola",
+        "session": "default",
     }
+    # El bot usa exactamente el mismo formato.
+    assert whatsapp_service.construir_payload_texto("5491122334455", "Hola") == preview
 
 
 def test_el_enlace_sirve_fuera_de_la_ventana_del_panel(

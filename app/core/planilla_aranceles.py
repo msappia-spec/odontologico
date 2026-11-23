@@ -12,6 +12,10 @@ Dos columnas fijas: ``codigo`` y ``precio_cobertura``. Se emite en ``.csv``
 (separador ``;`` + BOM, el que Excel abre bien en es-AR) y en ``.xlsx`` (Excel
 moderno, armado con ``zipfile`` + XML: no hace falta ``openpyxl``).
 
+:func:`leer_filas` expone la lectura **sin formato** (las filas crudas del
+archivo): la usan los importadores que traen otras columnas, como el nomenclador
+odontológico (*Capítulo*, *Código*, *Descripción* y *Arancel*).
+
 Lectura tolerante
 -----------------
 Se acepta el archivo tal como sale de Excel:
@@ -327,14 +331,19 @@ def _normalizar_filas(crudas: Sequence[Sequence[str]]) -> List[FilaPlanilla]:
     return resultado
 
 
-def leer_planilla(
+def leer_filas(
     contenido: bytes, nombre_archivo: Optional[str] = None
-) -> List[FilaPlanilla]:
-    """Interpreta una planilla de aranceles (``.csv`` o ``.xlsx``).
+) -> List[List[str]]:
+    """Devuelve las **filas crudas** de una planilla (``.csv`` o ``.xlsx``).
+
+    Es la lectura sin formato: cada fila vuelve como una lista de textos, tal
+    cual está en el archivo (la primera suele ser la cabecera). La usa
+    :func:`leer_planilla` y también los importadores que tienen su propio
+    formato de columnas, como el nomenclador odontológico (*Capítulo*, *Código*,
+    *Descripción* y *Arancel*), que ubican cada dato por el nombre del encabezado.
 
     Lanza :class:`ValidacionError` (HTTP **422**) si el archivo está vacío, es
-    demasiado grande, tiene una extensión no soportada o no trae filas de datos.
-    Las filas problemáticas **no** cortan la lectura: vuelven con ``error``.
+    demasiado grande o tiene una extensión no soportada.
     """
     if not contenido:
         raise ValidacionError(
@@ -355,10 +364,20 @@ def leer_planilla(
         )
 
     if extension == "xlsx" or contenido[:4] == b"PK\x03\x04":
-        crudas = _filas_xlsx(contenido)
-    else:
-        crudas = _filas_csv(_decodificar(contenido))
-    return _normalizar_filas(crudas)
+        return _filas_xlsx(contenido)
+    return _filas_csv(_decodificar(contenido))
+
+
+def leer_planilla(
+    contenido: bytes, nombre_archivo: Optional[str] = None
+) -> List[FilaPlanilla]:
+    """Interpreta una planilla de aranceles (``.csv`` o ``.xlsx``).
+
+    Lanza :class:`ValidacionError` (HTTP **422**) si el archivo está vacío, es
+    demasiado grande, tiene una extensión no soportada o no trae filas de datos.
+    Las filas problemáticas **no** cortan la lectura: vuelven con ``error``.
+    """
+    return _normalizar_filas(leer_filas(contenido, nombre_archivo))
 
 
 # --------------------------------------------------------------------------- #

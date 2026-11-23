@@ -11,14 +11,16 @@ REM
 REM  Uso:
 REM    Doble clic sobre este archivo, o desde la consola:
 REM      ejecutar.bat                 host 0.0.0.0 y puerto 8000
-REM      ejecutar.bat 8080            otro puerto
+REM      ejecutar.bat 8080            otro puerto (1-65535; "08000" se lee 8000)
 REM      ejecutar.bat --local         solo desde esta PC (127.0.0.1)
 REM      ejecutar.bat --reload        recarga al guardar cambios (desarrollo)
 REM      ejecutar.bat --abrir         abre el panel en el navegador al arrancar
 REM      ejecutar.bat --help          muestra esta ayuda
 REM
 REM  Antes de arrancar verifica el interprete, las dependencias y que el puerto
-REM  este libre; si ya hay algo escuchando ofrece abrir el panel en el navegador.
+REM  este libre; si ya hay algo escuchando consulta /health para distinguir si
+REM  es esta app (y ofrece abrir el panel) o si lo ocupa otro programa. Tambien
+REM  avisa si el .env no define DATABASE_URL.
 REM
 REM  Documentacion: README.md ("Puesta en marcha") y "como ejecutarlo.txt".
 REM ---------------------------------------------------------------------------
@@ -43,20 +45,22 @@ if /i "%~1"=="--reload" (set "RELOAD=1" & shift & goto leer_args)
 if /i "%~1"=="--abrir" (set "ABRIR=1" & shift & goto leer_args)
 if /i "%~1"=="--local" (set "HOST=127.0.0.1" & shift & goto leer_args)
 echo %~1| findstr /r "^[0-9][0-9]*$" >nul
-if not errorlevel 1 (
-    set "PUERTO=%~1"
-    shift
-    goto leer_args
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Opcion desconocida: %~1
+    goto ayuda
 )
-echo.
-echo [ERROR] Opcion desconocida: %~1
-goto ayuda
+set "PUERTO=%~1"
+call :normalizar_puerto
+if "%PUERTO_MAL%"=="1" goto puerto_invalido
+shift
+goto leer_args
 
 :ayuda
 echo.
 echo   Uso:  ejecutar.bat [puerto] [opciones]
 echo.
-echo     puerto        puerto donde escucha la app (por defecto 8000)
+echo     puerto        puerto donde escucha la app, 1-65535 (por defecto 8000)
 echo     --local       escucha solo en 127.0.0.1 (no queda abierta a la red)
 echo     --reload      recarga el codigo al guardar cambios (desarrollo)
 echo     --abrir       abre el panel en el navegador al arrancar
@@ -86,9 +90,27 @@ if not exist "app\main.py" goto error_carpeta
 "%PY%" -c "import fastapi, uvicorn" >nul 2>nul
 if errorlevel 1 goto error_dependencias
 
+REM --- Aviso de base de datos -----------------------------------------------
+REM El .env local apunta a PostgreSQL. Sin .env (o sin DATABASE_URL) la app cae
+REM en el SQLite por defecto y el panel aparece vacio; conviene avisarlo antes
+REM de arrancar en lugar de descubrirlo con la secretaria esperando datos que
+REM estan en otra base.
+set "AVISO_DB="
+if not exist ".env" (
+    set "AVISO_DB=1"
+) else (
+    findstr /b /c:"DATABASE_URL=" ".env" >nul 2>nul
+    if errorlevel 1 set "AVISO_DB=1"
+)
+
 REM --- El puerto tiene que estar libre --------------------------------------
 REM Se prueba con un socket: no depende del idioma de Windows ni de netstat.
-"%PY%" -c "import socket, sys; s = socket.socket(); s.settimeout(0.4); sys.exit(0 if s.connect_ex(('127.0.0.1', %PUERTO%)) == 0 else 1)"
+REM Se usa create_connection y no connect_ex sobre un socket con timeout:
+REM connect_ex puede devolver WSAEWOULDBLOCK (10035) mientras la conexion esta
+REM "en curso", un valor que no distingue "no hay nadie escuchando" de
+REM "todavia no se sabe". create_connection espera la respuesta real y falla
+REM con "conexion rechazada" cuando el puerto esta libre.
+"%PY%" -c "import socket; socket.create_connection(('127.0.0.1', %PUERTO%), 0.5).close()" >nul 2>nul
 if not errorlevel 1 goto puerto_ocupado
 
 REM --- Arranque --------------------------------------------------------------
@@ -117,6 +139,12 @@ if defined DATABASE_URL (
     echo           base y no la del archivo .env. Ver README.md.
     echo.
 )
+if defined AVISO_DB (
+    echo   [AVISO] No hay DATABASE_URL en .env: la app usara el SQLite por
+    echo           defecto y el panel puede quedar sin datos. Copia .env.example
+    echo           a .env y configura la conexion ^(ver README.md^).
+    echo.
+)
 echo   Interprete: %PY%
 echo   Escuchando: %HOST%:%PUERTO%   (reload=%RELOAD%)
 echo ---------------------------------------------------------------------------
@@ -140,6 +168,8 @@ goto fin
 echo [ERROR] El servidor termino con codigo %CODIGO%.
 echo         Revisa el mensaje de arriba. Si el puerto quedo tomado, proba:
 echo             ejecutar.bat 8080
+echo         Si el error menciona la base de datos, revisa DATABASE_URL en .env
+echo         y que PostgreSQL este iniciado ^(el .env local usa PostgreSQL^).
 goto fin
 
 REM --- Errores de preparacion ----------------------------------------------
@@ -170,16 +200,37 @@ echo.
 pause
 exit /b 1
 
+:puerto_invalido
+echo.
+echo [ERROR] Puerto invalido.
+echo         Usa un numero entero entre 1 y 65535, por ejemplo:
+echo             ejecutar.bat 8080
+echo.
+pause
+exit /b 1
+
 :puerto_ocupado
+REM Antes de ofrecer abrir el panel se consulta /health en ese puerto: si lo
+REM que escucha es otro programa, abrir el navegador a ciegas mostraba una
+REM pagina ajena y parecia que el panel estaba roto.
+set "RESPONDE=0"
+"%PY%" -c "import json,sys,urllib.request as u; sys.exit(0 if json.load(u.urlopen('http://127.0.0.1:%PUERTO%/health', timeout=3)).get('status')=='ok' else 1)" >nul 2>nul
+if not errorlevel 1 set "RESPONDE=1"
+
 echo.
 echo ===========================================================================
 echo   EL PUERTO %PUERTO% YA ESTA EN USO
 echo ===========================================================================
 echo.
-echo   Lo mas probable es que la aplicacion ya este andando en otra ventana:
-echo       http://127.0.0.1:%PUERTO%/
+if "%RESPONDE%"=="1" (
+    echo   La aplicacion ya esta andando en otra ventana:
+    echo       http://127.0.0.1:%PUERTO%/
+) else (
+    echo   En ese puerto no responde esta app: lo ocupa otro programa o una
+    echo   instancia que todavia esta arrancando ^(init_db puede tardar^).
+)
 echo.
-echo   1. Abrir el panel en el navegador (la app ya estaria funcionando)
+echo   1. Abrir el panel en el navegador
 echo   2. Cancelar y levantar en otro puerto:  ejecutar.bat 8080
 echo.
 set "CODIGO=1"
@@ -193,3 +244,26 @@ goto fin
 echo.
 pause
 exit /b %CODIGO%
+
+REM --- Validacion del puerto --------------------------------------------------
+REM ``findstr`` acepta cualquier secuencia de digitos, incluidos "08000" (ceros
+REM a la izquierda) y valores fuera de rango como "70000". Los ceros se recortan
+REM porque el literal "08000" es un SyntaxError en Python: el chequeo del puerto
+REM terminaba en "libre" sin haber probado nada y uvicorn lo interpretaba como
+REM 8000. Fuera de 1-65535 ni siquiera se puede hacer bind: el servidor
+REM arrancaba, tocaba la base y moria con un traceback largo y confuso.
+:normalizar_puerto
+setlocal EnableDelayedExpansion
+set "P=%PUERTO%"
+set "MAL=0"
+:quitar_ceros
+if not "!P:~0,1!"=="0" goto rango
+set "P=!P:~1!"
+goto quitar_ceros
+:rango
+if "!P!"=="" set "MAL=1"
+if not "!P:~5!"=="" set "MAL=1"
+if "!MAL!"=="0" if !P! LSS 1 set "MAL=1"
+if "!MAL!"=="0" if !P! GTR 65535 set "MAL=1"
+endlocal & set "PUERTO=%P%" & set "PUERTO_MAL=%MAL%"
+exit /b 0

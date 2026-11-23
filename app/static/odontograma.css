@@ -1,9 +1,13 @@
 /* ==========================================================================
-   Odontograma · estilos (Módulo 4)
+   Ficha médica · estilos del modal (Módulo 4)
    --------------------------------------------------------------------------
-   Colores de la Historia Clínica General:
-   rojo = prestación existente, azul = prestación requerida, X = ausente o a
-   extraer. Se carga en el Panel Principal y en la vista móvil.
+   El archivo conserva el nombre ``odontograma.css`` por compatibilidad con las
+   páginas que lo incluyen, pero hoy viste la **hoja completa** de la Historia
+   Clínica General: datos del paciente, odontograma (permanente y temporario),
+   estado bucal y libro «Trabajo realizado».
+
+   Colores del papel: rojo = prestación existente, azul = prestación requerida,
+   X = ausente o a extraer. Se carga en el Panel Principal y en la vista móvil.
    ========================================================================== */
 
 .odo-backdrop {
@@ -239,6 +243,16 @@
   color: #ef4444;
 }
 
+.odo-numero {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.16rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
 .odo-diente.odo-ausente .odo-marca {
   display: flex;
 }
@@ -362,6 +376,7 @@
 }
 
 .salud-btn-odonto,
+.salud-btn-ficha,
 .salud-btn-pdf {
   border: 1px solid #0d8578;
   background: #fff;
@@ -376,6 +391,7 @@
 }
 
 .salud-btn-odonto:hover,
+.salud-btn-ficha:hover,
 .salud-btn-pdf:hover {
   background: #eefbf8;
 }
@@ -429,5 +445,457 @@ body.odo-con-modal {
 
   .odo-btn {
     width: 100%;
+  }
+}
+
+/* --------------------- Ficha médica (hoja de papel) ---------------------- */
+/* El modal dejó de ser sólo el cuadro de dientes: reproduce la hoja completa
+   (datos del paciente, odontograma, estado bucal y libro de trabajos). */
+
+.odo-card-ficha {
+  width: min(1160px, 100%);
+}
+
+.odo-datos {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.8rem;
+  background: #fff;
+  padding: 0.7rem 0.8rem 0.85rem;
+}
+
+.odo-datos-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem 0.8rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.odo-datos-titulo {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #334155;
+}
+
+.odo-datos-nota {
+  margin: 0;
+  font-size: 0.64rem;
+  color: #94a3b8;
+}
+
+.odo-datos-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.7rem;
+}
+
+.odo-datos-acciones .odo-datos-nota {
+  flex: 1 1 12rem;
+}
+
+.odo-datos-acciones .odo-btn {
+  width: auto;
+  flex: none;
+}
+
+.odo-datos-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem 0.9rem;
+}
+
+.odo-dato {
+  margin: 0;
+  min-width: 0;
+  border-bottom: 1px dotted #cbd5e1;
+  padding: 0.1rem 0.1rem 0.22rem;
+}
+
+.odo-dato-ancho {
+  grid-column: 1 / -1;
+}
+
+.odo-dato-etiqueta {
+  display: block;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.odo-dato-valor {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.odo-dato-control {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #94a3b8;
+  background: transparent;
+  font: inherit;
+  font-size: 0.8rem;
+  color: #0f172a;
+  padding: 0.05rem 0;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.odo-dato-control:focus {
+  outline: 2px solid #17a394;
+  outline-offset: 1px;
+}
+
+.odo-ficha-cuerpo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 0.8rem;
+  margin-top: 0.75rem;
+  align-items: start;
+}
+
+.odo-leyenda {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.odo-leyenda-titulo {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.odo-referencias {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.65rem;
+  color: #475569;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.4rem 0;
+  margin: 0.1rem 0;
+}
+
+.odo-referencias span {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.odo-grupo {
+  display: flex;
+  gap: 0.18rem;
+}
+
+.odo-separador-vertical {
+  flex: none;
+  width: 1px;
+  align-self: stretch;
+  background: #cbd5e1;
+  margin: 0.2rem 0.35rem;
+}
+
+.odo-lado {
+  flex: none;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.odo-arcada-titulo-temp {
+  margin-top: 0.55rem;
+}
+
+.odo-fila-temp {
+  gap: 0.3rem;
+}
+
+.odo-estado {
+  margin-top: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.4rem;
+}
+
+.odo-estado-titulo {
+  margin: 0;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.odo-si-no {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.odo-si-no > span {
+  font-weight: 800;
+}
+
+.odo-si-no label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.odo-si-no input {
+  accent-color: #0d8578;
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.odo-trabajos {
+  margin-top: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  overflow: hidden;
+}
+
+.odo-trabajos-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.odo-btn-mini {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.7rem;
+}
+
+.odo-trabajos-nota {
+  margin: 0.4rem 0.7rem 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.odo-tabla-scroll {
+  overflow-x: auto;
+}
+
+.odo-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+  font-size: 0.72rem;
+}
+
+.odo-tabla th {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.35rem 0.4rem;
+  text-align: left;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.odo-tabla td {
+  border-bottom: 1px solid #eef2f7;
+  padding: 0.18rem 0.22rem;
+  vertical-align: middle;
+}
+
+.odo-tabla td:nth-child(1) {
+  width: 118px;
+}
+
+.odo-tabla td:nth-child(2) {
+  width: 150px;
+}
+
+.odo-tabla td:nth-child(3) {
+  width: 104px;
+}
+
+.odo-tabla td:nth-child(5),
+.odo-tabla td:nth-child(6),
+.odo-tabla td:nth-child(7) {
+  width: 104px;
+}
+
+.odo-tabla td:last-child {
+  width: 28px;
+  text-align: center;
+}
+
+.odo-num {
+  text-align: right;
+}
+
+.odo-num input {
+  text-align: right;
+}
+
+.odo-celda {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.35rem;
+  padding: 0.22rem 0.3rem;
+  font: inherit;
+  font-size: 0.72rem;
+  color: #0f172a;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.odo-celda:focus {
+  outline: 2px solid #17a394;
+  outline-offset: 1px;
+  border-color: #17a394;
+}
+
+.odo-codigo-desconocido {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.odo-celda[aria-invalid="true"] {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.odo-saldo {
+  font-weight: 800;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  padding-right: 0.45rem;
+}
+
+.odo-quitar {
+  border: 0;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 0.8rem;
+  font-weight: 900;
+  cursor: pointer;
+  padding: 0.1rem 0.25rem;
+}
+
+.odo-quitar:hover {
+  background: #fef2f2;
+  border-radius: 0.3rem;
+}
+
+.odo-totales-libro {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem 1.3rem;
+  padding: 0.45rem 0.7rem;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.odo-totales-libro strong {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .odo-ficha-cuerpo {
+    grid-template-columns: 1fr;
+  }
+
+  .odo-datos-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .odo-lado {
+    display: none;
+  }
+}
+
+@media print {
+  body.odo-con-modal {
+    overflow: visible !important;
+  }
+
+  body.odo-con-modal > *:not(#modal-ficha-medica) {
+    display: none !important;
+  }
+
+  #modal-ficha-medica {
+    position: static;
+    display: block !important;
+    padding: 0;
+    background: #fff;
+    overflow: visible;
+  }
+
+  .odo-card-ficha {
+    width: 100%;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+  }
+
+  .odo-paleta,
+  .odo-ayuda,
+  .odo-acciones,
+  .odo-cerrar,
+  .odo-quitar,
+  .odo-trabajos-cabecera .odo-btn,
+  #fm-editar-paciente,
+  #fm-error {
+    display: none !important;
+  }
+
+  .odo-dato-control,
+  .odo-celda {
+    border: 0;
+    border-bottom: 1px solid #cbd5e1;
+  }
+
+  .odo-tabla td:last-child,
+  .odo-tabla th:last-child {
+    display: none;
   }
 }

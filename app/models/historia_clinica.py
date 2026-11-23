@@ -30,6 +30,7 @@ from app.db.base_class import Base
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.antecedentes_salud import AntecedentesSalud
     from app.models.evolucion_medica import EvolucionMedica
+    from app.models.ficha_medica import FichaMedica
     from app.models.odontograma import Odontograma
     from app.models.paciente import Paciente
 
@@ -70,6 +71,15 @@ class HistoriaClinica(Base):
     # Odontograma gráfico que completa el profesional después de revisar al
     # paciente (Módulo 4). También es opcional.
     odontograma: Mapped[Optional["Odontograma"]] = relationship(
+        back_populates="historia_clinica",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    # Ficha médica del paciente (Módulo 4): la hoja de papel con el estado bucal
+    # y el libro «Trabajo realizado». Igual que el odontograma, es opcional y se
+    # corrige sobre la misma fila.
+    ficha_medica: Mapped[Optional["FichaMedica"]] = relationship(
         back_populates="historia_clinica",
         uselist=False,
         cascade="all, delete-orphan",

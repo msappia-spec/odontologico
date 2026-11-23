@@ -4,10 +4,6 @@ Se usa una base SQLite **en memoria** (``StaticPool``) totalmente aislada del
 entorno real, y se sobreescribe la dependencia ``get_db`` de FastAPI.
 """
 
-import hashlib
-import hmac
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -27,24 +23,19 @@ def whatsapp_sin_credenciales(monkeypatch):
     """Aísla del entorno: en las pruebas los envíos de WhatsApp se **simulan**.
 
     ``settings`` se instancia una sola vez al importar la app, así que si la
-    máquina (o el ``.env``) tiene cargado un token real, los tests que esperan un
-    envío simulado empezarían a hacer ``POST`` de verdad a la Graph API. Acá se
-    vacían las credenciales para todos los tests; el que necesite el camino real
-    (por ejemplo para comprobar el ``payload`` que se manda) las vuelve a poner
-    con su propio ``monkeypatch``.
+    máquina (o el ``.env``) tiene cargadas las credenciales reales de WAHA, los
+    tests que esperan un envío simulado harían un ``POST`` de verdad. Acá se
+    vacían para todos los tests; el que necesite el camino real las vuelve a
+    poner con su propio ``monkeypatch``.
     """
-    monkeypatch.setattr(settings, "whatsapp_phone_number_id", None)
-    monkeypatch.setattr(settings, "whatsapp_access_token", None)
-    monkeypatch.setattr(settings, "whatsapp_app_secret", "app-secret-de-prueba")
+    monkeypatch.setattr(settings, "waha_url", None)
+    monkeypatch.setattr(settings, "waha_api_key", None)
+    monkeypatch.setattr(settings, "waha_session", "default")
     monkeypatch.setattr(settings, "cron_secret", "cron-secret-de-prueba")
 
 
-class ClienteConFirmaWebhook:
-    """Agrega la firma de Meta a los POST de webhook de las pruebas.
-
-    Así las pruebas existentes ejercitan el mismo control que producción sin
-    repetir la construcción de la firma en cada caso.
-    """
+class ClienteConCron:
+    """Agrega el ``Bearer`` del cron a los POST de la tarea de recordatorios."""
 
     def __init__(self, client: TestClient):
         self._client = client
@@ -57,20 +48,7 @@ class ClienteConFirmaWebhook:
             headers = dict(kwargs.pop("headers", {}) or {})
             headers.setdefault("Authorization", "Bearer cron-secret-de-prueba")
             return self._client.post(url, *args, headers=headers, **kwargs)
-
-        if url != "/api/v1/whatsapp/webhook" or "json" not in kwargs:
-            return self._client.post(url, *args, **kwargs)
-
-        payload = kwargs.pop("json")
-        cuerpo = json.dumps(
-            payload, ensure_ascii=False, separators=(",", ":")
-        ).encode("utf-8")
-        headers = dict(kwargs.pop("headers", {}) or {})
-        headers.setdefault("Content-Type", "application/json")
-        headers["X-Hub-Signature-256"] = "sha256=" + hmac.new(
-            b"app-secret-de-prueba", cuerpo, hashlib.sha256
-        ).hexdigest()
-        return self._client.post(url, *args, content=cuerpo, headers=headers, **kwargs)
+        return self._client.post(url, *args, **kwargs)
 
 
 @pytest.fixture()
@@ -116,7 +94,7 @@ def client(engine, db_session) -> TestClient:
     app.dependency_overrides[get_db] = _override_get_db
     test_client = TestClient(app)
     try:
-        yield ClienteConFirmaWebhook(test_client)
+        yield ClienteConCron(test_client)
     finally:
         app.dependency_overrides.clear()
 

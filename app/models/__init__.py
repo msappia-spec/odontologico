@@ -5,12 +5,14 @@ cuentas corrientes y financiación de pacientes)."""
 from app.models.antecedentes_salud import AntecedentesSalud
 from app.models.arancel_obra_social import ArancelObraSocial
 from app.models.archivo_adjunto import ArchivoAdjunto
+from app.models.conversacion_whatsapp import ConversacionWhatsApp
 from app.models.cuenta_corriente import CuentaCorriente, PlanCuotas, TransaccionCC
 from app.models.disponibilidad import DisponibilidadDoctor
 from app.models.disponibilidad_especifica import DisponibilidadEspecifica
 from app.models.doctor import Doctor
 from app.models.egreso import GastoFactura, PagoEgreso, Proveedor
 from app.models.enums import (
+    EstadoConversacionWhatsApp,
     EstadoPagoFactura,
     EstadoPagoMovimiento,
     EstadoPlanCuotas,
@@ -23,11 +25,14 @@ from app.models.enums import (
     TipoProveedor,
 )
 from app.models.evolucion_medica import EvolucionMedica
+from app.models.ficha_medica import FichaMedica, FichaMedicaTrabajo
 from app.models.historia_clinica import HistoriaClinica
 from app.models.movimiento_caja import DetalleMovimientoCaja, MovimientoCaja
 from app.models.obra_social import ObraSocial
+from app.models.opcion_menu_whatsapp import OpcionMenuWhatsApp
 from app.models.odontograma import Odontograma, OdontogramaDiente
 from app.models.paciente import Paciente
+from app.models.presupuesto import Presupuesto, PresupuestoItem
 from app.models.prestacion import Prestacion
 from app.models.turno import Turno
 
@@ -35,6 +40,7 @@ __all__ = [
     "AntecedentesSalud",
     "ArancelObraSocial",
     "ArchivoAdjunto",
+    "ConversacionWhatsApp",
     "CuentaCorriente",
     "DetalleMovimientoCaja",
     "DisponibilidadDoctor",
@@ -42,6 +48,8 @@ __all__ = [
     "Doctor",
     "GastoFactura",
     "EvolucionMedica",
+    "FichaMedica",
+    "FichaMedicaTrabajo",
     "HistoriaClinica",
     "MovimientoCaja",
     "ObraSocial",
@@ -51,10 +59,13 @@ __all__ = [
     "Paciente",
     "PagoEgreso",
     "PlanCuotas",
+    "Presupuesto",
+    "PresupuestoItem",
     "Prestacion",
     "Proveedor",
     "TransaccionCC",
     "Turno",
+    "EstadoConversacionWhatsApp",
     "EstadoPagoFactura",
     "EstadoPagoMovimiento",
     "EstadoPlanCuotas",

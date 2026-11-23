@@ -31,7 +31,7 @@ odontológico. Cubre seis módulos funcionales:
 SQLite (desarrollo) / PostgreSQL (producción), frontend HTML + CSS + JavaScript
 vanilla, despliegue en Vercel.
 
-**Base de datos:** 23 tablas, 23 entidades ORM principales y 12 enumeraciones de
+**Base de datos:** 25 tablas, 25 entidades ORM principales y 12 enumeraciones de
 dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
 existen como libro mayor contable (`transacciones_cc`) y como pagos de egresos
 (`pagos_egresos`), no como pasarela.
@@ -79,11 +79,11 @@ Sí es:
 | Punto de entrada | Un único `app/main.py` crea `FastAPI`, monta estáticos y un `api_router`. | Monolito de despliegue. |
 | Routers | 15 archivos en `app/api/v1/endpoints/`, agrupados por recurso. | Separación por dominio en la capa HTTP. |
 | Servicios | 18 archivos en `app/services/`, uno por agregado o caso de uso. | Lógica de negocio fuera de las rutas. |
-| Modelos | 20 tablas en 16 archivos, todas registradas en un único `Base.metadata`. | Modelo de datos compartido. |
+| Modelos | 28 tablas en 20 archivos, todas registradas en un único `Base.metadata`. | Modelo de datos compartido. |
 | Schemas | 14 archivos Pydantic, con contratos de entrada/salida separados. | Contratos explícitos y validación centralizada. |
 | Acceso a datos | Los servicios usan `Session` y `select()` directamente; no hay repositorios. | Acoplamiento servicio–ORM. |
 | Transacciones | Cada servicio hace `commit()`; no hay Unit of Work explícita. | Transacciones locales por operación. |
-| Frontend | Panel de 7.960 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
+| Frontend | Panel de 8.690 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
 | Despliegue | `vercel.json` declara `framework: fastapi`; un solo deploy. | Escalado y fallos acoplados. |
 | Pruebas | SQLite en memoria + `TestClient`, 34 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
 
@@ -188,6 +188,7 @@ Odontologico/
 │   │       ├── historias_clinicas.py# Ficha y evoluciones inmutables
 │   │       ├── anamnesis.py         # Ficha pública y panel de salud
 │   │       ├── odontogramas.py      # GET/PUT del odontograma por paciente
+│   │       ├── fichas_medicas.py    # GET/PUT de la ficha médica del paciente
 │   │       ├── prestaciones.py      # Catálogo de prácticas facturables
 │   │       ├── aranceles.py         # Aranceles, convenios e importador
 │   │       ├── facturacion.py       # Caja, presentaciones y liquidaciones
@@ -229,6 +230,7 @@ Odontologico/
 │   │   ├── movimiento_caja.py       # movimientos_caja + detalles
 │   │   ├── opcion_menu_whatsapp.py  # opciones_menu_whatsapp
 │   │   ├── antecedentes_salud.py    # antecedentes_salud
+│   │   ├── ficha_medica.py          # fichas_medicas + ficha_medica_trabajos
 │   │   ├── odontograma.py           # odontogramas + odontograma_dientes
 │   │   ├── cuenta_corriente.py      # cuentas_corrientes + transacciones_cc
 │   │   │                            #   + planes_cuotas (PK UUID, NUMERIC)
@@ -238,6 +240,7 @@ Odontologico/
 │   │   ├── doctor.py, paciente.py, turno.py, disponibilidad.py
 │   │   ├── obra_social.py, prestacion.py, arancel.py
 │   │   ├── historia_clinica.py, antecedentes_salud.py, odontograma.py
+│   │   ├── ficha_medica.py          # Ficha del paciente y libro de trabajos
 │   │   ├── facturacion.py, whatsapp.py, finanzas.py, egreso.py
 │   │   └── opcion_menu_whatsapp.py
 │   ├── services/
@@ -255,6 +258,7 @@ Odontologico/
 │   │   ├── liquidacion_service.py
 │   │   ├── reporte_pdf_service.py
 │   │   ├── odontograma_service.py
+│   │   ├── ficha_medica_service.py  # Cabecera, estado bucal y libro de trabajos
 │   │   ├── finanzas_service.py
 │   │   ├── egreso_service.py
 │   │   ├── whatsapp_menu_service.py
@@ -341,7 +345,7 @@ Odontologico/
 │    └── services (reglas de negocio)                            │
 │             ├── models SQLAlchemy 2.0                          │
 │             ├── core (fechas, dinero, tokens, PDF, planillas)  │
-│             └── integración WhatsApp (httpx → Graph API)       │
+│             └── integración WhatsApp (httpx → WAHA)            │
 └───────────────────────────────┬────────────────────────────────┘
                                 │ SessionLocal / get_db
                                 ▼
@@ -353,8 +357,9 @@ Odontologico/
 
 **Componentes externos opcionales:**
 
-- **WhatsApp Cloud API (Meta)** para envío real de recordatorios y respuestas.
-  Si faltan credenciales, el envío se simula con un `wamid` ficticio.
+- **WAHA (WhatsApp HTTP API)** para envío real de recordatorios y respuestas.
+  Si faltan `WAHA_URL` o `WAHA_API_KEY`, el envío se simula con un identificador
+  ficticio (`waha.SIMULADO...`).
 - **Vercel** para hosting serverless y **GitHub** para respaldo del código.
 - **Tailwind CDN** y **Google Fonts (Inter)** para el frontend.
 
@@ -430,36 +435,31 @@ Hay dos caminos distintos:
 - Busca turnos cuya `fecha_hora_inicio` cae exactamente en el día
   `hoy + N` (`RECORDATORIO_DIAS`, por defecto 3).
 - Filtra `estado_turno = PENDIENTE` y `estado_whatsapp = PENDIENTE_ENVIO`.
-- Arma una plantilla Utility aprobada con botones **Confirmar** / **Cancelar**,
-  válida también fuera de la ventana de 24 horas.
+- Arma un **texto libre** con la instrucción de responder `1` / `si` para
+  confirmar o `2` / `no` para cancelar.
 - Si el paciente todavía no completó la anamnesis, agrega el enlace HMAC.
-- Envía por `httpx` a la Graph API si hay `WHATSAPP_PHONE_NUMBER_ID` y token;
-  si no, simula el envío.
+- Espera 1,5 s y envía por `httpx` a `{WAHA_URL}/api/sendText` (cabecera
+  `X-Api-Key`, `chatId` `549...@c.us`) si hay `WAHA_URL` y `WAHA_API_KEY`; si no,
+  simula el envío.
 - Actualiza `estado_whatsapp` a `ENVIADO` o `FALLIDO` y guarda
-  `whatsapp_mensaje_id` (wamid) cuando el envío fue exitoso.
+  `whatsapp_mensaje_id` cuando el envío fue exitoso.
+- Guarda en `conversaciones_whatsapp` la confirmación pendiente del teléfono.
 
 > **Scheduler incluido.** `vercel.json` ejecuta el endpoint todos los días a
 > las 12:00 UTC. El cron y cualquier ejecución manual deben presentar
 > `Authorization: Bearer <CRON_SECRET>`.
 
-**Plantilla requerida en Meta.** Crear y aprobar la plantilla Utility
-`recordatorio_turno`, idioma `es_AR`, con este cuerpo y los botones rápidos en
-este orden:
+**Texto del recordatorio.** WAHA no usa plantillas ni botones aprobados: el
+mensaje es texto libre y cierra con las instrucciones de respuesta:
 
 ```
-Hola {{1}}, te recordamos tu turno con {{2}} el {{3}}. ¿Confirmás tu asistencia?
-{{4}}
+Respondé *1* (o *SI*) para confirmar el turno.
+Respondé *2* (o *NO*) para cancelarlo.
 ```
 
-1. `{{1}}`: nombre del paciente.
-2. `{{2}}`: profesional.
-3. `{{3}}`: fecha y hora.
-4. `{{4}}`: instrucción y enlace de anamnesis, o la indicación de que no hay
-   documentación pendiente.
-5. Quick reply 1: `Confirmar`; Quick reply 2: `Cancelar`.
-
-El backend envía los payloads `confirmar_turno` y `cancelar_turno`, por lo que
-las respuestas actualizan el estado del turno sin configuración adicional.
+El backend guarda el turno pendiente en `conversaciones_whatsapp`; las
+respuestas `1`/`si` y `2`/`no` actualizan el estado del turno sin configuración
+adicional.
 
 **B. Click-to-Chat (`GET /api/v1/whatsapp/recordatorios-pendientes`)**
 
@@ -471,29 +471,27 @@ las respuestas actualizan el estado del turno sin configuración adicional.
 
 #### 3.4.3. Webhook de WhatsApp y FAQ Bot
 
-**Mensaje de texto (`type: "text"`):**
+**Evento de WAHA (`event: "message"`):**
 
-1. `whatsapp_service.mensaje_de_texto()` extrae el primer mensaje con cuerpo.
-2. `whatsapp_bot_service.responder_mensaje()` normaliza texto y teléfono.
-3. Lee el menú activo de `opciones_menu_whatsapp`; si la tabla está vacía usa
-   las cuatro opciones históricas (precio, obras sociales, ubicación,
-   secretaría).
-4. Si el texto es un saludo/palabra clave, envía el menú.
-5. Si es una tecla válida, ejecuta el tipo de la opción:
-   `TEXTO`, `PRECIO`, `OBRAS_SOCIALES`, `UBICACION` o `SECRETARIA`.
-6. Si no coincide, **no responde** y registra `Atención Manual Requerida` con el
-   teléfono, el texto y el motivo.
+1. `whatsapp_service.extraer_mensaje()` descarta `fromMe`, grupos (`@g.us`),
+   estados (`@broadcast`), eventos distintos de `message` y mensajes vacíos.
+   Esos casos responden `200` con `tipo = IGNORADO`.
+2. Extrae el teléfono desde `payload.from` (quitando `@c.us`) y el texto desde
+   `payload.body`.
+3. `whatsapp_bot_service.responder_mensaje()` normaliza texto y teléfono y
+   consulta `conversaciones_whatsapp`.
+4. Si hay un recordatorio pendiente, `1`/`si` confirma y `2`/`no` cancela el
+   turno (`tipo = CONFIRMACION`); cualquier otra respuesta repite la pregunta y
+   mantiene el estado.
+5. Sin confirmación pendiente, lee el menú activo de `opciones_menu_whatsapp`
+   (o las cuatro opciones históricas si la tabla está vacía). Si el texto es un
+   saludo o una tecla válida, responde según la opción (`TEXTO`, `PRECIO`,
+   `OBRAS_SOCIALES`, `UBICACION` o `SECRETARIA`).
+6. Cualquier otro texto muestra el **menú principal numerado**. Sólo una opción
+   `SECRETARIA` deriva a `Atención Manual Requerida`.
 
-**Respuesta de botón (`interactive.button_reply`):**
-
-1. Se toma `context.id` (wamid del recordatorio original).
-2. Se busca `Turno.whatsapp_mensaje_id == context.id`.
-3. Se mapea el botón a `CONFIRMADO` o `CANCELADO`.
-4. Se marca `estado_whatsapp = RESPONDIDO` y se confirma la transacción.
-
-> **Seguridad pendiente:** el `POST /whatsapp/webhook` no valida la firma
-> `X-Hub-Signature-256` de Meta. El `GET` sí valida `hub.verify_token`. Para
-> producción con número real conviene agregar la verificación HMAC del body.
+No hay `GET` de verificación: WAHA no lo usa. El webhook se configura en WAHA
+apuntando a `/api/v1/whatsapp/webhook` con el evento `message`.
 
 #### 3.4.4. Historia clínica y evoluciones
 
@@ -517,7 +515,7 @@ las respuestas actualizan el estado del turno sin configuración adicional.
 > base puede modificar una evolución; para bloquearlo también a nivel motor
 > harían falta triggers o permisos de base de datos.
 
-#### 3.4.5. Ficha médica pública y odontograma
+#### 3.4.5. Ficha médica pública, ficha del paciente y odontograma
 
 1. El recordatorio incluye `/anamnesis/<token>` sólo si la ficha está pendiente.
 2. El token tiene la forma `base64url(payload).base64url(HMAC-SHA256)`.
@@ -540,15 +538,32 @@ las respuestas actualizan el estado del turno sin configuración adicional.
    profesional carguen la ficha completa desde el mostrador, sin token: además
    del cuestionario acepta el **examen bucal** y el **diagnóstico/plan**, y
    sincroniza los filiatorios igual que el enlace público.
-6. `GET/PUT /api/v1/pacientes/{id}/odontograma` es el gráfico **aparte** que el
+6. `GET/PUT /api/v1/pacientes/{id}/odontograma` es el gráfico que el
    profesional completa después de revisar al paciente: toca un diente y elige
-   el color (o elige el color y toca varios dientes), en notación FDI y con las
-   referencias del PDF: rojo (existente), azul (requerida) o X (ausente/a
-   extraer); se guardan además prótesis, coronas y cantidad de dientes
-   existentes. El `GET` no crea la historia; el `PUT` reemplaza los dientes.
-7. `GET /api/v1/anamnesis/panel` lista hasta 500 turnos no cancelados de la
+   el color (o elige el color y toca varios dientes), en notación FDI con la
+   dentición **permanente 11-48 y la temporaria 51-85**, y con las referencias
+   del PDF: rojo (existente), azul (requerida) o X (ausente/a extraer); se
+   guardan además prótesis, coronas y cantidad de dientes existentes. El `GET`
+   no crea la historia; el `PUT` reemplaza los dientes.
+7. La **ficha médica del paciente** (`GET/PUT
+   /api/v1/pacientes/{id}/ficha-medica`) es la hoja de papel completa: adjunta
+   los datos filiatorios del paciente, guarda el vencimiento, el grupo familiar,
+   el parentesco y los antecedentes de enfermedad, el estado bucal general
+   (sarro y enfermedad periodontal) y el libro **«Trabajo realizado»**
+   (`fichas_medicas` + `ficha_medica_trabajos`). El saldo de cada renglón se
+   calcula al leer (`Debe - Haber` acumulado) y no se persiste; el `PUT` crea la
+   historia clínica si hace falta, reemplaza el libro y descarta los renglones en
+   blanco. El botón *Ficha médica* de la tarjeta (panel y `/medico`) abre el
+   modal completo: datos, odontograma, estado bucal y libro. En el panel, el
+   **código de cada renglón se elige del catálogo de prestaciones activas**
+   (`GET /api/v1/prestaciones?activas=true`); al elegirlo se completan el
+   detalle y el importe si estaban vacíos. Antes de guardar se valida la hoja
+   completa (fechas, topes de texto, código del catálogo e importes no
+   negativos), de modo que un renglón inválido no deja el odontograma guardado a
+   medias.
+8. `GET /api/v1/anamnesis/panel` lista hasta 500 turnos no cancelados de la
    ventana pedida, con el estado de la ficha y el enlace firmado para reenviar.
-8. `GET /api/v1/anamnesis/panel/{turno_id}/enlace` arma el enlace firmado, el
+10. `GET /api/v1/anamnesis/panel/{turno_id}/enlace` arma el enlace firmado, el
    texto sugerido y el Click-to-Chat (`wa.me`) de **cualquier** turno no
    cancelado, aunque esté fuera de la ventana del panel: la secretaría busca por
    paciente y no por fecha. El token se firma siempre en el servidor. El botón
@@ -558,22 +573,22 @@ las respuestas actualizan el estado del turno sin configuración adicional.
    el enlace para copiar o para mandar por API. El mensaje cierra con el enlace
    en su propia línea (WhatsApp sólo lo pinta en azul así), el modal lo muestra
    como link clickeable y avisa cuando la URL es `localhost`. El envío por API
-   (`canal=api`) manda el texto con `preview_url` para que la Cloud API arme la
-   tarjeta del enlace.
-9. `POST /api/v1/anamnesis/panel/{turno_id}/enviar` es el único camino de envío
+   (`canal=api`) manda el texto por WAHA; la vista previa del enlace la arma
+   WhatsApp.
+11. `POST /api/v1/anamnesis/panel/{turno_id}/enviar` es el único camino de envío
    automático:
    - `canal=manual` (por defecto) **no envía nada**: devuelve el enlace y el
      mensaje para copiarlos en WhatsApp Web o desde el celular;
-   - `canal=api` usa la WhatsApp Cloud API y queda `simulado=true` cuando faltan
-     las credenciales (`settings.whatsapp_envio_real` es falso);
+   - `canal=api` usa WAHA y queda `simulado=true` cuando faltan las credenciales
+     (`settings.whatsapp_envio_real` es falso);
    - ninguno de los dos toca `turno.estado_whatsapp`: el recordatorio sigue
      pendiente y la ficha se completa recién con el `POST` público del paciente.
-10. La CLI `python -m scripts.enviar_ficha` repite ese circuito desde la consola
+12. La CLI `python -m scripts.enviar_ficha` repite ese circuito desde la consola
    (busca por teléfono, DNI o nombre, elige el turno vigente más próximo y pide
    el enlace a la app desplegada) sin conocer el secreto ni la base. Muestra la
    fecha y hora tal como las guarda la agenda (la misma del panel y del mensaje):
    no las convierte de zona.
-11. `GET /api/v1/pacientes/{id}/historia-clinica/pdf` imprime la ficha sobre la
+13. `GET /api/v1/pacientes/{id}/historia-clinica/pdf` imprime la ficha sobre la
     **plantilla de papel** (`app/resources/historia_clinica_general.pdf`):
     - abre una copia de las dos páginas oficiales y escribe encima el paciente,
       sus filiatorios y las respuestas;
@@ -705,7 +720,7 @@ Si no hay pendientes, responde `422`.
   Vercel se usa `VERCEL_PROJECT_PRODUCTION_URL` o `VERCEL_URL`; en local,
   `http://localhost:8000`.
 - El secreto de anamnesis sigue esta prioridad:
-  `ANAMNESIS_TOKEN_SECRET` → `WHATSAPP_VERIFY_TOKEN` → SHA-256 derivado de
+  `ANAMNESIS_TOKEN_SECRET` → SHA-256 derivado de
   `DATABASE_URL + APP_NAME + "anamnesis"`.
 
 ### 3.6. Transacciones, errores y límites
@@ -734,7 +749,7 @@ Si no hay pendientes, responde `422`.
 | `pydantic` | 2.14.1 | Schemas de entrada/salida, validadores y serialización. |
 | `pydantic-settings` | 2.15.0 | Lectura de `.env` y variables de entorno tipadas. |
 | `email-validator` | 2.3.0 | Soporte de `EmailStr` en el schema de paciente. |
-| `httpx` | 0.28.1 | Cliente HTTP para la WhatsApp Cloud API. |
+| `httpx` | 0.28.1 | Cliente HTTP para WAHA (`/api/sendText`). |
 | `psycopg[binary]` | 3.3.6 | Driver PostgreSQL 3 usado por SQLAlchemy. |
 | `python-dotenv` | 1.2.4 | Carga de archivos `.env` (complemento de settings). |
 | `tzdata` | 2026.5 | Base de zonas horarias en plataformas que no la traen. |
@@ -845,7 +860,7 @@ Si no hay pendientes, responde `422`.
 | `Turno` | `turnos` | `id`, `paciente_id`, `doctor_id`, fechas, estados, `whatsapp_mensaje_id` | N-1 paciente/doctor; 1-1 movimiento de caja. |
 | `DisponibilidadDoctor` | `disponibilidad_doctores` | `id`, `doctor_id`, `dia_semana`, `hora_inicio`, `hora_fin` | N-1 doctor. |
 | `DisponibilidadEspecifica` | `disponibilidad_especifica` | `id`, `doctor_id`, `fecha`, horas, `tipo` | N-1 doctor. |
-| `HistoriaClinica` | `historias_clinicas` | `id`, `paciente_id`, `numero_ficha` | 1-1 paciente; 1-N evoluciones; 1-1 antecedentes. |
+| `HistoriaClinica` | `historias_clinicas` | `id`, `paciente_id`, `numero_ficha` | 1-1 paciente; 1-N evoluciones; 1-1 antecedentes; 1-1 odontograma; 1-1 ficha médica. |
 | `EvolucionMedica` | `evoluciones_medicas` | `id`, `historia_clinica_id`, `doctor_id`, `fecha_atencion`, textos clínicos | N-1 historia/doctor; 1-N archivos. Inmutable. |
 | `ArchivoAdjunto` | `archivos_adjuntos` | `id`, `evolucion_id`, `url_archivo`, `tipo_archivo`, `fecha_subida` | N-1 evolución. |
 | `Prestacion` | `prestaciones` | `id`, `codigo_nomenclador`, `descripcion`, `valor_base`, `activa` | 1-N aranceles y detalles. |
@@ -855,7 +870,9 @@ Si no hay pendientes, responde `422`.
 | `OpcionMenuWhatsApp` | `opciones_menu_whatsapp` | `id`, `numero`, `titulo`, `tipo`, `respuesta`, `activa`, `orden` | Sin FK. |
 | `AntecedentesSalud` | `antecedentes_salud` | `id`, `historia_clinica_id`, campos de la Historia Clínica General (familiares, personales, odontológicos, examen bucal y diagnóstico/plan), `completado`, `fecha_completado` | 1-1 historia clínica. Los **filiatorios** de la ficha no son columnas: se guardan en `pacientes`. |
 | `Odontograma` | `odontogramas` | `id`, `historia_clinica_id`, `doctor_id`, prótesis fija/removible, coronas, dientes existentes, observaciones, `actualizado_en` | 1-1 historia clínica; 1-N dientes. |
-| `OdontogramaDiente` | `odontograma_dientes` | `id`, `odontograma_id`, `diente` (FDI), `estado`, `notas` | N-1 odontograma; único por diente. |
+| `OdontogramaDiente` | `odontograma_dientes` | `id`, `odontograma_id`, `diente` (FDI permanente 11-48 o temporario 51-85), `estado`, `notas` | N-1 odontograma; único por diente. |
+| `FichaMedica` | `fichas_medicas` | `id`, `historia_clinica_id` (UQ), `vencimiento`, `grupo_familiar`, `parentesco`, `antecedentes_enfermedad`, `presencia_sarro`, `enfermedad_periodontal`, `actualizado_en` | 1-1 historia clínica; 1-N renglones de trabajo. |
+| `FichaMedicaTrabajo` | `ficha_medica_trabajos` | `id`, `ficha_medica_id`, `orden`, `fecha`, `codigo`, `pieza`, `trabajo`, `debe`, `haber` | N-1 ficha médica. El saldo se calcula al leer. |
 | `CuentaCorriente` | `cuentas_corrientes` | `id` (UUID), `paciente_id`, `saldo_actual` (`NUMERIC(10,2)`), `ultima_actualizacion` | 1-1 paciente; 1-N transacciones y planes (orden descendente por fecha). |
 | `TransaccionCC` | `transacciones_cc` | `id` (UUID), `cuenta_corriente_id`, `tipo_movimiento`, `monto`, `descripcion`, `fecha`, `medio_pago` | N-1 cuenta. Libro mayor *append-only*. |
 | `PlanCuotas` | `planes_cuotas` | `id` (UUID), `cuenta_corriente_id`, `monto_total_tratamiento`, `monto_entrega_inicial`, `cantidad_cuotas`, `monto_por_cuota`, `estado` | N-1 cuenta; `monto_financiado` y `ajuste_ultima_cuota` son propiedades. |
@@ -897,7 +914,8 @@ Si no hay pendientes, responde `422`.
 | `arancel.py` | `ArancelObraSocialBase/Create/Update/Read`, `ConvenioFilaBase`, `GuardarConvenioRequest`, `ConvenioFilaRead`, `ConvenioObraSocialRead`, `ImportarArancelesRequest`, `ImportarArancelesFilaRead`, `ImportarArancelesRead` | Aranceles, convenios y reporte de importación. |
 | `historia_clinica.py` | `ArchivoAdjuntoCreate/Read`, `EvolucionMedicaCreate/Read`, `HistoriaClinicaDetalle` | Alta y lectura clínica; no hay Update. |
 | `antecedentes_salud.py` | `DeclaracionSaludCreate`, `FichaMedicaUpdate`, `AntecedentesSaludRead`, `AnamnesisPublicaRead`, `AnamnesisGuardadaRead`, `FichaSaludPanelRead`, `FichaSaludEnlaceRead`, `FichaSaludEnvioCreate`, `FichaSaludEnvioRead` | Ficha pública (sólo paciente), ficha completa del panel (con examen y diagnóstico), **filiatorios** (se guardan en el paciente y viajan también en `datos_filiatorios`), alertas calculadas y envío manual del enlace. |
-| `odontograma.py` | `OdontogramaDienteCreate/Read`, `OdontogramaUpdate`, `OdontogramaRead` | Gráfico dental: notación FDI 11-48, estados del PDF y totales por color. |
+| `odontograma.py` | `OdontogramaDienteCreate/Read`, `OdontogramaUpdate`, `OdontogramaRead` | Gráfico dental: notación FDI permanente 11-48 y temporaria 51-85, estados del PDF y totales por color. |
+| `ficha_medica.py` | `FichaMedicaTrabajoCreate/Read`, `FichaMedicaUpdate`, `FichaMedicaRead` | Hoja del paciente: cabecera, estado bucal, libro «Trabajo realizado» con saldo acumulado y datos filiatorios del paciente. |
 | `facturacion.py` | `PrestacionFacturadaCreate`, `FacturarTurnoRequest`, `PresupuestoTurnoRequest`, `PresupuestoCobroRead`, `DetalleMovimientoCajaRead`, `MovimientoCajaRead`, `PrestacionesDisponiblesRead`, `CobrarMovimientoRequest`, `DebitarMovimientoRequest`, `ResumenCajaRead`, `PresentacionObraSocialRead`, `LiquidacionProfesionalesRead` | Cierre de visita, caja, presentaciones y liquidaciones. |
 | `finanzas.py` | `AbrirPlanCuotasRequest`, `PlanCuotasAbiertoRead`, `PlanCuotasRead`, `PlanCuotasEstadoUpdate`, `RegistrarPagoRequest`, `PagoRegistradoRead`, `TransaccionCCRead`, `CuentaCorrienteRead`, `CobroCuentaCorrienteRead`, `CobrosCuentaCorrienteRead` | Consulta del saldo, apertura de planes de cuotas, pagos con su medio y cobros del período para la caja del día; importes en `Decimal` publicados como número JSON. |
 | `egreso.py` | `ProveedorCreate/Read/DetalleRead`, `GastoFacturaCreate/Read`, `PagoEgresoCreate/Read`, `PagoEgresoRegistradoRead`, `DeudaPorTipoRead`, `ResumenEgresosRead` | Módulo 6: alta de proveedores, facturas recibidas (vencimiento por defecto a 30 días, `paciente_id` opcional), pagos de egresos y tablero de cuentas por pagar; importes en `Decimal` publicados como número JSON. |
@@ -917,6 +935,7 @@ Si no hay pendientes, responde `422`.
 | `historia_clinica_service.py` | `numero_ficha_de`, `obtener_historia`, `obtener_o_crear_historia`, `crear_evolucion`, `listar_evoluciones`, `obtener_evolucion`, `detalle_historia` | Ficha automática, evoluciones inmutables y línea de tiempo. |
 | `anamnesis_service.py` | `obtener_formulario_publico`, `guardar_declaracion_publica`, `guardar_declaracion_turno`, `listar_fichas_panel`, `obtener_enlace_ficha`, `enviar_ficha`, `necesita_completar_anamnesis` | Token, alta/edición de la ficha médica completa (paciente y profesional), sincronización de los filiatorios en el paciente, panel de fichas y envío manual del enlace. |
 | `odontograma_service.py` | `obtener_odontograma`, `guardar_odontograma`, `_aplicar_cabecera`, `_odontograma_de` | Lectura sin crear la historia, alta/corrección del gráfico y reemplazo del conjunto de dientes. |
+| `ficha_medica_service.py` | `obtener_ficha`, `guardar_ficha`, `_armar_read`, `_aplicar_cabecera`, `_ficha_de` | Lectura sin crear la historia, alta/corrección de la cabecera y el estado bucal, reemplazo del libro de trabajos y cálculo del saldo acumulado. |
 | `arancel_service.py` | `obtener_arancel`, `listar_aranceles`, `crear_arancel`, `actualizar_arancel`, `reemplazar_arancel`, `eliminar_arancel`, `resolver_arancel`, `mapa_aranceles`, `coseguro_sugerido`, `convenio_de_obra_social`, `guardar_convenio`, `importar_aranceles`, `plantilla_aranceles` | Acuerdo OS–práctica, grilla de convenios, importador y plantilla. |
 | `facturacion_service.py` | `periodo_mensual`, `numero_presentacion`, `movimiento_de_turno`, `listar_movimientos`, `resumen_caja`, `_resolver_prestaciones`, `prestaciones_disponibles`, `presupuestar`, `facturar_turno`, `cobrar_movimiento`, `debitar_movimiento`, `presentacion_del_periodo`, `generar_presentacion` | Motor de facturación mixta, caja y presentaciones a obras sociales. |
 | `finanzas_service.py` | `transaccion`, `obtener_cuenta_corriente`, `informe_cuentas_corrientes`, `abrir_plan_cuotas`, `registrar_pago`, `cambiar_estado_plan`, `cobros_del_periodo`, `listar_transacciones`, `eliminar_transaccion` | Cuenta corriente, libro mayor *append-only*, recálculo del saldo, informe consolidado de la cobranza, planes de cuotas dentro de una unidad de trabajo (`commit`/`rollback`) y cobros del período (con su medio de pago) para la caja del día. |
@@ -925,12 +944,13 @@ Si no hay pendientes, responde `422`.
 | `reporte_pdf_service.py` | `pdf_presentacion_obra_social`, `pdf_liquidacion_profesionales`, `nombre_archivo_presentacion`, `nombre_archivo_liquidacion` | Render PDF de los dos reportes de facturación. |
 | `whatsapp_menu_service.py` | `opciones_por_defecto`, `contar_opciones`, `listar_opciones`, `obtener_menu_vigente`, `obtener_opcion`, `crear_opcion`, `actualizar_opcion`, `desactivar_opcion`, `sembrar_menu_por_defecto`, `restaurar_menu_por_defecto` | Menú configurable, unicidad de tecla y seed inicial. |
 | `whatsapp_bot_service.py` | `normalizar_texto`, `detectar_opcion`, `es_saludo_inicial`, `normalizar_destinatario`, `formatear_importe`, `obtener_prestacion_consulta`, `listar_obras_sociales_activas`, `mensaje_menu`, `mensaje_precio_consulta`, `mensaje_obras_sociales`, `mensaje_ubicacion`, `responder_mensaje` | Árbol de decisión del FAQ Bot y redacción de respuestas. |
-| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `enviar_recordatorios`, `iterar_mensajes`, `mensaje_de_texto`, `procesar_respuesta_boton`, `normalizar_telefono_whatsapp`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WhatsApp, recordatorios, webhook y enlaces `wa.me`. |
+| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `enviar_recordatorios`, `es_evento_de_mensaje`, `telefono_de_chat`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA, recordatorios, webhook y enlaces `wa.me`. |
+| `whatsapp_conversacion_service.py` | `obtener_conversacion`, `marcar_confirmacion_pendiente`, `marcar_menu`, `cerrar_confirmacion`, `obtener_confirmacion_pendiente` | Estado de conversación por teléfono (menú / confirmación pendiente). |
 
 **Orden de dependencia entre servicios (resumen):**
 
 ```
-whatsapp_bot → whatsapp_service → anamnesis_service → historia_clinica_service
+whatsapp_bot → whatsapp_service / whatsapp_conversacion_service → anamnesis_service → historia_clinica_service
 liquidacion → facturacion → arancel / obra_social / prestacion
 finanzas → paciente
 egreso → paciente
@@ -1002,7 +1022,7 @@ fallo de WhatsApp.
 | `GET` | `/api/v1/turnos/{id}` | Detalle. |
 | `PATCH` | `/api/v1/turnos/{id}` | Reprograma, reasigna, confirma, cancela o reactiva. |
 
-#### 5.4.3. Historia clínica, ficha médica y odontograma
+#### 5.4.3. Historia clínica, ficha médica del paciente y odontograma
 
 | Método | Ruta | Resumen / regla |
 |---|---|---|
@@ -1012,7 +1032,9 @@ fallo de WhatsApp.
 | `GET` | `/api/v1/pacientes/{id}/historia-clinica/pdf` | Historia Clínica General en PDF sobre la plantilla de papel (`?doctor_id=` opcional); anexo con odontograma y textos largos. |
 | `GET` | `/api/v1/evoluciones/{id}` | Evolución puntual; sólo lectura. |
 | `GET` | `/api/v1/pacientes/{id}/odontograma` | Gráfico dental + prótesis + totales; `id` en `null` si no se cargó. |
-| `PUT` | `/api/v1/pacientes/{id}/odontograma` | Guarda el odontograma completo (FDI 11-48; reemplaza los dientes). |
+| `PUT` | `/api/v1/pacientes/{id}/odontograma` | Guarda el odontograma completo (FDI permanente 11-48 y temporaria 51-85; reemplaza los dientes). |
+| `GET` | `/api/v1/pacientes/{id}/ficha-medica` | Hoja del paciente: datos filiatorios, vencimiento, grupo familiar, parentesco, antecedentes, sarro/periodontal y libro «Trabajo realizado» con saldo; `id` en `null` si no se cargó. |
+| `PUT` | `/api/v1/pacientes/{id}/ficha-medica` | Guarda la ficha completa (crea la historia; reemplaza el libro, descarta renglones en blanco y recalcula el saldo). |
 | `GET` | `/api/v1/anamnesis/panel?dias=&solo_pendientes=` | Turnos próximos con estado de ficha y enlace. |
 | `GET` | `/api/v1/anamnesis/panel/{turno_id}/enlace?telefono=` | Enlace firmado, mensaje y `wa.me` de cualquier turno no cancelado. |
 | `POST` | `/api/v1/anamnesis/panel/{turno_id}/enviar` | Prepara (`manual`) o envía (`api`) la ficha; no marca el recordatorio. |
@@ -1070,8 +1092,7 @@ fallo de WhatsApp.
 | `GET` | `/api/v1/liquidaciones/obras-sociales/pdf?...` | Presentación en PDF. |
 | `GET` | `/api/v1/liquidaciones/profesionales/pdf?...` | Liquidación en PDF. |
 | `GET` / `POST` | `/api/v1/tareas/enviar-recordatorios?dias=` | Dispara recordatorios del día `hoy + N`; requiere `Bearer CRON_SECRET`. |
-| `GET` | `/api/v1/whatsapp/webhook` | Verificación `hub.mode`, `hub.verify_token`, `hub.challenge`. |
-| `POST` | `/api/v1/whatsapp/webhook` | Procesa texto (bot) o botón (confirmar/cancelar). |
+| `POST` | `/api/v1/whatsapp/webhook` | Procesa eventos de WAHA: confirmación por texto y menú del bot. |
 | `GET` | `/api/v1/whatsapp/recordatorios-pendientes?dias=` | Lista con enlace `wa.me` y mensaje redactado. |
 | `GET` | `/api/v1/whatsapp/menu?activas=` | Lista opciones del FAQ Bot. |
 | `POST` | `/api/v1/whatsapp/menu` | Crea opción; número de un dígito único. |
@@ -1215,12 +1236,12 @@ absolutas con `pathlib`.
 |---|---:|---|
 | `index.html` | 2.538 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente, proveedores y egresos y bot. |
 | `styles.css` | 1.348 líneas | Componentes, animaciones, timeline clínica y utilidades propias. |
-| `app.js` | 8.159 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia y puente `window.OdontoApp`. |
+| `app.js` | 8.690 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia y puente `window.OdontoApp`. |
 | `calendar.js` | 986 líneas | Calendario mensual, filtro por odontólogo, tooltip, panel del día y bloques libres; consume `window.OdontoApp` y expone `window.OdontoCalendar`. |
 | `ficha_medica.js` | 686 líneas | Catálogo único de **124 campos** (8 filiatorios + antecedentes familiares, personales, odontológicos, examen y diagnóstico) + formulario, edad calculada y resumen reutilizables. |
 | `ficha_medica.css` | 226 líneas | Estilos del cuestionario en la página pública, el panel y la vista móvil (incluye la edad calculada). |
-| `odontograma.js` | 516 líneas | Modal del odontograma: paleta rojo/azul/X, 32 dientes FDI, prótesis y guardado por API. |
-| `odontograma.css` | 431 líneas | Colores de los estados, arcadas, botón *Odontograma* y adaptación móvil. |
+| `odontograma.js` | 1.003 líneas | Modal de la **ficha médica**: datos del paciente, odontograma permanente/temporario, estado bucal, libro «Trabajo realizado», guardado por API y botón *Editar datos* que delega en el formulario de pacientes. |
+| `odontograma.css` | 885 líneas | Hoja del papel: datos, arcadas, estado bucal, tabla de trabajos, botón *Ficha médica*, móvil e impresión. |
 | `medico.html` | 360 líneas | Vista mobile-first, selección de profesional, agenda y hoja de historia/evolución. |
 | `medico.css` | 424 líneas | Estilos táctiles, hojas deslizantes y timeline. |
 | `medico.js` | 1.555 líneas | Agenda autónoma, navegación de fechas, alta/edición/cancelación, evolución clínica y refresco cada 60 s. |
@@ -1240,7 +1261,8 @@ absolutas con `pathlib`.
 - cliente HTTP `api()` y `mensajeError()`;
 - render de dashboard, agenda, doctores, pacientes, obras sociales y menú;
 - historia clínica y anamnesis en modo lectura;
-- ficha médica completa (formulario del panel y resumen) y botón del odontograma;
+- ficha médica completa (formulario del panel y resumen) y botón de la ficha
+  médica del paciente (hoja de papel con odontograma y trabajos);
 - disponibilidad semanal y excepciones por fecha;
 - facturación, caja, convenios, prestaciones y liquidaciones;
 - modales de turno, paciente, obra social y opción de menú;
@@ -1254,7 +1276,8 @@ absolutas con `pathlib`.
 - alta de paciente y turno;
 - edición, confirmación y cancelación;
 - historia clínica y alta de evolución inmutable;
-- ficha médica (sólo lectura) y odontograma gráfico;
+- ficha médica (sólo lectura), botón de la ficha médica del paciente (datos,
+  odontograma y trabajos) y alta de evolución;
 - búsqueda local de fichas y refresco automático.
 
 ### 5.6. Scripts (`scripts/`)
@@ -1266,12 +1289,13 @@ absolutas con `pathlib`.
 | `migrar_pacientes_datos.py` | `python -m scripts.migrar_pacientes_datos` | Agrega `dni`, `obra_social` (texto) y `numero_afiliado` a bases legacy. |
 | `migrar_obra_social.py` | `python -m scripts.migrar_obra_social` | Crea `obras_sociales`, migra el texto heredado a `obra_social_id` y elimina la columna vieja si SQLite lo permite. |
 | `migrar_historias_clinicas.py` | `python -m scripts.migrar_historias_clinicas` | Crea `historias_clinicas`, `evoluciones_medicas` y `archivos_adjuntos` con sus índices. |
+| `migrar_ficha_medica.py` | `python -m scripts.migrar_ficha_medica` | Crea `fichas_medicas` y `ficha_medica_trabajos` con sus índices (copia de seguridad y verificación). |
 | `migrar_facturacion.py` | `python -m scripts.migrar_facturacion` | Crea tablas del Módulo 3 y agrega columnas de pago a `doctores`. |
 | `migrar_turnos_unique_parcial.py` | `python -m scripts.migrar_turnos_unique_parcial` | Convierte la unicidad de turnos al índice parcial que excluye cancelados. |
 | `migrar_disponibilidad_especifica.py` | `python -m scripts.migrar_disponibilidad_especifica` | Crea la tabla de excepciones por fecha. |
 | `migrar_sqlite_a_postgres.py` | `python -m scripts.migrar_sqlite_a_postgres --destino ... [--ejecutar] [--modo reemplazar\|agregar]` | Copia datos preservando IDs, reajusta secuencias y verifica conteos. Sin `--ejecutar` es simulacro. |
 | `replicar_datos_api.py` | `python -m scripts.replicar_datos_api [--url ...] [--ejecutar]` | Copia datos locales a la app desplegada usando su API; empareja por clave natural. No replica excepciones ni `wamid`. |
-| `enviar_ficha.py` | `python -m scripts.enviar_ficha --telefono\|--dni\|--nombre [--turno] [--api] [--destino] [--listar] [--json]` | Pide a la app el enlace firmado de la ficha y lo imprime (o lo envía por la Cloud API). No toca la base ni firma tokens. |
+| `enviar_ficha.py` | `python -m scripts.enviar_ficha --telefono\|--dni\|--nombre [--turno] [--api] [--destino] [--listar] [--json]` | Pide a la app el enlace firmado de la ficha y lo imprime (o lo envía por WAHA). No toca la base ni firma tokens. |
 | `limpiar_base.py` | `python -m scripts.limpiar_base --env-file .env.vercel.local [--modo operativo\|todo] [--ejecutar]` | Vacía filas en una transacción, sin borrar el esquema. Sin `--ejecutar` es simulacro; rechaza SQLite salvo `--permitir-sqlite`. |
 | `configurar_url_vercel.py` | `python -m scripts.configurar_url_vercel [--forzar]` | Pide con entrada oculta la `DATABASE_URL` de producción y la guarda en `.env.vercel.local` (ignorado por git). |
 | `publicar.py` | `python -m scripts.publicar [opciones]` | Ejecuta pytest, commit, push, deploy Vercel y verificación de `/health`, `/` y `/medico`. |
@@ -1291,7 +1315,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | Archivo | Cobertura principal |
 |---|---|
 | `conftest.py` | Fixtures `engine`, `db_session`, `client`, `doctor`, `paciente`; aislamiento de WhatsApp. |
-| `test_anamnesis.py` | Token HMAC, formulario público, ficha completa (familiares, personales, odontológicos), opciones/rangos, separación paciente/profesional, panel y alertas. |
+| `test_anamnesis.py` | Token HMAC, formulario público, ficha completa (familiares, personales, odontológicos), opciones/rangos, separación paciente/profesional, panel, alertas y acceso «Editar datos» de la ficha médica. |
 | `test_ficha_pdf.py` | Plantilla de papel completa (todas las etiquetas del relleno), PDF con los datos y las casillas SI/NO marcadas, anexo con odontograma y textos largos, `application/pdf` en la API y `404` de paciente/profesional. |
 | `test_contrato_http_turnos.py` | Contrato PATCH de turnos, códigos y CORS. |
 | `test_convenios.py` | Grilla de convenios, plantilla, importador CSV/XLSX y cierre de visita. |
@@ -1311,7 +1335,8 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_migracion_sqlite_a_postgres.py` | Copia de datos, mapeos y secuencias. |
 | `test_migraciones_esquema.py` | `ALTER TABLE` aditivo, idempotencia y PostgreSQL. |
 | `test_obras_sociales.py` | Catálogo, unicidad y vínculo con pacientes. |
-| `test_odontograma.py` | Lectura sin crear historia, tres estados por color, reemplazo de dientes, FDI y validaciones. |
+| `test_odontograma.py` | Lectura sin crear historia, tres estados por color, reemplazo de dientes, FDI permanente y temporario, y validaciones. |
+| `test_ficha_medica.py` | Ficha del paciente: lectura sin crear historia, cabecera y estado bucal, saldo acumulado del libro «Trabajo realizado», reemplazo y validaciones (`404`/`422`). |
 | `test_pacientes.py` | DNI, cobertura, búsqueda y normalización. |
 | `test_publicar.py` | Ejecutor de comandos, git/Vercel simulados y verificación. |
 | `test_recordatorios_click_to_chat.py` | Enlaces `wa.me`, ventana de días y marcado `ENVIADO`. |
@@ -1426,7 +1451,8 @@ aplicación lista
 
 - `turnos` es el eje entre `pacientes`, `doctores` y la caja.
 - `historias_clinicas` es el eje clínico entre un paciente, sus evoluciones, su
-  ficha médica y su odontograma.
+  ficha de salud, su ficha médica del paciente (`fichas_medicas` con sus
+  `ficha_medica_trabajos`) y su odontograma.
 - `aranceles_obra_social` es una **tabla de asociación con atributos** entre
   obras sociales y prestaciones (conceptual N:M).
 - `opciones_menu_whatsapp` es una tabla independiente, sin relaciones.
@@ -1458,6 +1484,8 @@ aplicación lista
 | 21 | `proveedores` | 6 | Acreedores (mecánico dental, insumos, servicios/impuestos) y su saldo. |
 | 22 | `gastos_facturas` | 6 | Facturas recibidas: concepto, importes, vencimiento y estado de pago. |
 | 23 | `pagos_egresos` | 6 | Pagos aplicados a una factura, con su método. |
+| 24 | `fichas_medicas` | 4 | Cabecera de la ficha médica: vencimiento, grupo familiar, antecedentes y estado bucal. |
+| 25 | `ficha_medica_trabajos` | 4 | Libro «Trabajo realizado» (fecha, código, pieza, debe y haber). |
 
 ### 6.4. Diccionario de datos exhaustivo
 
@@ -1619,7 +1647,7 @@ notificación por WhatsApp.
 | `fecha_hora_fin` | `DATETIME / TIMESTAMP WITH TIME ZONE` | No | — | — | Fin del turno; debe ser posterior al inicio. |
 | `estado_turno` | `VARCHAR(20) / VARCHAR(20)` | No | `'PENDIENTE'` | — | `PENDIENTE`, `CONFIRMADO` o `CANCELADO`; sin `CHECK`. |
 | `estado_whatsapp` | `VARCHAR(20) / VARCHAR(20)` | No | `'PENDIENTE_ENVIO'` | — | `PENDIENTE_ENVIO`, `ENVIADO`, `FALLIDO` o `RESPONDIDO`; sin `CHECK`. |
-| `whatsapp_mensaje_id` | `VARCHAR(128) / VARCHAR(128)` | Sí | `NULL` | **IDX** `ix_turnos_whatsapp_mensaje_id` | `wamid` del mensaje saliente para correlacionar el botón. |
+| `whatsapp_mensaje_id` | `VARCHAR(128) / VARCHAR(128)` | Sí | `NULL` | **IDX** `ix_turnos_whatsapp_mensaje_id` | Identificador del mensaje saliente de WAHA (auditoría). |
 
 **Restricciones e índices:**
 
@@ -2073,6 +2101,55 @@ borra; si hay que corregir, se registra otro pago.
   tocar los cobros del paciente (donde ese valor sería un ingreso imposible).
 - `ON DELETE CASCADE` desde la factura: sin factura, un pago no significa nada.
 
+#### 6.4.24. `fichas_medicas` (Módulo 4)
+
+Cabecera de la hoja de papel que el consultorio archiva junto al odontograma.
+Una ficha por historia clínica. Los datos filiatorios **no** se duplican acá:
+viven en `pacientes` y la API los adjunta al leer.
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `INTEGER / INTEGER` | No | autoincremental | **PK** | Identificador interno. |
+| `historia_clinica_id` | `INTEGER / INTEGER` | No | — | **FK** → `historias_clinicas.id` (`CASCADE`); **UQ** `uq_ficha_medica_historia` | Ficha clínica asociada. |
+| `vencimiento` | `DATE / DATE` | Sí | `NULL` | — | Vencimiento de la credencial («Vto» del papel). |
+| `grupo_familiar` | `VARCHAR(120) / VARCHAR(120)` | Sí | `NULL` | — | Grupo familiar del titular. |
+| `parentesco` | `VARCHAR(60) / VARCHAR(60)` | Sí | `NULL` | — | Parentesco con el titular. |
+| `antecedentes_enfermedad` | `TEXT / TEXT` | Sí | `NULL` | — | Antecedentes anotados por el profesional. |
+| `presencia_sarro` | `BOOLEAN / BOOLEAN` | Sí | `NULL` | — | `true` = SI, `false` = NO, `NULL` = sin responder. |
+| `enfermedad_periodontal` | `BOOLEAN / BOOLEAN` | Sí | `NULL` | — | `true` = SI, `false` = NO, `NULL` = sin responder. |
+| `actualizado_en` | `DATETIME / TIMESTAMP WITH TIME ZONE` | No | `now()` | — | Último guardado (UTC naive en Python). |
+
+**Restricciones y notas:**
+
+- `GET /pacientes/{id}/ficha-medica` **no** crea la historia clínica; el `PUT` sí
+  la crea, igual que el odontograma.
+- El estado bucal admite `NULL` porque el papel puede quedar sin marcar; la API
+  lo expone tal cual.
+
+#### 6.4.25. `ficha_medica_trabajos` (Módulo 4)
+
+Renglones del libro **«Trabajo realizado»**. El `PUT` reemplaza el conjunto
+completo y descarta los renglones en blanco.
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `INTEGER / INTEGER` | No | autoincremental | **PK** | Identificador interno. |
+| `ficha_medica_id` | `INTEGER / INTEGER` | No | — | **FK** → `fichas_medicas.id` (`CASCADE`); **IDX** `ix_ficha_trabajo_ficha` | Ficha dueña. |
+| `orden` | `INTEGER / INTEGER` | No | `0` | — | Posición en el libro (0 = primer renglón). |
+| `fecha` | `DATE / DATE` | Sí | `NULL` | — | Fecha de la práctica. |
+| `codigo` | `VARCHAR(30) / VARCHAR(30)` | Sí | `NULL` | — | Código del nomenclador tomado del catálogo de prestaciones (se conserva como texto en el histórico). |
+| `pieza` | `VARCHAR(30) / VARCHAR(30)` | Sí | `NULL` | — | Pieza dentaria; admite varias («18, 17»). |
+| `trabajo` | `TEXT / TEXT` | Sí | `NULL` | — | Práctica realizada. |
+| `debe` | `FLOAT / FLOAT` | Sí | `NULL` | — | Importe debitado (≥ 0). |
+| `haber` | `FLOAT / FLOAT` | Sí | `NULL` | — | Importe acreditado (≥ 0). |
+
+**Restricciones y notas:**
+
+- El **saldo no se guarda**: el servicio lo calcula al leer sumando `debe` y
+  restando `haber` en el orden del libro (`saldo` de cada renglón y totales).
+- Los importes negativos y los textos fuera de largo responden `422`; el tope de
+  renglones es `MAX_RENGLONES_TRABAJO` (100).
+
 ### 6.5. Relaciones del sistema
 
 | Origen | Campo | Destino | Cardinalidad | `ON DELETE` | Regla |
@@ -2087,6 +2164,8 @@ borra; si hay que corregir, se registra otro pago.
 | `odontogramas` | `historia_clinica_id` | `historias_clinicas.id` | **1:1** (UQ) | `CASCADE` | Un odontograma por ficha clínica. |
 | `odontogramas` | `doctor_id` | `doctores.id` | N:1 | `SET NULL` | Profesional que cargó el gráfico. |
 | `odontograma_dientes` | `odontograma_id` | `odontogramas.id` | N:1 | `CASCADE` | Varios dientes por odontograma. |
+| `fichas_medicas` | `historia_clinica_id` | `historias_clinicas.id` | **1:1** (UQ) | `CASCADE` | Una ficha médica por ficha clínica. |
+| `ficha_medica_trabajos` | `ficha_medica_id` | `fichas_medicas.id` | N:1 | `CASCADE` | Varios renglones por ficha. |
 | `evoluciones_medicas` | `historia_clinica_id` | `historias_clinicas.id` | N:1 | `CASCADE` | Muchas atenciones por ficha. |
 | `evoluciones_medicas` | `doctor_id` | `doctores.id` | N:1 | `RESTRICT` | El doctor no se borra si firmó evoluciones. |
 | `archivos_adjuntos` | `evolucion_id` | `evoluciones_medicas.id` | N:1 | `CASCADE` | Varios archivos por evolución. |
@@ -2112,6 +2191,7 @@ borra; si hay que corregir, se registra otro pago.
 - `pacientes` ↔ `historias_clinicas` (`uq_historia_paciente`).
 - `historias_clinicas` ↔ `antecedentes_salud` (`uq_antecedentes_historia_clinica`).
 - `historias_clinicas` ↔ `odontogramas` (`uq_odontograma_historia`).
+- `historias_clinicas` ↔ `fichas_medicas` (`uq_ficha_medica_historia`).
 - `turnos` ↔ `movimientos_caja` (`uq_movimiento_caja_turno`).
 - `pacientes` ↔ `cuentas_corrientes` (`uq_cuenta_corriente_paciente`).
 
@@ -2130,6 +2210,7 @@ borra; si hay que corregir, se registra otro pago.
 | Índice único | `uq_antecedentes_historia_clinica` | `antecedentes_salud` | `historia_clinica_id` único (1:1). |
 | Índice único | `uq_odontograma_historia` | `odontogramas` | `historia_clinica_id` único (1:1). |
 | Índice único | `uq_odontograma_diente` | `odontograma_dientes` | `(odontograma_id, diente)` único. |
+| Índice único | `uq_ficha_medica_historia` | `fichas_medicas` | `historia_clinica_id` único (1:1). |
 | Índice único | `uq_movimiento_caja_turno` | `movimientos_caja` | `turno_id` único (1:1). |
 | Índice único | `uq_opcion_menu_numero` | `opciones_menu_whatsapp` | `numero` único. |
 | Índice único | `uq_cuenta_corriente_paciente` | `cuentas_corrientes` | `paciente_id` único (1:1). |
@@ -2220,7 +2301,7 @@ servicios.
 | Valor | Significado |
 |---|---|
 | `PENDIENTE_ENVIO` | Todavía no se envió el recordatorio. |
-| `ENVIADO` | Se envió (real o simulado) y se guardó el `wamid`. |
+| `ENVIADO` | Se envió (real o simulado) y se guardó el identificador del mensaje. |
 | `FALLIDO` | El envío falló. |
 | `RESPONDIDO` | El paciente respondió con un botón. |
 
@@ -2321,7 +2402,7 @@ corrección se hace con otro movimiento de signo contrario.
 |---|---|---|---|
 | Turnos de un doctor en un rango | `turnos` | `ix_turnos_doctor_id`, `ix_turnos_fecha_hora_inicio` | No hay índice compuesto `(doctor_id, fecha_hora_inicio)`; a gran volumen conviene agregarlo. |
 | Turnos de un paciente | `turnos` | `ix_turnos_paciente_id` | Frecuente en historia y vista móvil. |
-| Buscar turno por wamid | `turnos` | `ix_turnos_whatsapp_mensaje_id` | Clave del webhook de botones. |
+| Buscar turno por mensaje de WhatsApp | `turnos` | `ix_turnos_whatsapp_mensaje_id` | Trazabilidad del recordatorio enviado. |
 | Evitar duplicado exacto de turno | `turnos` | `uq_turno_doctor_fecha_inicio` (parcial) | Excluye cancelados. |
 | Agenda semanal por doctor/día | `disponibilidad_doctores` | `ix_disponibilidad_doctor_dia` | Cubre `(doctor_id, dia_semana)`. |
 | Excepciones por doctor/fecha | `disponibilidad_especifica` | `ix_especifica_doctor_fecha` | Cubre `(doctor_id, fecha)`. |
@@ -2330,6 +2411,8 @@ corrección se hace con otro movimiento de signo contrario.
 | Declaración por ficha | `antecedentes_salud` | `uq_antecedentes_historia_clinica` | 1:1. |
 | Odontograma por ficha | `odontogramas` | `uq_odontograma_historia` | 1:1. |
 | Dientes de un odontograma | `odontograma_dientes` | `ix_odontograma_dientes_odontograma_id`, `uq_odontograma_diente` | Lista ordenada y unicidad por diente. |
+| Ficha médica por ficha | `fichas_medicas` | `uq_ficha_medica_historia` | 1:1. |
+| Trabajos de una ficha | `ficha_medica_trabajos` | `ix_ficha_trabajo_ficha` | Renglones ordenados por `orden`. |
 | Caja por fecha | `movimientos_caja` | `ix_movimiento_caja_fecha` | Puede existir un índice legacy duplicado. |
 | Caja por doctor | `movimientos_caja` | `ix_movimientos_caja_doctor_id` | Reportes de liquidación. |
 | Un cierre por turno | `movimientos_caja` | `uq_movimiento_caja_turno` | Unicidad. |
@@ -2981,10 +3064,12 @@ Para acceder desde el celular en la misma Wi-Fi, usar la IP de la PC y
 `import fastapi, uvicorn` funcione y que el puerto esté libre —lo prueba con un
 socket a `127.0.0.1`, así no depende del idioma de `netstat`—, imprime las URLs
 (`/`, `/medico`, `/docs`, `/health`), las IPv4 de la PC para el celular y lanza
-`uvicorn app.main:app --host 0.0.0.0 --port 8000`. Acepta `[puerto]`, `--local`,
-`--reload`, `--abrir` y `--help`. Si el puerto está ocupado ofrece abrir el panel
-en el navegador (la app ya estaría corriendo) en lugar de arrancar un segundo
-proceso, que en Windows fallaría con `[Errno 10048]`.
+`uvicorn app.main:app --host 0.0.0.0 --port 8000`. Acepta `[puerto]` (1-65535),
+`--local`, `--reload`, `--abrir` y `--help`. Si el puerto está ocupado consulta
+`/health`: cuando responde esta app ofrece abrir el panel en el navegador (en
+lugar de arrancar un segundo proceso, que en Windows fallaría con
+`[Errno 10048]`); si lo ocupa otro programa, lo avisa y sugiere otro puerto.
+También avisa si el `.env` no define `DATABASE_URL`.
 
 ### 8.2. Variables de entorno
 
@@ -2998,11 +3083,9 @@ proceso, que en Windows fallaría con `[Errno 10048]`.
 | `DATABASE_URL_DESTINO` | vacío | Destino opcional de `migrar_sqlite_a_postgres`. |
 | `CORS_ORIGINS` | `["*"]` | Orígenes permitidos; acepta lista JSON. |
 | `CORS_ALLOW_CREDENTIALS` | `false` | Cookies/credenciales CORS. |
-| `WHATSAPP_API_URL` | `https://graph.facebook.com/v26.0` | Base de la Graph API. |
-| `WHATSAPP_PHONE_NUMBER_ID` | vacío | Phone Number ID de Meta (sólo dígitos). |
-| `WHATSAPP_TOKEN` | vacío | Alias corto del access token. |
-| `WHATSAPP_ACCESS_TOKEN` | vacío | Access token; tiene prioridad sobre `WHATSAPP_TOKEN`. |
-| `WHATSAPP_VERIFY_TOKEN` | vacío | Verify token del webhook. |
+| `WAHA_URL` | `http://localhost:3000` | URL base de WAHA (sin `/api`). |
+| `WAHA_API_KEY` | vacío | Valor de la cabecera `X-Api-Key`. |
+| `WAHA_SESSION` | `default` | Sesión de WAHA que envía y recibe. |
 | `WHATSAPP_CONSULTA_CODIGO` | `10100` | Código de consulta para la opción PRECIO. |
 | `WHATSAPP_CONSULTORIO_DIRECCION` | `Av. Colón 1234, Córdoba Capital` | Dirección del bot. |
 | `WHATSAPP_CONSULTORIO_HORARIOS` | `Lunes a viernes...` | Horarios del bot. |
@@ -3012,8 +3095,8 @@ proceso, que en Windows fallaría con `[Errno 10048]`.
 | `ANAMNESIS_TOKEN_SECRET` | vacío | Secreto HMAC de la ficha. |
 | `VERCEL` / `VERCEL_URL` / `VERCEL_PROJECT_PRODUCTION_URL` | provistas por Vercel | Detección de entorno y URL pública. |
 
-**Orden de prioridad del token de WhatsApp:**
-`WHATSAPP_ACCESS_TOKEN` → `WHATSAPP_TOKEN`. Un valor vacío se ignora.
+**Envío real:** requiere `WAHA_URL` y `WAHA_API_KEY`. Sin `WAHA_API_KEY` los
+envíos se simulan (`settings.whatsapp_envio_real` es falso).
 
 ### 8.3. Seeds y datos de ejemplo
 
@@ -3049,7 +3132,7 @@ Modos:
 | Modo | Qué vacía | Qué conserva |
 |---|---|---|
 | `operativo` (recomendado) | `pacientes`, `turnos`, `historias_clinicas`, `evoluciones_medicas`, `antecedentes_salud`, `odontogramas`, `odontograma_dientes`, `archivos_adjuntos`, `movimientos_caja`, `detalles_movimiento_caja`, `disponibilidad_especifica`, `cuentas_corrientes`, `transacciones_cc`, `planes_cuotas` | `doctores`, `obras_sociales`, `prestaciones`, `aranceles_obra_social`, `disponibilidad_doctores` y `opciones_menu_whatsapp` |
-| `todo` | Las 20 tablas | Nada; vuelve a sembrar las 4 opciones del menú del bot |
+| `todo` | Las 25 tablas | Nada; vuelve a sembrar las 4 opciones del menú del bot |
 
 El `.bat` primero ejecuta un **simulacro** (conteos), después pide escribir `SI`
 y recién entonces borra. En PostgreSQL usa `TRUNCATE ... RESTART IDENTITY` sin
@@ -3120,8 +3203,8 @@ detached; remoto `origin`; tests en verde.
 | Síntoma | Causa probable | Solución |
 |---|---|---|
 | `500` al listar/guardar doctores o pacientes | Falta una columna que `create_all` no agrega. | Ejecutar `init_db`/migración y revisar `COLUMNAS_NUEVAS`. |
-| WhatsApp responde 400/404 | `WHATSAPP_PHONE_NUMBER_ID` es un teléfono, no el ID de Meta. | Copiar el Phone Number ID de API Setup. |
-| Webhook no verifica | `WHATSAPP_VERIFY_TOKEN` vacío o distinto. | Cargar el mismo valor en Meta y en el entorno. |
+| WAHA responde 401/403 | `WAHA_API_KEY` vacía o distinta. | Cargar la misma API key en WAHA y en el entorno. |
+| WAHA responde 404 | `WAHA_URL` incluye `/api` o la sesión no existe. | Usar la URL base y verificar `WAHA_SESSION`. |
 | Datos desaparecen en Vercel | SQLite en `/tmp`. | Configurar PostgreSQL. |
 | `409` al crear turno | Solape del doctor o duplicado exacto. | Elegir otro horario; cancelar el turno viejo libera el inicio. |
 | `400` “paciente ya tiene turno” | Paciente citado con otro profesional en el mismo rango. | Cambiar horario o cancelar el turno existente. |
@@ -3225,7 +3308,7 @@ detached; remoto `origin`; tests en verde.
 | **Plan de cuotas** | Tratamiento financiado: entrega inicial + cuotas mensuales sobre el saldo restante. |
 | **Saldo a favor** | Excedente pagado por el paciente; el saldo de la cuenta queda negativo. |
 | **RECOBRABLE** | Estado del plan derivado a cobranza, con deuda pendiente. |
-| **Wamid** | Identificador del mensaje de WhatsApp; se usa para correlacionar respuestas. |
+| **Id de mensaje WAHA** | Identificador del mensaje de WhatsApp; queda para auditoría. La correlación usa `conversaciones_whatsapp`. |
 | **UTC naive** | Fecha/hora en UTC sin `tzinfo`, convención de todo el backend. |
 | **Baja lógica** | Marcar `activo/activa = false` sin borrar la fila. |
 | **Snapshot** | Copia congelada de datos (código, descripción, importes) al facturar. |
@@ -3325,6 +3408,7 @@ PRAGMA foreign_key_check;
 | Agenda/disponibilidad | `disponibilidad_service.py`, `disponibilidad*.py` |
 | Historia clínica | `historia_clinica_service.py`, `evolucion_medica.py` |
 | Anamnesis / ficha médica | `anamnesis_service.py`, `anamnesis_token.py`, `antecedentes_salud.py`, `ficha_medica.js`, `ficha_pdf_service.py` |
+| Ficha médica del paciente | `ficha_medica_service.py`, `models/ficha_medica.py`, `schemas/ficha_medica.py`, `endpoints/fichas_medicas.py`, `odontograma.js`, `test_ficha_medica.py` |
 | Odontograma | `odontograma_service.py`, `models/odontograma.py`, `endpoints/odontogramas.py`, `odontograma.js`, `test_odontograma.py` |
 | Facturación/caja | `facturacion_service.py`, `movimiento_caja.py` |
 | Cuenta corriente/pagos | `finanzas_service.py`, `models/cuenta_corriente.py`, `schemas/finanzas.py`, `endpoints/finanzas.py`, `test_finanzas.py` |

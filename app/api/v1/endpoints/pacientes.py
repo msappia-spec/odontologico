@@ -24,7 +24,9 @@ router = APIRouter(prefix="/pacientes", tags=["Pacientes"])
         "como nulos y el DNI se normaliza (sin puntos ni guiones). También se "
         "aceptan los datos filiatorios de la Historia Clínica General (fecha de "
         "nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, "
-        "lugar de trabajo y jerarquía); la edad se calcula, no se envía."
+        "lugar de trabajo y jerarquía); la edad se calcula, no se envía. La "
+        "categoría del paciente (SIN_CATEGORIZAR por defecto, EXCELENTE o MALO) "
+        "admite observaciones cuando es MALO."
     ),
 )
 def crear_paciente(payload: PacienteCreate, db: Session = Depends(get_db)) -> Paciente:
@@ -69,7 +71,8 @@ def obtener_paciente(paciente_id: int, db: Session = Depends(get_db)) -> Pacient
     summary="Actualizar un paciente",
     description=(
         "Actualiza parcialmente los datos del paciente (nombre, teléfono, email, "
-        "DNI, obra social, Nº de afiliado y datos filiatorios). Sólo se aplican "
+        "DNI, obra social, Nº de afiliado, categoría, observaciones y datos "
+        "filiatorios). Sólo se aplican "
         "los campos enviados y el DNI sigue siendo único entre pacientes. Es la "
         "vía para limpiar un dato filiatorio: la ficha médica, en cambio, nunca "
         "borra lo que ya estaba cargado."

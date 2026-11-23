@@ -55,6 +55,83 @@ def test_crear_paciente_sin_datos_administrativos(client):
 
     assert r.status_code == 201, r.text
     assert r.json()["dni"] is None
+    # Una ficha nueva sin categoría explícita queda «sin categorizar».
+    assert r.json()["categoria"] == "SIN_CATEGORIZAR"
+    assert r.json()["categoria_observaciones"] is None
+
+
+def test_categoria_malo_guarda_las_observaciones_recortadas(client):
+    r = client.post(
+        f"{API}/pacientes",
+        json=_payload(
+            categoria="MALO",
+            categoria_observaciones="  Llega siempre tarde y no avisa.  ",
+        ),
+    )
+
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["categoria"] == "MALO"
+    assert data["categoria_observaciones"] == "Llega siempre tarde y no avisa."
+
+    detalle = client.get(f"{API}/pacientes/{data['id']}")
+    assert detalle.status_code == 200
+    assert detalle.json()["categoria"] == "MALO"
+    assert detalle.json()["categoria_observaciones"] == "Llega siempre tarde y no avisa."
+
+
+def test_las_observaciones_solo_se_aceptan_con_categoria_malo(client):
+    r = client.post(
+        f"{API}/pacientes",
+        json=_payload(categoria="EXCELENTE", categoria_observaciones="No corresponde."),
+    )
+
+    assert r.status_code == 422, r.text
+    assert "categoría" in r.text.lower()
+
+    creado = client.post(
+        f"{API}/pacientes",
+        json=_payload(categoria="EXCELENTE"),
+    ).json()
+    r = client.patch(
+        f"{API}/pacientes/{creado['id']}",
+        json={"categoria_observaciones": "Tampoco corresponde."},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_patch_malo_conserva_las_observaciones_y_al_cambiar_limpia_el_texto(client):
+    creado = client.post(
+        f"{API}/pacientes",
+        json=_payload(categoria="MALO", categoria_observaciones="Debe seña."),
+    ).json()
+
+    # Un PATCH que sólo complete las observaciones conserva la categoría MALO.
+    r = client.patch(
+        f"{API}/pacientes/{creado['id']}",
+        json={"categoria_observaciones": "Debe seña y avisar antes."},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["categoria"] == "MALO"
+    assert r.json()["categoria_observaciones"] == "Debe seña y avisar antes."
+
+    # Al dejar de ser MALO, el motivo se limpia para no mostrar un aviso viejo.
+    r = client.patch(
+        f"{API}/pacientes/{creado['id']}", json={"categoria": "EXCELENTE"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["categoria"] == "EXCELENTE"
+    assert r.json()["categoria_observaciones"] is None
+
+    # ``null`` vuelve a la categoría por defecto.
+    r = client.patch(f"{API}/pacientes/{creado['id']}", json={"categoria": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["categoria"] == "SIN_CATEGORIZAR"
+
+
+def test_categoria_invalida_devuelve_422(client):
+    r = client.post(f"{API}/pacientes", json=_payload(categoria="REGULAR"))
+    assert r.status_code == 422
 
 
 def test_varios_pacientes_sin_dni_no_colisionan(client):

@@ -466,9 +466,9 @@ class FichaSaludEnvioCreate(BaseModel):
 
     * ``manual`` (por defecto): no envía nada; devuelve el enlace y el texto
       para que la secretaría los copie en WhatsApp Web o en el celular.
-    * ``api``: envía el mensaje por la WhatsApp Cloud API. Si el servidor no
-      tiene credenciales configuradas, el envío queda **simulado** (igual que
-      los recordatorios) y se informa con ``simulado = true``.
+    * ``api``: envía el mensaje por WAHA. Si el servidor no tiene credenciales
+      configuradas, el envío queda **simulado** (igual que los recordatorios) y
+      se informa con ``simulado = true``.
     """
 
     canal: Literal["manual", "api"] = Field(
@@ -507,5 +507,5 @@ class FichaSaludEnvioRead(FichaSaludEnlaceRead):
         ),
     )
     whatsapp_mensaje_id: Optional[str] = Field(
-        None, description="``wamid`` devuelto por Meta (o el simulado)."
+        None, description="Identificador devuelto por WAHA (o el simulado)."
     )

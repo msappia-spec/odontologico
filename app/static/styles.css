@@ -790,6 +790,201 @@ select.field {
   box-shadow: 0 0 0 3px var(--brand-100);
 }
 
+/* ------------------- Selector Mes / Semana y grilla semanal --------------- */
+.cal-vista-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  padding: .18rem;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+}
+.cal-vista-btn {
+  font-family: inherit;
+  font-size: .72rem;
+  font-weight: 700;
+  color: #64748b;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  padding: .3rem .65rem;
+  cursor: pointer;
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+.cal-vista-btn:hover { color: var(--brand-700); }
+.cal-vista-btn:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
+.cal-vista-btn.activo {
+  background: #fff;
+  color: var(--brand-700);
+  box-shadow: 0 1px 4px rgba(15, 28, 36, .12);
+}
+
+.cal-semana-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .6rem;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .cal-semana-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .cal-semana-grid { grid-template-columns: 1fr; }
+}
+.cal-semana-grid > .empty-state { grid-column: 1 / -1; }
+
+.cal-semana-dia {
+  min-width: 0;
+  overflow: hidden;
+  background: #fbfcfe;
+  border: 1px solid #eef2f6;
+  border-radius: .9rem;
+  transition: background .16s ease, border-color .16s ease, box-shadow .18s ease;
+}
+.cal-semana-dia.hoy { border-color: var(--brand-300); }
+.cal-semana-dia.seleccionado {
+  background: #f1faf8;
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 2px rgba(23, 163, 148, .14);
+}
+.cal-semana-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .4rem;
+  padding: .52rem .62rem;
+  background: #fff;
+  border-bottom: 1px solid #eef2f6;
+}
+.cal-semana-dia-nombre {
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--ink-900);
+}
+.cal-semana-dia-fecha { margin-top: .05rem; font-size: .68rem; color: #94a3b8; }
+.cal-semana-dia.hoy .cal-semana-dia-nombre { color: var(--brand-700); }
+.cal-semana-cabecera-acciones {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: .3rem;
+}
+.cal-semana-conteo {
+  flex: none;
+  min-width: 1.35rem;
+  padding: .1rem .38rem;
+  text-align: center;
+  font-size: .62rem;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  border-radius: 999px;
+}
+.cal-semana-imprimir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  color: #94a3b8;
+  background: transparent;
+  border: 0;
+  border-radius: .4rem;
+  cursor: pointer;
+  transition: color .14s ease, background .14s ease;
+}
+.cal-semana-imprimir svg { width: .85rem; height: .85rem; }
+.cal-semana-imprimir:hover { color: var(--brand-700); background: var(--brand-50); }
+.cal-semana-imprimir:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
+
+.cal-semana-lista {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+  min-height: 4.6rem;
+  padding: .5rem;
+}
+.cal-semana-vacio {
+  padding: .7rem .2rem;
+  text-align: center;
+  font-size: .7rem;
+  color: #b0bcc9;
+  font-style: italic;
+}
+
+.cal-semana-turno {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e8edf3;
+  border-left: 4px solid #94a3b8;
+  border-radius: .65rem;
+  box-shadow: 0 8px 20px -22px rgba(15, 28, 36, .55);
+}
+.cal-semana-turno.confirmado { background: #f0fdf4; border-color: #bbf7d0; }
+.cal-semana-turno.cancelado { background: #f8fafc; opacity: .72; }
+.cal-semana-turno-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .3rem .5rem;
+  width: 100%;
+  padding: .45rem .52rem;
+  font-family: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.cal-semana-turno-info:hover { background: rgba(15, 28, 36, .035); }
+.cal-semana-turno-info:focus-visible { outline: 2px solid var(--brand-500); outline-offset: -2px; }
+.cal-semana-hora {
+  flex: none;
+  font-size: .76rem;
+  font-weight: 800;
+  color: var(--ink-900);
+  line-height: 1.1;
+}
+.cal-semana-hora small { display: block; margin-top: .1rem; font-size: .58rem; font-weight: 600; color: #94a3b8; }
+.cal-semana-paciente {
+  flex: 1 1 5.5rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .76rem;
+  font-weight: 700;
+  color: var(--ink-900);
+}
+.cal-semana-turno.cancelado .cal-semana-paciente { color: #94a3b8; text-decoration: line-through; }
+.cal-semana-badges { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem; }
+.cal-semana-badges .badge { font-size: .56rem; padding: .1rem .32rem; }
+
+.cal-semana-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+  padding: 0 .52rem .5rem;
+}
+.cal-semana-accion {
+  padding: .18rem .4rem;
+  font-family: inherit;
+  font-size: .6rem;
+  font-weight: 700;
+  color: #475569;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: .45rem;
+  cursor: pointer;
+  transition: background .14s ease, border-color .14s ease;
+}
+.cal-semana-accion:hover { background: #f1f5f9; border-color: #cbd5e1; }
+.cal-semana-accion-peligro { color: #b91c1c; background: #fff1f2; border-color: #fecaca; }
+.cal-semana-accion-peligro:hover { background: #ffe4e6; border-color: #fda4af; }
+
 /* ==========================================================================
    Vista "Disponibilidad": editor semanal de la agenda de cada odontólogo
    (la grilla que renderiza app.js en #disp-semana)
@@ -1427,6 +1622,268 @@ tr.conv-cambiado:hover { background: #fef3c7; }
   background: var(--brand-50);
   color: var(--brand-700);
   border: 1px solid var(--brand-100);
+}
+
+/* ==========================================================================
+   Agenda imprimible del día (#agenda-impresion)
+   --------------------------------------------------------------------------
+   calendar.js genera la hoja con la fecha y el odontólogo elegidos. En pantalla
+   queda oculta; al imprimir se tapa el resto del panel y sólo sale esta hoja en
+   A4 vertical. Los turnos cancelados se conservan atenuados para no perder el
+   historial del día.
+   ========================================================================== */
+
+.agenda-impresion { display: none; background: #fff; }
+.agenda-impresion-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8mm;
+  padding-bottom: 4mm;
+  border-bottom: 2px solid #0f1c24;
+}
+.agenda-impresion-marca { display: flex; align-items: center; gap: 4mm; }
+.agenda-impresion-logo { flex: none; width: 13mm; height: 17mm; }
+.agenda-impresion-clinica {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16pt;
+  font-weight: 700;
+  letter-spacing: .04em;
+  line-height: 1;
+  color: #0f1c24;
+}
+.agenda-impresion-lema {
+  margin-top: 1.4mm;
+  font-size: 7.8pt;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.agenda-impresion-emitido { text-align: right; }
+.agenda-impresion-emitido span {
+  display: block;
+  font-size: 6.8pt;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.agenda-impresion-emitido strong {
+  display: block;
+  margin-top: .8mm;
+  font-size: 8.6pt;
+  color: #334155;
+  white-space: nowrap;
+}
+.agenda-impresion-titulo {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8mm;
+  padding: 6mm 0 4mm;
+}
+.agenda-impresion-kicker {
+  font-size: 7.2pt;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #0d8578;
+}
+.agenda-impresion-titulo h1 {
+  margin: 1.5mm 0 0;
+  font-size: 18pt;
+  line-height: 1.1;
+  text-transform: capitalize;
+  color: #0f1c24;
+}
+.agenda-impresion-profesional {
+  margin-top: 1.6mm;
+  font-size: 10pt;
+  font-weight: 600;
+  color: #475569;
+}
+.agenda-impresion-total {
+  flex: none;
+  min-width: 22mm;
+  padding: 2.5mm 4mm;
+  text-align: center;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 3mm;
+}
+.agenda-impresion-total strong {
+  display: block;
+  font-size: 20pt;
+  line-height: 1;
+  color: #0f1c24;
+}
+.agenda-impresion-total span {
+  display: block;
+  margin-top: 1mm;
+  font-size: 6.8pt;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.agenda-impresion-nota {
+  margin: 0 0 4mm;
+  padding: 2mm 3mm;
+  font-size: 8pt;
+  color: #92400e;
+  background: #fffbeb;
+  border-left: 2px solid #f59e0b;
+}
+.agenda-impresion-bloque { margin-top: 4mm; }
+.agenda-impresion-bloque:first-child { margin-top: 0; }
+.agenda-impresion-bloque-cab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5mm;
+  padding: 2.4mm 3mm;
+  color: #fff;
+  background: #0f1c24;
+  border-radius: 2mm 2mm 0 0;
+  break-after: avoid;
+}
+.agenda-impresion-bloque-cab h2 {
+  margin: 0;
+  font-size: 11pt;
+  line-height: 1.15;
+  color: #fff;
+}
+.agenda-impresion-bloque-cab p {
+  margin-top: .8mm;
+  font-size: 7.8pt;
+  color: #cbd5e1;
+}
+.agenda-impresion-bloque-total {
+  flex: none;
+  padding: 1mm 2.4mm;
+  font-size: 7.6pt;
+  font-weight: 800;
+  color: #0f1c24;
+  background: #fff;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.agenda-impresion-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  border: 1px solid #e2e8f0;
+  border-top: 0;
+}
+.agenda-impresion-tabla thead { display: table-header-group; }
+.agenda-impresion-tabla th {
+  padding: 2mm 2.2mm;
+  text-align: left;
+  font-size: 6.8pt;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #475569;
+  background: #f1f5f9;
+  border-bottom: 1px solid #cbd5e1;
+}
+.agenda-impresion-tabla td {
+  padding: 2.1mm 2.2mm;
+  vertical-align: top;
+  font-size: 8.4pt;
+  color: #334155;
+  border-bottom: 1px solid #e2e8f0;
+}
+.agenda-impresion-tabla tbody tr:nth-child(even) { background: #f8fafc; }
+.agenda-impresion-tabla tbody tr:last-child td { border-bottom: 0; }
+.agenda-impresion-tabla tr { break-inside: avoid; }
+.agenda-impresion-tabla td strong {
+  display: block;
+  font-weight: 700;
+  color: #0f1c24;
+}
+.agenda-impresion-tabla td small {
+  display: block;
+  margin-top: .5mm;
+  font-size: 6.9pt;
+  color: #94a3b8;
+}
+.agenda-impresion-tabla th:nth-child(1),
+.agenda-impresion-tabla td:nth-child(1) { width: 13%; }
+.agenda-impresion-tabla th:nth-child(2),
+.agenda-impresion-tabla td:nth-child(2) { width: 27%; }
+.agenda-impresion-tabla th:nth-child(3),
+.agenda-impresion-tabla td:nth-child(3) { width: 11%; }
+.agenda-impresion-tabla th:nth-child(4),
+.agenda-impresion-tabla td:nth-child(4) { width: 18%; }
+.agenda-impresion-tabla th:nth-child(5),
+.agenda-impresion-tabla td:nth-child(5) { width: 20%; }
+.agenda-impresion-tabla th:nth-child(6),
+.agenda-impresion-tabla td:nth-child(6) { width: 11%; }
+.agenda-impresion-fila.cancelado td {
+  color: #94a3b8;
+  background: #f8fafc;
+}
+.agenda-impresion-fila.cancelado td:nth-child(2) strong { text-decoration: line-through; }
+.agenda-impresion-estado {
+  display: inline-block;
+  padding: 1mm 2mm;
+  font-size: 6.9pt;
+  font-weight: 800;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.agenda-impresion-estado.confirmado { color: #166534; background: #dcfce7; }
+.agenda-impresion-estado.pendiente { color: #92400e; background: #fef3c7; }
+.agenda-impresion-estado.cancelado { color: #475569; background: #e2e8f0; }
+.agenda-impresion-tenue { color: #94a3b8; }
+.agenda-impresion-vacio {
+  padding: 10mm 6mm;
+  text-align: center;
+  font-size: 9pt;
+  color: #94a3b8;
+  border: 1px dashed #cbd5e1;
+  border-top: 0;
+}
+.agenda-impresion-pie {
+  display: flex;
+  justify-content: space-between;
+  gap: 6mm;
+  margin-top: 5mm;
+  padding-top: 2mm;
+  font-size: 7pt;
+  color: #94a3b8;
+  border-top: 1px solid #e2e8f0;
+}
+.agenda-impresion-firma {
+  width: 65mm;
+  margin-top: 12mm;
+  padding-top: 2mm;
+  text-align: center;
+  font-size: 8pt;
+  color: #64748b;
+  border-top: .4mm solid #94a3b8;
+}
+
+@media print {
+  @page { size: A4 portrait; margin: 11mm; }
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  body > *:not(#agenda-impresion) { display: none !important; }
+  #agenda-impresion {
+    display: block !important;
+    width: 100%;
+    color: #0f1c24;
+    font-family: "Inter", "Segoe UI", Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.38;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 
 

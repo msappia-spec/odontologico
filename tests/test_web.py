@@ -129,6 +129,36 @@ def test_dashboard_incluye_la_vista_de_disponibilidad(client):
     assert 'id="disp-doctor"' in r.text
 
 
+def test_dashboard_incluye_la_vista_de_presupuestos(client):
+    """La pestaña «Presupuestos» viaja con su formulario, listado y PDF."""
+    html = client.get("/").text
+    assert 'data-view="presupuestos"' in html
+    assert 'id="view-presupuestos"' in html
+    assert 'id="pres-form"' in html
+    assert 'id="pres-items"' in html
+    assert 'id="pres-prestaciones-catalogo"' in html
+    assert 'id="pres-lista"' in html
+    assert "/static/presupuestos.js" in html
+    assert "/static/presupuestos.css" in html
+
+    js = client.get("/static/presupuestos.js").text
+    assert "/presupuestos" in js
+    assert "window.PresupuestosApp" in js
+    assert "data-pres-editar" in js
+    assert "data-pres-eliminar" in js
+    assert "/prestaciones?activas=true" in js
+    assert "pres-codigo" in js
+    assert "/pdf" in js
+
+    app_js = client.get("/static/app.js").text
+    assert "presupuestos:" in app_js
+    assert "window.PresupuestosApp.cargar()" in app_js
+
+    css = client.get("/static/presupuestos.css").text
+    assert ".pres-item-grid" in css
+    assert ".pres-totales" in css
+
+
 def test_dashboard_incluye_la_vista_de_obras_sociales(client):
     """La pestaña "Obras Sociales" (catálogo) y su modal viajan en el HTML."""
     r = client.get("/")
@@ -193,7 +223,7 @@ def test_el_panel_de_horarios_avisa_cuando_no_queda_ningun_bloque_libre(client):
     assert "Los bloques en gris no se pueden" in html
 
 
-
+def test_los_estados_del_calendario_tienen_color(client):
     """CONFIRMADO verde, CANCELADO gris y PENDIENTE con el color del odontólogo."""
     calendario = client.get("/static/calendar.js").text
     assert "bg-green-500 text-white" in calendario
@@ -207,6 +237,80 @@ def test_el_panel_de_horarios_avisa_cuando_no_queda_ningun_bloque_libre(client):
     assert ".cal-evento.confirmado" in css
     assert ".cal-evento.cancelado" in css
     assert ".disp-rango" in css
+
+
+def test_el_calendario_ofrece_vista_semanal_lunes_a_viernes_por_odontologo(client):
+    """La barra «Mes / Semana» abre la agenda semanal de un único profesional.
+
+    La vista semanal no es una grilla de disponibilidad: muestra **todos los
+    turnos** del odontólogo elegido de lunes a viernes, con la misma posibilidad
+    de abrir el detalle, editar, cancelar o cobrar que el panel del día.
+    """
+    html = client.get("/").text
+    assert 'data-cal-vista="mes"' in html
+    assert 'data-cal-vista="semana"' in html
+    assert 'id="cal-semana-panel" class="card p-3 sm:p-4 hide"' in html
+    assert 'id="cal-semana-grid"' in html
+    assert 'id="cal-semana-doctor"' in html
+    assert "Odontólogo de la semana" in html
+    assert "lunes a viernes" in html
+
+    calendario = client.get("/static/calendar.js").text
+    assert 'DIAS_VISTA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]' in calendario
+    assert "function semanaInicioDe(" in calendario
+    assert "function turnosSemana(" in calendario
+    assert "String(t.doctor_id) === String(cal.filtro)" in calendario
+    assert "moverDias(inicio, 4)" in calendario
+    assert "for (let i = 0; i < DIAS_VISTA.length; i += 1)" in calendario
+    assert 'cal.vista === "semana"' in calendario
+    assert "asegurarDoctorSemana" in calendario
+    assert "renderSemanaDoctorSelect" in calendario
+    assert "data-ver-turno" in calendario and "data-semana-dia" in calendario
+    assert "lunes a viernes" in calendario
+
+    css = client.get("/static/styles.css").text
+    assert ".cal-vista-switch" in css
+    assert ".cal-vista-btn.activo" in css
+    assert ".cal-semana-grid" in css
+    assert "grid-template-columns: repeat(5" in css
+    assert ".cal-semana-turno.cancelado" in css
+    assert ".cal-semana-accion-peligro" in css
+
+
+def test_se_puede_imprimir_la_agenda_de_un_dia_por_odontologo(client):
+    """La agenda diaria se imprime en A4 desde el panel y desde la semana.
+
+    El botón *Imprimir* del panel toma la fecha y el odontólogo elegidos; cada
+    columna de la vista semanal agrega su propio botón para imprimir ese día.
+    calendar.js arma una hoja con los turnos (paciente, DNI, teléfono,
+    cobertura y estado) y styles.css oculta el resto del panel al imprimir.
+    """
+    html = client.get("/").text
+    assert 'id="agenda-imprimir"' in html
+    assert "Imprimir la agenda de la fecha y el odontólogo elegidos" in html
+    assert "Cada columna" in html and "imprimir la agenda de ese d&iacute;a" in html
+
+    calendario = client.get("/static/calendar.js").text
+    assert "function imprimirDia(" in calendario
+    assert "function documentoImpresion(" in calendario
+    assert "function gruposImpresion(" in calendario
+    assert 'data-imprimir-dia="${iso}"' in calendario
+    assert "[data-imprimir-dia]" in calendario
+    assert '"agenda-impresion"' in calendario
+    assert "imprimirDia: imprimirDia" in calendario
+    assert 'window.print()' in calendario
+    assert "ESTADO_IMPRESION" in calendario
+    assert "Paciente" in calendario and "Cobertura" in calendario
+    assert "imprimirDia(fechaSeleccionada(), filtro)" in calendario
+
+    css = client.get("/static/styles.css").text
+    assert ".agenda-impresion {" in css
+    assert ".agenda-impresion-tabla" in css
+    assert ".agenda-impresion-estado.confirmado" in css
+    assert ".agenda-impresion-fila.cancelado" in css
+    assert "@media print" in css
+    assert "body > *:not(#agenda-impresion)" in css
+    assert "size: A4 portrait" in css
 
 
 def test_el_encabezado_superior_lleva_el_titulo_de_la_operacion(client):
@@ -719,6 +823,27 @@ def test_el_javascript_del_modulo_de_borrado_usa_los_delete_de_la_api(client):
     assert "data-dep-borrar-cc" in js
 
 
+def test_el_badge_de_turnos_del_paciente_abre_el_historial_completo(client):
+    """La columna «Turnos» es un botón que lista todos los turnos del paciente.
+
+    El número sale de los turnos ya cargados en el panel; al hacer clic, el
+    modal consulta el historial completo por ``paciente_id`` (paginado de a 500)
+    y lo muestra del más reciente al más antiguo.
+    """
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+
+    assert 'id="modal-turnos-paciente"' in html
+    assert 'id="modal-turnos-paciente-lista"' in html
+    assert 'id="modal-turnos-paciente-close"' in html
+    assert "function abrirTurnosPaciente(" in js
+    assert 'data-turnos-paciente="${p.id}"' in js
+    assert 'closest("[data-turnos-paciente]")' in js
+    # El historial no se limita a lo cargado: pide todas las páginas por paciente.
+    assert "`/turnos?paciente_id=${pacienteId}&skip=${salto}&limit=${TAMANO_PAGINA}`" in js
+    assert "function cerrarTurnosPaciente(" in js
+
+
 def test_los_controles_del_modulo_de_borrado_que_usa_el_js_existen_en_el_html(
     client,
 ):
@@ -731,4 +856,34 @@ def test_los_controles_del_modulo_de_borrado_que_usa_el_js_existen_en_el_html(
     assert not faltantes, f"ids usados por app.js sin HTML: {faltantes}"
 
 
+def test_la_categoria_del_paciente_avisa_antes_de_asignar_un_turno(client):
+    """La ficha se categoriza y el modal del turno muestra el aviso de MALO."""
+    html = client.get("/").text
+    js = client.get("/static/app.js").text
+
+    # Formulario de pacientes: las tres categorías y las observaciones.
+    assert 'id="pac-categoria"' in html
+    assert '<option value="SIN_CATEGORIZAR" selected>Sin categorizar</option>' in html
+    assert '<option value="EXCELENTE">Excelente</option>' in html
+    assert '<option value="MALO">Malo</option>' in html
+    assert 'id="pac-categoria-observaciones"' in html
+    assert 'id="pac-categoria-observaciones-bloque"' in html
+    assert "<th>Categoría</th>" in html
+
+    # Aviso dentro del formulario de turno y confirmación con las observaciones.
+    assert 'id="turno-alerta-paciente"' in html
+    assert 'id="turno-alerta-paciente-observaciones"' in html
+    assert 'id="modal-alerta-paciente"' in html
+    assert 'id="modal-alerta-paciente-ok"' in html
+    assert "Asignar turno igual" in html
+
+    assert "function sincronizarCategoriaPaciente(" in js
+    assert "function actualizarAlertaPacienteTurno(" in js
+    assert "function mostrarAlertaPacienteMalo(" in js
+    assert "function confirmarAlertaPacienteMalo(" in js
+    assert "function guardarTurnoValidado(" in js
+    assert 'paciente.categoria === "MALO"' in js
+    assert "categoria_observaciones" in js
+    # El aviso no guarda el turno: deja el formulario abierto hasta confirmar.
+    assert "const payload = state.turnoAlertaPendiente;" in js
 

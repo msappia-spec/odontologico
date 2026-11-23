@@ -3,15 +3,17 @@
 from datetime import date
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Date, ForeignKey, Index, String
+from sqlalchemy import Date, Enum as SAEnum, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base
+from app.models.enums import CategoriaPaciente
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.cuenta_corriente import CuentaCorriente
     from app.models.historia_clinica import HistoriaClinica
     from app.models.obra_social import ObraSocial
+    from app.models.presupuesto import Presupuesto
     from app.models.turno import Turno
 
 
@@ -39,6 +41,10 @@ class Paciente(Base):
       ``lugar_trabajo`` y ``jerarquia``. Son la **única fuente de verdad**: la
       ficha médica (Módulo 4) los muestra, los carga y los sincroniza acá al
       guardar, de modo que la secretaría no vuelve a tipear los mismos datos.
+    * ``categoria`` / ``categoria_observaciones``: calificación administrativa
+      (``SIN_CATEGORIZAR``, ``EXCELENTE`` o ``MALO``) y el motivo que la
+      justifica. Un paciente ``MALO`` dispara un aviso con sus observaciones
+      antes de asignarle un turno en el panel y en la agenda móvil.
     """
 
     __tablename__ = "pacientes"
@@ -71,6 +77,24 @@ class Paciente(Base):
     lugar_trabajo: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     jerarquia: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
+    # Categoría administrativa con la que la secretaría califica al paciente.
+    # ``MALO`` exige revisar las observaciones antes de asignar un turno; el
+    # aviso vive en el panel y en la agenda móvil. Las fichas históricas quedan
+    # en ``SIN_CATEGORIZAR`` gracias al default del modelo y de la migración.
+    categoria: Mapped[CategoriaPaciente] = mapped_column(
+        SAEnum(
+            CategoriaPaciente,
+            name="categoria_paciente",
+            native_enum=False,
+            validate_strings=True,
+            length=20,
+        ),
+        nullable=False,
+        default=CategoriaPaciente.SIN_CATEGORIZAR,
+        server_default=CategoriaPaciente.SIN_CATEGORIZAR.value,
+    )
+    categoria_observaciones: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Relaciones
     turnos: Mapped[List["Turno"]] = relationship(
         back_populates="paciente",
@@ -101,6 +125,13 @@ class Paciente(Base):
     cuenta_corriente: Mapped[Optional["CuentaCorriente"]] = relationship(
         back_populates="paciente",
         uselist=False,
+        passive_deletes=True,
+    )
+    # Presupuestos entregados al paciente (documentos comerciales). La relación
+    # inversa permite consultarlos y los borra junto con el paciente.
+    presupuestos: Mapped[List["Presupuesto"]] = relationship(
+        back_populates="paciente",
+        cascade="all, delete-orphan",
         passive_deletes=True,
     )
 

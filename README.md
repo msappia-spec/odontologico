@@ -3,7 +3,7 @@
 **Módulo 1: Gestión de Turnos y Automatización de WhatsApp** ·
 **Módulo 2: Historias Clínicas y Evoluciones Médicas** ·
 **Módulo 3: Obras Sociales, Liquidación de Médicos y Facturación Mixta** ·
-**Módulo 4: Ficha médica completa (Historia Clínica General) y odontograma** ·
+**Módulo 4: Ficha médica (Historia Clínica General), odontograma y trabajo realizado** ·
 **Módulo 5: Cuenta corriente, planes de cuotas y pagos** ·
 **Módulo 6: Proveedores, egresos y cuentas por pagar** —
 Backend en **FastAPI + SQLAlchemy 2.0**, con soporte dual **SQLite / PostgreSQL**.
@@ -17,8 +17,9 @@ El **Módulo 1** implementa:
    defecto **3**), filtra los pendientes y dispara el envío de WhatsApp
    (simulado o real).
 3. **Webhook de entrada de WhatsApp** (`POST /api/v1/whatsapp/webhook`) que
-   procesa la respuesta de botón del paciente (**Confirmar** / **Cancelar**),
-   localiza el turno por el id del mensaje contextual y actualiza sus estados, y
+   procesa la respuesta de texto del paciente (`1`/`si` para confirmar,
+   `2`/`no` para cancelar), localiza el turno por el estado persistido de la
+   conversación y actualiza sus estados, y
    contesta los **mensajes de texto libre** con el *FAQ Bot* y el **menú
    configurable** en la vista *Bot WhatsApp* (texto libre, precio de la consulta,
    obras sociales, ubicación o derivar a una secretaria; lo que no es del menú
@@ -36,6 +37,16 @@ El **Módulo 1** implementa:
 6. **Estados con color** en la interfaz: los turnos `CONFIRMADO` se pintan en
    **verde** con prioridad, los `PENDIENTE` conservan el color del odontólogo y
    los `CANCELADO` quedan en gris atenuado.
+7. **Vista semanal por odontólogo** en el calendario: el selector **Mes /
+   Semana** permite ver de **lunes a viernes todos los turnos** del profesional
+   elegido, con navegación entre semanas y las mismas acciones de editar,
+   cancelar, confirmar o cobrar. La vista mensual se conserva para la agenda
+   general del consultorio.
+8. **Impresión de la agenda diaria**: el botón **Imprimir** del panel usa la
+   fecha y el odontólogo elegidos, y cada columna de la vista semanal imprime su
+   propio día. La hoja A4 incluye profesional, fecha, total de turnos, paciente,
+   DNI, teléfono, cobertura y estado; los cancelados quedan atenuados para no
+   perder el historial.
 
 ---
 
@@ -155,7 +166,7 @@ hasta la liquidación mensual de los profesionales.
 
 ---
 
-## 🦷 Módulo 4 · Ficha médica completa (Historia Clínica General) y odontograma
+## 🦷 Módulo 4 · Ficha médica (Historia Clínica General), odontograma y trabajo realizado
 
 Antes de la consulta el paciente completa, desde el celular y **sin iniciar
 sesión**, el cuestionario de salud del consultorio. El enlace viaja en el
@@ -204,7 +215,7 @@ paciente.
    `calcular_motivos_alerta`). El detalle de la historia expone `alerta_medica` y
    `motivos_alerta` calculados, sin campos duplicados en la base.
 5. **Recordatorio de WhatsApp**: mientras la ficha siga pendiente, el mensaje
-   Click-to-Chat (y el cuerpo interactivo de la Cloud API) incluye el enlace
+   Click-to-Chat (y el mensaje de texto de WAHA) incluye el enlace
    público firmado. Una vez completada, el recordatorio vuelve a su texto normal.
 6. **Panel interno «Fichas de salud»** (menú lateral del Panel Principal): lista
    los turnos de hoy y de los próximos `dias` con la ficha **pendiente** o
@@ -227,7 +238,7 @@ paciente.
    el **enlace firmado**, el **mensaje listo**, el enlace **Click-to-Chat** al
    teléfono del paciente o a un **destino alternativo** (por ejemplo el celular
    desde el que llamó) y dos salidas: *Copiar mensaje* para pegarlo en WhatsApp
-   Web o *Enviar por API* para que salga por la Cloud API. El enlace y el texto
+   Web o *Enviar por API* para que salga por WAHA. El enlace y el texto
    los arma el servidor:
    `GET /api/v1/anamnesis/panel/{turno_id}/enlace?telefono=` los devuelve para
    cualquier turno no cancelado (aunque esté fuera de la ventana del panel) y
@@ -244,18 +255,37 @@ paciente.
    avisa que WhatsApp no la reconoce y que el celular del paciente no puede
    alcanzar esa PC: hace falta `PUBLIC_BASE_URL` con el dominio público o un
    túnel.
-8. **Odontograma gráfico** (botón *Odontograma* de la tarjeta de la ficha, en el
-   panel y en la vista móvil): es un modal **aparte** que el profesional completa
-   **después de revisar al paciente**. Se toca un diente y después se elige el
-   color (también se puede elegir el color primero y tocar varios dientes), en
-   notación FDI y con las referencias del PDF: **rojo** = prestación existente,
-   **azul** = prestación requerida y **X** = diente ausente o a extraer;
-   *Borrar marca* limpia el diente seleccionado. Se guardan además prótesis fija
-   y removible, coronas, cantidad de dientes existentes y observaciones. Un
-   odontograma por historia (`uq_odontograma_historia`) y los dientes se
-   reemplazan en cada guardado (`odontograma_dientes`, único por diente):
-   `GET/PUT /api/v1/pacientes/{id}/odontograma`. La lectura no crea la historia
-   clínica; el `PUT` sí la crea si es la primera vez.
+8. **Ficha médica del paciente** (botón *Ficha médica* de la tarjeta, en el panel
+   y en la vista móvil): abre la **hoja completa** de la Historia Clínica
+   General. Arriba repite los **datos del paciente** (nombre, obra social,
+   afiliado, nacimiento con la edad, domicilio, teléfono, titular, lugar de
+   trabajo y jerarquía) y agrega los datos propios de la hoja: **grupo
+   familiar**, **parentesco**, **antecedentes de enfermedad** y **Vto**. Debajo
+   está el **odontograma** en notación FDI con las **dos denticiones** —la
+   permanente 11-48 y la temporaria 51-85— y las referencias del papel:
+   **rojo** = prestación existente, **azul** = prestación requerida y **X** =
+   diente ausente o a extraer; *Borrar marca* limpia el diente seleccionado. Se
+   guardan además prótesis fija y removible, coronas, cantidad de dientes
+   existentes y observaciones (`GET/PUT /api/v1/pacientes/{id}/odontograma`, un
+   odontograma por historia y los dientes se reemplazan en cada guardado).
+   A la derecha del cuadro queda la leyenda con prótesis, coronas, cantidad de
+   dientes y observaciones. Debajo se marca el **estado bucal general** —presencia
+   de sarro SI/NO y enfermedad periodontal SI/NO— y se completa el libro
+   **«Trabajo realizado»** con Fecha, Código (elegido del catálogo de
+   prestaciones), Pieza dentaria, Trabajo realizado, Debe, Haber y **Saldo**
+   acumulado (se calcula solo: Debe − Haber renglón por renglón). La cabecera y
+   el libro viven en `fichas_medicas` /
+   `ficha_medica_trabajos` y se leen o guardan con
+   `GET/PUT /api/v1/pacientes/{id}/ficha-medica`: la lectura no crea la historia
+   clínica y el `PUT` sí la crea si es la primera vez. Si el odontograma se
+   guardó y la ficha falla, el modal avisa que los dientes ya quedaron
+   registrados (las dos llamadas se informan por separado).
+   La tabla de *Pacientes* tiene un botón **Ficha médica** en cada fila que abre
+   esta hoja directamente para editarla. Dentro de la hoja, **Editar datos**
+   cierra el modal y lleva al formulario de *Pacientes* con los filiatorios
+   precargados (nombre, obra social, afiliado, nacimiento, domicilio, teléfono,
+   trabajo, jerarquía y titular); en `/medico` el botón no se muestra porque esa
+   vista no tiene el formulario de pacientes.
 9. **Impresión de la Historia Clínica General** (botón *Imprimir* de la tarjeta
    de la ficha en el panel y en `/medico`, y del modal con el que la secretaría
    carga la ficha): `GET /api/v1/pacientes/{id}/historia-clinica/pdf` devuelve la
@@ -276,7 +306,7 @@ paciente.
 
 Variables específicas: `PUBLIC_BASE_URL` (dominio absoluto usado en el enlace;
 en Vercel se deduce del despliegue) y `ANAMNESIS_TOKEN_SECRET` (secreto de firma;
-si se omite se reutiliza `WHATSAPP_VERIFY_TOKEN`).
+si se omite se deriva una clave estable de la configuración del servidor).
 
 ---
 
@@ -462,6 +492,7 @@ Odontologico/
 │   │   ├── evolucion_medica.py     # Módulo 2: atención inmutable (bloquea UPDATE/DELETE)
 │   │   ├── archivo_adjunto.py      # Módulo 2: radiografías/estudios de la evolución
 │   │   ├── antecedentes_salud.py   # Módulo 4: ficha médica (preguntas del PDF)
+│   │   ├── ficha_medica.py        # Módulo 4: ficha del paciente + libro de trabajos
 │   │   ├── odontograma.py          # Módulo 4: odontograma + estado de cada diente
 │   │   ├── prestacion.py           # Módulo 3: catálogo de prácticas facturables
 │   │   ├── arancel_obra_social.py  # Módulo 3: cobertura y coseguro por práctica
@@ -475,6 +506,7 @@ Odontologico/
 │   │   ├── disponibilidad.py       # Rangos semanales y bloques ofrecidos
 │   │   ├── historia_clinica.py     # Módulo 2: alta de evolución y ficha (sólo lectura)
 │   │   ├── antecedentes_salud.py   # Módulo 4: cuestionario, lectura y envío del enlace
+│   │   ├── ficha_medica.py        # Módulo 4: cabecera, estado bucal y trabajos
 │   │   ├── odontograma.py          # Módulo 4: dientes, estados y totales por color
 │   │   ├── opcion_menu_whatsapp.py # FAQ Bot: alta/edición/baja y vista previa del menú
 │   │   ├── finanzas.py             # Módulo 5: cuenta corriente, plan de cuotas y pagos
@@ -489,6 +521,7 @@ Odontologico/
 │   │   ├── historia_clinica_service.py # Módulo 2: ficha + alta/consulta de evoluciones
 │   │   ├── anamnesis_service.py    # Módulo 4: ficha pública, panel y envío del enlace
 │   │   ├── ficha_pdf_service.py    # Módulo 4: Historia Clínica General en PDF (plantilla)
+│   │   ├── ficha_medica_service.py # Módulo 4: cabecera, estado bucal y libro de trabajos
 │   │   ├── odontograma_service.py  # Módulo 4: lectura y guardado del odontograma
 │   │   ├── prestacion_service.py   # Módulo 3: catálogo de prácticas (código único)
 │   │   ├── arancel_service.py      # Módulo 3: aranceles por cobertura (resolución)
@@ -508,6 +541,7 @@ Odontologico/
 │           ├── historias_clinicas.py # Módulo 2: historia clínica (sólo GET y POST)
 │           ├── anamnesis.py        # Módulo 4: ficha pública y panel de salud
 │           ├── odontogramas.py     # Módulo 4: GET/PUT del odontograma por paciente
+│           ├── fichas_medicas.py   # Módulo 4: GET/PUT de la ficha médica del paciente
 │           ├── obras_sociales.py   # Catálogo de obras sociales: CRUD + baja lógica
 │           ├── prestaciones.py     # Módulo 3: CRUD del catálogo de prácticas
 │           ├── aranceles.py        # Módulo 3: aranceles por cobertura + convenios e importador
@@ -516,7 +550,7 @@ Odontologico/
 │           ├── egresos.py          # Módulo 6: proveedores, gastos y cuentas por pagar
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
-│           ├── whatsapp.py         # Webhook (bot + botones) + recordatorios
+│           ├── whatsapp.py         # Webhook WAHA (bot + confirmaciones) + recordatorios
 │           └── whatsapp_menu.py    # FAQ Bot: CRUD del menú que ve el paciente
 │   ├── web/
 │   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
@@ -531,16 +565,18 @@ Odontologico/
 │       ├── medico.js               # Profesional + agenda + acciones + nueva evolución
 │       ├── ficha_medica.js         # Módulo 4: catálogo único de preguntas, filiatorios y resumen
 │       ├── ficha_medica.css        # Estilos del cuestionario (público, panel y móvil)
-│       ├── odontograma.js          # Módulo 4: modal del odontograma (rojo/azul/X)
-│       ├── odontograma.css         # Colores, arcadas y botón del odontograma
+│       ├── odontograma.js          # Módulo 4: modal de la ficha médica (datos + dientes + trabajos)
+│       ├── odontograma.css         # Hoja del papel: arcadas, estado bucal y libro de trabajos
 │       ├── anamnesis.html          # Ficha pública del paciente (Módulo 4)
 │       ├── anamnesis.css           # Estilos de la página pública
 │       └── anamnesis.js            # Token del path, GET/POST y resumen
 ├── scripts/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
 │   ├── seed_nomenclador_cba.py          # Nomenclador Córdoba (prestaciones + valor base)
+│   ├── importar_nomenclador_excel.py   # Nomenclador desde Excel → prestaciones (altas y precios)
 │   ├── publicar.py                      # Publicar en un paso: pruebas + commit + push + deploy
 │   ├── migrar_historias_clinicas.py      # Migración Módulo 2: ficha, evoluciones y adjuntos
+│   ├── migrar_ficha_medica.py            # Migración Módulo 4: ficha médica y trabajos
 │   ├── migrar_facturacion.py            # Migración Módulo 3: prácticas, aranceles, caja y pagos
 │   ├── migrar_turnos_unique_parcial.py  # Migración al índice único parcial de turnos
 │   ├── migrar_pacientes_datos.py        # Migración: DNI y cobertura del paciente
@@ -559,6 +595,8 @@ Odontologico/
 │   ├── test_pacientes.py
 │   ├── test_recordatorios_click_to_chat.py # Enlaces wa.me y recordatorios pendientes
 │   ├── test_seed_nomenclador_cba.py # Seed del nomenclador de Córdoba (idempotente)
+│   ├── test_importar_nomenclador_excel.py # Nomenclador desde Excel (lectura, altas y bajas)
+│   ├── test_ficha_medica.py        # Módulo 4: cabecera, estado bucal y libro de trabajos
 │   ├── test_turnos.py
 │   ├── test_turnos_actualizacion.py # PATCH /turnos/{id} (reprogramar, cancelar…)
 │   ├── test_turnos_paciente_ubicuo.py
@@ -595,6 +633,11 @@ python -m scripts.seed
 # 4-bis) (Opcional) Precargar el nomenclador odontológico de Córdoba
 python -m scripts.seed_nomenclador_cba
 
+# 4-ter) (Opcional) Cargar la grilla completa del nomenclador desde Excel
+#        (Capítulo, Código, Descripción y Arancel): crea las prácticas que
+#        faltan y actualiza descripción y valor base de las que ya existen.
+python -m scripts.importar_nomenclador_excel "C:\Users\Marcos\Downloads\nomenclador_odontologico.xlsx"
+
 # 5) Levantar el servidor
 uvicorn app.main:app --reload
 ```
@@ -607,13 +650,15 @@ uvicorn app.main:app --reload
 > **Atajo en Windows (`ejecutar.bat`).** Doble clic en `ejecutar.bat` (raíz del
 > proyecto) levanta el servidor con el Python del `.venv`, escuchando en
 > `0.0.0.0:8000` para poder entrar también desde el celular, y antes de arrancar
-> comprueba el intérprete, las dependencias y que el puerto esté libre. Muestra
-> las URLs, las IPs de esta PC en la red y el estado de la base
-> (`Esquema verificado/creado`). Para detenerlo: `Ctrl+C` en esa ventana.
-> Opciones: `ejecutar.bat 8080` (otro puerto), `--local` (sólo esta PC),
-> `--reload` (recarga al guardar cambios), `--abrir` (abre el panel en el
-> navegador) y `--help`. Si el puerto ya está tomado, ofrece abrir el panel en
-> lugar de arrancar un segundo servidor.
+> comprueba el intérprete, las dependencias y que el puerto esté libre (avisa si
+> el `.env` no define `DATABASE_URL`). Muestra las URLs, las IPs de esta PC en la
+> red y el estado de la base (`Esquema verificado/creado`). Para detenerlo:
+> `Ctrl+C` en esa ventana. Opciones: `ejecutar.bat 8080` (otro puerto, 1-65535;
+> `08000` se lee como 8000), `--local` (sólo esta PC), `--reload` (recarga al
+> guardar cambios), `--abrir` (abre el panel en el navegador) y `--help`. Si el
+> puerto ya está tomado consulta `/health`: cuando responde esta app ofrece abrir
+> el panel en lugar de arrancar un segundo servidor; si lo ocupa otro programa,
+> lo avisa y sugiere otro puerto.
 
 > **Siempre con `--reload` (o reiniciando el proceso).** Al editar o cancelar un
 > turno la interfaz usa `PATCH /api/v1/turnos/{id}`. Si el servidor que responde
@@ -710,7 +755,7 @@ usa Vercel, sin borrar el esquema. Ofrece dos modos:
   adjuntos, caja, cuenta corriente (planes y movimientos) y disponibilidad
   específica. Conserva doctores, obras sociales, prestaciones, aranceles, agenda
   semanal y menú del bot.
-- **Todas las tablas:** las 20 tablas; vuelve a sembrar el menú del FAQ Bot.
+- **Todas las tablas:** las 25 tablas; vuelve a sembrar el menú del FAQ Bot.
 
 El CLI de Vercel no puede exportar `DATABASE_URL` porque está marcada como
 `Secret` (`vercel env pull` la reemplaza por `[SENSITIVE]`). Por eso el `.bat`
@@ -743,8 +788,8 @@ los conteos y recién borra cuando se escribe `SI`.
    | `WHATSAPP_CODIGO_PAIS` | `549` | No |
    | `PUBLIC_BASE_URL` | `https://TU-PROYECTO.vercel.app` | No (se deduce en Vercel; sirve para enlaces de anamnesis) |
    | `ANAMNESIS_TOKEN_SECRET` | secreto largo y aleatorio | Recomendada (firma los enlaces de la ficha de salud) |
-   | `WHATSAPP_API_URL` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_ACCESS_TOKEN` | credenciales de Meta (`WHATSAPP_TOKEN` es sinónimo del último) | Sólo para envíos reales |
-   | `WHATSAPP_VERIFY_TOKEN` | secreto elegido, p. ej. `odontologia_secreto_2026` | Sí, para conectar el webhook en Meta |
+   | `WAHA_URL` / `WAHA_API_KEY` / `WAHA_SESSION` | URL de WAHA, API key y sesión (p. ej. `https://host.nip.io`, `turnos2026`, `default`) | Sólo para envíos reales |
+   | Webhook de WAHA | `{PUBLIC_BASE_URL}/api/v1/whatsapp/webhook` | Sí, para recibir respuestas |
    | `WHATSAPP_CONSULTA_CODIGO` | `10100` | No (código del nomenclador de la consulta) |
    | `WHATSAPP_CONSULTORIO_DIRECCION` / `WHATSAPP_CONSULTORIO_HORARIOS` | texto | No (los publica el FAQ Bot con una opción de tipo `UBICACION`) |
 
@@ -780,8 +825,9 @@ los conteos y recién borra cuando se escribe `SI`.
   definir `CRON_SECRET` en el proyecto. El disparo manual por `POST` exige la
   misma autorización.
 - **Webhook de WhatsApp.** Configurar
-  `https://TU-PROYECTO.vercel.app/api/v1/whatsapp/webhook` como *Callback URL*
-  en la app de Meta.
+  `https://TU-PROYECTO.vercel.app/api/v1/whatsapp/webhook` como webhook de WAHA
+  para el evento `message`, y cargar `WAHA_URL`, `WAHA_API_KEY` y `WAHA_SESSION`
+  en el proyecto.
 - **Versión de Python.** Se fija con `.python-version` (3.14).
 - **Frontend.** El panel y la vista móvil se sirven por el mismo dominio
   (`app.mount("/static", ...)` + rutas del `web_router`), por lo que no hay que
@@ -823,7 +869,7 @@ que desde la consola no se puede armar: el script se lo pide a la app desplegada
 
 ```powershell
 python -m scripts.enviar_ficha --telefono "11 2233-4455"   # imprime enlace + mensaje
-python -m scripts.enviar_ficha --dni 30111222 --api        # lo envía por la Cloud API
+python -m scripts.enviar_ficha --dni 30111222 --api        # lo envía por WAHA
 python -m scripts.enviar_ficha --nombre "Ana" --listar     # turnos del paciente, para elegir
 python -m scripts.enviar_ficha --turno 42 --json           # respuesta cruda de la API
 python -m scripts.enviar_ficha --dni 30111222 --destino 3515551234
@@ -835,7 +881,7 @@ nombre; si hay varios, pide `--dni` y, si no hay turnos por delante, muestra los
 cancelados quedan afuera) y llama a
 `GET /api/v1/anamnesis/panel/{turno_id}/enlace`; con `--api` usa
 `POST /api/v1/anamnesis/panel/{turno_id}/enviar` con `canal=api` y muestra el
-`wamid` (o el aviso de **envío simulado** si el servidor no tiene credenciales).
+identificador del mensaje (o el aviso de **envío simulado** si el servidor no tiene credenciales).
 `--url` apunta a otra instancia (por defecto, producción). Código de salida `0`
 si salió bien y `1` ante cualquier error explicado. La fecha y hora que imprime
 son **las mismas que muestra el panel**: la agenda guarda la hora "de pared" del
@@ -870,7 +916,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | Sección | Función |
 |---------|---------|
 | **Panel Principal** | KPIs (turnos de hoy, confirmados, pendientes, cancelados), **agenda del día en una columna por odontólogo** (cada columna trae el avatar, la especialidad y el cupo de turnos del profesional, con las tarjetas compactas del día y sus acciones *Confirmar asistencia* / *Editar* / *Cancelar* / *Reactivar*), próximos turnos, envío de recordatorios y tarjeta *Recordatorios por WhatsApp* con el contador de pendientes (lleva a esa pestaña). |
-| **Calendario** | Grilla mensual de turnos con **color por estado** (`CONFIRMADO` en verde, `PENDIENTE` con el color del odontólogo y `CANCELADO` en gris atenuado), *tooltip* con el detalle del turno, **filtro por odontólogo** (*Todos los odontólogos* + un botón por profesional) y panel del día con turnos ocupados y horarios disponibles. Los horarios disponibles salen de la **agenda semanal configurada por profesional**, no de una lista fija. Al hacer clic en un **horario disponible con un odontólogo filtrado**, el modal se abre con ese profesional ya seleccionado y **bloqueado** (con un aviso en pantalla), para que el turno no se agende por error en otra agenda. |
+| **Calendario** | Grilla mensual de turnos con **color por estado** (`CONFIRMADO` en verde, `PENDIENTE` con el color del odontólogo y `CANCELADO` en gris atenuado), *tooltip* con el detalle del turno, **filtro por odontólogo** (*Todos los odontólogos* + un botón por profesional), vista **semanal por odontólogo** y panel del día con turnos ocupados y horarios disponibles. Incluye **impresión A4 de la agenda diaria** desde el panel (fecha y profesional elegidos) y desde cada columna de la semana. Los horarios disponibles salen de la **agenda semanal configurada por profesional**, no de una lista fija. Al hacer clic en un **horario disponible con un odontólogo filtrado**, el modal se abre con ese profesional ya seleccionado y **bloqueado** (con un aviso en pantalla), para que el turno no se agende por error en otra agenda. |
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
 | **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos y un botón para eliminar cada uno. Cada día ofrece **dos tramos fijos de un clic**: **Mañana 08:00-13:00** y **Tarde 15:30-18:00** (se pueden tener los dos el mismo día) y el alta manual *desde / hasta* queda plegada en «Otro horario». Incluye **Restaurar plantilla sugerida** (lun-vie con los dos tramos y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
 | **Doctores** | Formulario de alta estilizado + tabla con la **forma de pago** de cada profesional, la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT` que incluye el desplegable **Tipo de pago** —*Dueño*, *Comisión por porcentaje* o *Sueldo fijo*— y habilita el campo numérico del porcentaje o del sueldo mensual), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
@@ -924,7 +970,7 @@ El estado clínico manda sobre el color del odontólogo, tanto en la grilla mens
 
 ### Recordatorios Pendientes (*Click-to-Chat*)
 
-Alternativa **gratuita** al envío automático por la Cloud API, pensada para el
+Alternativa **manual** al envío automático por WAHA, pensada para el
 día a día del consultorio: la secretaría abre el chat del paciente con el
 mensaje ya redactado y lo envía desde el WhatsApp del consultorio.
 
@@ -966,16 +1012,16 @@ El panel principal consume los mismos endpoints del backend:
 - `PATCH /api/v1/turnos/{id}` con `{"estado_whatsapp": "ENVIADO"}` → se envía al
   abrir el enlace de WhatsApp de una fila de *Recordatorios Pendientes*.
 - `POST /api/v1/whatsapp/webhook` → botones **“Responder: Confirma / Cancela”**,
-  que aparecen en el turno una vez enviado el recordatorio. Reproducen el webhook
-  de Meta usando el `whatsapp_mensaje_id` como `context.id`, lo que permite ver el
-  ciclo completo (enviado → respuesta → confirmado/cancelado) sin un teléfono real.
-  Como dependen de ese identificador (dato efímero de Meta que **no** se copia al
-  migrar la base), la asistencia también se puede confirmar sin WhatsApp con el
-  botón **Confirmar asistencia** de la tarjeta del turno
+  que aparecen en el turno una vez enviado el recordatorio. Reproducen un evento
+  de WAHA con el teléfono del paciente y el texto `1` o `2`, lo que permite ver
+  el ciclo completo (enviado → respuesta → confirmado/cancelado) sin un teléfono
+  real. Como la confirmación depende de `conversaciones_whatsapp`, la asistencia
+  también se puede confirmar sin WhatsApp con el botón **Confirmar asistencia**
+  de la tarjeta del turno
   (`PATCH` con `{"estado_turno":"CONFIRMADO"}`) y con el tilde verde de la agenda
   móvil: son acciones de un toque pensadas para el paciente que avisa por teléfono
   o llega al consultorio.
-- `POST /api/v1/whatsapp/webhook` con un mensaje de **texto** (`type: "text"`) →
+- `POST /api/v1/whatsapp/webhook` con un evento `message` de WAHA y un texto →
   el **FAQ Bot** contesta solo con el menú de opciones; probándolo desde Swagger
   se puede ver la respuesta (`opcion`, `respuesta`, `atencion_manual`) sin
   conectar un teléfono.
@@ -1072,6 +1118,8 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 | **AntecedentesSalud** | `id`, `historia_clinica_id` (UQ) + cuestionario completo de la Historia Clínica General (familiares, personales, odontológicos, examen bucal y plan) |
 | **Odontograma** | `id`, `historia_clinica_id` (UQ), `doctor_id`, `protesis_fija`, `protesis_removible`, `coronas`, `dientes_existentes`, `observaciones`, `actualizado_en` |
 | **OdontogramaDiente** | `id`, `odontograma_id`, `diente` (UQ con el odontograma), `estado`, `notas` |
+| **FichaMedica** | `id`, `historia_clinica_id` (UQ), `vencimiento`, `grupo_familiar`, `parentesco`, `antecedentes_enfermedad`, `presencia_sarro`, `enfermedad_periodontal`, `actualizado_en` |
+| **FichaMedicaTrabajo** | `id`, `ficha_medica_id`, `orden`, `fecha`, `codigo`, `pieza`, `trabajo`, `debe`, `haber` (el saldo se calcula) |
 | **OpcionMenuWhatsApp** | `id`, `numero`, `titulo`, `tipo`, `respuesta`, `activa`, `orden` |
 | **CuentaCorriente** | `id` (UUID), `paciente_id`, `saldo_actual`, `ultima_actualizacion` |
 | **TransaccionCC** | `id` (UUID), `cuenta_corriente_id`, `tipo_movimiento`, `monto`, `descripcion`, `fecha`, `medio_pago` |
@@ -1080,7 +1128,7 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 | **GastoFactura** | `id` (UUID), `proveedor_id`, `paciente_id` (opcional, sólo mecánico dental), `concepto`, `monto_total`, `monto_pagado`, `fecha_emision`, `fecha_vencimiento`, `estado_pago` (+ `saldo_pendiente` y `vencida`, propiedades calculadas) |
 | **PagoEgreso** | `id` (UUID), `gasto_factura_id`, `monto_pagado`, `metodo_pago`, `fecha_pago` |
 
-> La tabla resume los **23 modelos** (una clase ORM por tabla). El detalle campo
+> La tabla resume los **25 modelos** (una clase ORM por tabla). El detalle campo
 > por campo, con tipos, índices y constraints, está en **`DOCUMENTACION.md` §6.4**.
 
 **Enumeraciones**
@@ -1245,6 +1293,21 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > En PostgreSQL, `Base.metadata.create_all` (que corre al arrancar la app) también
 > crea las tres tablas; el encabezado del script incluye el DDL equivalente.
 >
+> **Migración de la ficha médica del paciente (Módulo 4).** Las tablas de la hoja
+> de papel (`fichas_medicas` y `ficha_medica_trabajos`) también son **nuevas** y
+> `create_all` las crea al arrancar. Para crearlas explícitamente, con la app
+> detenida:
+>
+> ```bash
+> python -m scripts.migrar_ficha_medica
+> ```
+>
+> Es aditiva e idempotente: crea las dos tablas con sus índices
+> (`uq_ficha_medica_historia` e `ix_ficha_trabajo_ficha`), completa los índices
+> que falten, guarda una copia del `.db` y verifica que `pacientes` e
+> `historias_clinicas` conserven sus filas. El encabezado incluye el DDL para
+> PostgreSQL.
+>
 > **Migración de la facturación (Módulo 3).** El catálogo de prácticas, los
 > aranceles y las tablas de caja son nuevas, y `doctores` suma las columnas
 > `tipo_pago` y `valor_pago`. `create_all` crea las tablas nuevas pero **no**
@@ -1324,6 +1387,21 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > planilla de Excel para importarlos en lote) o de a uno en *Prestaciones y
 > aranceles*, porque son el acuerdo con cada cobertura.
 >
+> **Actualización desde la planilla del nomenclador (Excel).** Cuando llega la
+> grilla completa (*Capítulo*, *Código*, *Descripción* y *Arancel*) se carga con
+> `python -m scripts.importar_nomenclador_excel "ruta\al\nomenclador.xlsx"`: las
+> columnas se ubican por el **nombre** del encabezado (el orden no importa y las
+> de más se ignoran), **crea** las prácticas que faltan y **actualiza**
+> descripción y valor base de las que ya están, comparando por código sin
+> distinguir mayúsculas, puntos ni espacios (`uq_prestacion_codigo`), así que
+> correrla dos veces no duplica nada. Los aranceles publicados como «No
+> publicado» o «A convenir» quedan en **$0** (el precio lo define la secretaría
+> en el panel) y **no** pisan un precio ya cargado. Acepta `--dry-run` (muestra
+> sin escribir), `--solo-nuevas` (no toca los precios ajustados a mano),
+> `--desactivar-faltantes` (baja **lógica** de las que ya no figuran en la
+> grilla) y `--sin-detalle`. Las prácticas que quedan así cargadas son las que
+> después se cotizan por cobertura en *Facturación y Caja → Convenios*.
+>
 > **Migración de la cobertura al catálogo.** Las bases creadas con el campo de
 > texto `Paciente.obra_social` necesitan el paso a la clave foránea
 > `obra_social_id` (tabla `obras_sociales`, nombre único sin distinguir
@@ -1380,7 +1458,15 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `GET`  | `/anamnesis/panel/{turno_id}/enlace` | **Módulo 4:** enlace firmado + mensaje + `wa.me` de un turno no cancelado (`?telefono=` para otro destino) |
 | `POST` | `/anamnesis/panel/{turno_id}/enviar` | **Módulo 4:** `canal=manual` sólo prepara el mensaje; `canal=api` lo manda por WhatsApp (no marca el recordatorio) |
 | `GET`  | `/pacientes/{id}/odontograma` | **Módulo 4:** odontograma del paciente (dientes pintados, prótesis y totales; `id` en `null` si todavía no se cargó) |
-| `PUT`  | `/pacientes/{id}/odontograma` | **Módulo 4:** guardar el odontograma completo (rojo/azul/X en notación FDI 11-48; `422` con estado inválido, diente repetido o fuera de rango) |
+| `PUT`  | `/pacientes/{id}/odontograma` | **Módulo 4:** guardar el odontograma completo (rojo/azul/X en notación FDI permanente 11-48 y temporaria 51-85; `422` con estado inválido, diente repetido o fuera de rango) |
+| `GET`  | `/pacientes/{id}/ficha-medica` | **Módulo 4:** hoja del paciente (datos filiatorios, vencimiento, grupo familiar, parentesco, antecedentes, sarro/periodontal y libro «Trabajo realizado» con saldo; `id` en `null` si no se cargó) |
+| `PUT`  | `/pacientes/{id}/ficha-medica` | **Módulo 4:** guardar la ficha completa (crea la historia; reemplaza el libro, descarta renglones en blanco y recalcula el saldo; `422` con importes negativos o textos largos) |
+| `POST` | `/presupuestos` | **Presupuestos:** crear una cotización con trabajos, precios y entregas opcionales. Cada trabajo acepta un `codigo` de prestación (opcional) y una descripción de hasta 1000 caracteres con saltos de línea (paciente inexistente → `404`; lista vacía, código/descripción demasiado largos o importes negativos → `422`) |
+| `GET`  | `/presupuestos` | Listar presupuestos (`?paciente_id=` y `?buscar=` por paciente/DNI, forma de pago, **código o descripción de los trabajos**) |
+| `GET`  | `/presupuestos/{id}` | Obtener el presupuesto con total, entregas y saldo calculados |
+| `PUT`  | `/presupuestos/{id}` | Reemplazar cabecera y todos los trabajos del presupuesto (mismo payload que el `POST`) |
+| `DELETE`| `/presupuestos/{id}` | Eliminar el presupuesto y sus renglones (`204`) |
+| `GET`  | `/presupuestos/{id}/pdf` | **PDF del presupuesto** con el diseño del documento del consultorio (`application/pdf`, inline). Imprime `Cód. <código> - <descripción>` y respeta los saltos de línea de la descripción |
 | `POST` | `/obras-sociales` | Crear obra social (nombre único → `409`) |
 | `GET`  | `/obras-sociales` | Listar el catálogo (`?activas=true/false`, `?nombre=`) |
 | `GET`  | `/obras-sociales/{id}` | Obtener obra social |
@@ -1393,8 +1479,7 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `PATCH`| `/turnos/{id}` | Actualizar turno (reprogramar, reasignar, cancelar o reactivar) con las mismas validaciones |
 | `GET` / `POST` | `/tareas/enviar-recordatorios` | **Tarea programada** de recordatorios WhatsApp; requiere `Bearer CRON_SECRET` |
 | `GET`  | `/whatsapp/recordatorios-pendientes` | **Recordatorios pendientes** con enlace Click-to-Chat (`?dias=1..30`, por defecto 3) |
-| `GET`  | `/whatsapp/webhook` | Verificación del webhook (Meta) |
-| `POST` | `/whatsapp/webhook` | **Webhook de entrada**: texto libre → FAQ Bot; botón del recordatorio → confirmar/cancelar el turno |
+| `POST` | `/whatsapp/webhook` | **Webhook de WAHA**: `1`/`si` o `2`/`no` confirman/cancelan; otro texto → FAQ Bot o menú |
 | `GET`  | `/whatsapp/menu` | **Bot WhatsApp:** opciones del menú (`?activas=true/false`; sin filtro, todas) |
 | `POST` | `/whatsapp/menu` | Crear opción del menú (tecla única → `409`; `TEXTO` sin `respuesta` → `422`) |
 | `GET`  | `/whatsapp/menu/vista-previa` | Texto del menú activo (o aviso de menú vacío) al escribir «hola» |
@@ -1680,37 +1765,26 @@ curl -X POST $API/turnos -H "Content-Type: application/json" \
 # Ejecutar la tarea programada de recordatorios
 curl -X POST $API/tareas/enviar-recordatorios
 
-# Webhook (respuesta de botón "Confirmar")
+# Webhook de WAHA: el paciente confirma el turno respondiendo "1"
 curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
-  "object":"whatsapp_business_account",
-  "entry":[{"id":"WABA","changes":[{"field":"messages","value":{
-    "messages":[{
-      "from":"5491122334455","id":"wamid.IN","type":"interactive",
-      "context":{"id":"wamid.SIMULADO.XXXX"},
-      "interactive":{"type":"button_reply",
-                     "button_reply":{"id":"confirmar_turno","title":"Confirmar"}}
-    }]}}]}]}'
+  "event":"message","session":"default",
+  "payload":{"id":"waha.IN","from":"5491122334455@c.us","fromMe":false,
+             "body":"1","type":"chat"}}'
 
 # Recordatorios pendientes con su enlace Click-to-Chat (ventana de 7 días)
 curl "$API/whatsapp/recordatorios-pendientes?dias=7"
 
 # Webhook con un mensaje de TEXTO del paciente (lo contesta el FAQ Bot)
 curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
-  "object":"whatsapp_business_account",
-  "entry":[{"id":"WABA","changes":[{"field":"messages","value":{
-    "messages":[{
-      "from":"5491122334455","id":"wamid.IN","type":"text",
-      "text":{"body":"hola"}
-    }]}}]}]}'
+  "event":"message","session":"default",
+  "payload":{"id":"waha.IN","from":"5491122334455@c.us","fromMe":false,
+             "body":"hola","type":"chat"}}'
 
 # La misma consulta eligiendo una tecla (con el menú histórico, 1 = precio)
 curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
-  "object":"whatsapp_business_account",
-  "entry":[{"id":"WABA","changes":[{"field":"messages","value":{
-    "messages":[{
-      "from":"5491122334455","id":"wamid.IN","type":"text",
-      "text":{"body":"1"}
-    }]}}]}]}'
+  "event":"message","session":"default",
+  "payload":{"id":"waha.IN","from":"5491122334455@c.us","fromMe":false,
+             "body":"1","type":"chat"}}'
 ```
 
 ---
@@ -1725,12 +1799,15 @@ curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
   `estado_turno == PENDIENTE` **y** `estado_whatsapp == PENDIENTE_ENVIO`.
 - Por cada turno:
   - Registra el log: **`Enviando WhatsApp a <telefono>`**.
-  - Dispara el envío: si están las credenciales (`WHATSAPP_PHONE_NUMBER_ID` y
-    `WHATSAPP_ACCESS_TOKEN` o su sinónimo `WHATSAPP_TOKEN`) realiza un `POST`
-    **real** con `httpx`; si no, **simula** el `POST` HTTP y genera un `wamid`
-    ficticio (`wamid.SIMULADO...`).
+  - Dispara el envío: si están `WAHA_URL` y `WAHA_API_KEY`, espera 1,5 s y hace
+    un `POST` **real** con `httpx` a `{WAHA_URL}/api/sendText` (cabecera
+    `X-Api-Key`, `chatId` en formato `549...@c.us`); si no, **simula** el envío
+    y genera un identificador ficticio (`waha.SIMULADO...`).
   - Actualiza el turno: `estado_whatsapp = ENVIADO` y guarda
     `whatsapp_mensaje_id` (o `FALLIDO` si hubo error).
+  - Guarda en `conversaciones_whatsapp` que ese teléfono tiene una confirmación
+    pendiente para el turno. El recordatorio pide responder **1** o **SI** para
+    confirmar y **2** o **NO** para cancelar.
 
 > **Programación real:** el endpoint actúa como disparador. En producción se
 > puede invocar mediante un *cron*, el Task Scheduler de Windows o `APScheduler`,
@@ -1752,7 +1829,7 @@ vez que arranca la aplicación.
 | tecla de una opción `UBICACION` | dirección y horarios del consultorio (`WHATSAPP_CONSULTORIO_*`) |
 | tecla de una opción `TEXTO` | el mensaje escrito por la secretaría en el panel |
 | tecla de una opción `SECRETARIA` | **Atención Manual Requerida** (no responde: queda para una secretaria) |
-| tecla que no existe o cualquier otro texto | **Atención Manual Requerida** |
+| tecla que no existe o cualquier otro texto | vuelve a mostrar el menú principal |
 
 #### Menú configurable desde el panel
 
@@ -1774,9 +1851,9 @@ vez que arranca la aplicación.
   acentos y emojis con `unicodedata` (NFKD), así que `"Holá"`, `"1️⃣"` (el
   teclado de WhatsApp) y `"OPCIÓN: 3"` se entienden igual.
 - **Detección de la opción.** `detectar_opcion` acepta `1`, `1.`, `(1)`, `n°1`,
-  `opcion 1`… pero **un sólo dígito**: `23` no es una opción del menú y cae en
-  atención manual. Un número fuera del menú configurado (`7`) también queda
-  registrado.
+  `opcion 1`… pero **un sólo dígito**: `23` no es una opción del menú y vuelve
+  al menú principal. Un número fuera del menú configurado (`7`) también muestra
+  el menú.
 - **Precio.** Se formatea con los separadores argentinos (`$18.000,00`) y, si la
   prestación no está cargada, se avisa que no se pudo consultar el valor (el
   `logger.warning` queda en los logs).
@@ -1785,61 +1862,53 @@ vez que arranca la aplicación.
   `app.services.whatsapp_bot`) con el motivo y el texto original, para que la
   secretaría siga la conversación desde su WhatsApp.
 - **Transporte.** El bot sólo decide *qué* contestar; el envío lo hace
-  `whatsapp_service.enviar_mensaje_texto` (`POST` **real** a la Graph API con
-  credenciales, **simulado** sin ellas), igual que los recordatorios. Como el
-  paciente escribió primero, la respuesta entra en la **ventana de 24 h** de
-  atención al cliente y no necesita plantilla aprobada.
+  `whatsapp_service.enviar_mensaje_texto` (`POST` **real** a
+  `{WAHA_URL}/api/sendText`, **simulado** sin credenciales), igual que los
+  recordatorios.
+- **Estado por paciente.** `conversaciones_whatsapp` guarda una fila por
+  teléfono con el estado `MENU` o `CONFIRMACION_TURNO` y el turno pendiente. Se
+  consulta en cada mensaje, así que la confirmación funciona aunque WAHA no
+  envíe el identificador original.
 - **Consultas a la base.** `obtener_prestacion_consulta` y
   `listar_obras_sociales_activas` se pueden usar sueltas (son funciones puras
   respecto del bot). El CRUD del menú y los tipos de respuesta se prueban en
   `tests/test_menu_whatsapp.py`; el árbol de decisión histórico, en
   `tests/test_whatsapp_bot.py`.
 
-### Verificación del webhook (`GET /api/v1/whatsapp/webhook`)
+### Configuración del webhook en WAHA
 
-Antes de entregar mensajes, Meta valida la URL con un `GET` que trae
-`hub.mode=subscribe`, el `hub.verify_token` cargado en el panel y un
-`hub.challenge`. El endpoint:
+No hay `GET` de verificación: WAHA no lo usa. En WAHA se configura el webhook
+apuntando a la app:
 
-- compara el token contra `WHATSAPP_VERIFY_TOKEN` (con `hmac.compare_digest` y
-  **nunca** contra el access token de la API);
-- si coincide, devuelve el `hub.challenge` **tal cual**, en texto plano y con
-  `200` (Meta rechaza un JSON que lo envuelva);
-- si el token no coincide, falta `hub.mode=subscribe` o no viene el challenge,
-  responde `403`.
-
-Configuración en Meta (*WhatsApp → Configuration → Webhook → Edit*):
-
-- **Callback URL**: `https://odontologico-omega.vercel.app/api/v1/whatsapp/webhook`
-- **Verify token**: el mismo valor de `WHATSAPP_VERIFY_TOKEN`
-  (`odontologia_secreto_2026`)
-- En *Webhook fields*, suscribir **`messages`**.
+- **URL**: `https://TU-PROYECTO.vercel.app/api/v1/whatsapp/webhook`
+- **Eventos**: `message` (la app ignora `session.status`, `message.ack` y el
+  resto).
 
 ### Webhook de entrada (`POST /api/v1/whatsapp/webhook`)
 
-Atiende los dos tipos de mensaje que puede mandar un paciente:
+Sólo se procesan los eventos `event: "message"` cuyo `payload.fromMe` sea
+`false` y cuyo remitente no sea un grupo (`@g.us`) ni un estado (`@broadcast`).
+El resto responde `200` con `"tipo": "IGNORADO"` para que WAHA no reintente.
 
-**`text` (escribe a mano)** → lo contesta el FAQ Bot. Responde `200` con
+**Confirmación pendiente** → si el teléfono tiene un recordatorio esperando,
+`1` / `si` confirma el turno y `2` / `no` lo cancela. La respuesta es
+`"tipo": "CONFIRMACION"` con `turno_id`, `estado_turno` y
+`estado_whatsapp = RESPONDIDO`. Cualquier otra respuesta repite la pregunta y
+mantiene el estado pendiente.
+
+**Cualquier otro texto** → lo contesta el FAQ Bot. Responde `200` con
 `"tipo": "BOT"`, la `opcion` detectada (`null` si no es del menú), el
-`respuesta` enviado (texto) y `atencion_manual: true` cuando derivó a una
-persona. Si el mensaje no trae `from` ni `text.body`, es `400`.
+`respuesta` enviado y `atencion_manual: true` cuando una opción deriva a una
+persona. Si no hay confirmación pendiente y el texto no es una opción, se
+muestra el **menú principal numerado**.
 
-**`interactive.button_reply` (botones del recordatorio)** → extrae el mensaje con
-`interactive.button_reply`, toma `context.id` (el `wamid` del mensaje saliente
-original), busca el `Turno` por `whatsapp_mensaje_id` y mapea el botón —
-`confirmar_turno` → `CONFIRMADO`, `cancelar_turno` → `CANCELADO`—, actualizando
-`estado_turno` y dejando `estado_whatsapp = RESPONDIDO` (`"tipo": "BOTON"`).
-
-En los dos casos el JSON se parsea primero con esquemas Pydantic tolerantes a
-campos extra.
-
-**Códigos de error:** `400` payload inválido / botón desconocido / sin
-`context.id`; `404` no existe turno con ese `wamid`.
+Los mensajes se parsean con esquemas Pydantic tolerantes a campos extra. Los
+eventos ignorados también responden `200`.
 
 ### Recordatorios por enlace *Click-to-Chat*
 
-Cuando no se quieren (o no se pueden) usar las credenciales de la Cloud API, el
-panel ofrece la vía gratuita: el backend **arma el enlace y la secretaría envía**.
+Como alternativa manual a WAHA, el panel ofrece la vía gratuita: el backend
+**arma el enlace y la secretaría envía**.
 
 `GET /api/v1/whatsapp/recordatorios-pendientes?dias=N` (`1 ≤ N ≤ 30`, por defecto
 `RECORDATORIO_DIAS`) devuelve, ordenados por fecha, los turnos que caen dentro de
@@ -1916,11 +1985,15 @@ odontológicos del PDF, la normalización de textos y opciones cerradas, los
 rangos numéricos, los nuevos motivos de alerta y que el enlace público **no**
 pueda firmar el examen bucal ni el diagnóstico (eso sólo lo hace el `PUT`
 interno). El **odontograma** tiene su archivo, `tests/test_odontograma.py`
-(*12 pruebas*): lectura que no crea la historia clínica, los tres estados del
+(*13 pruebas*): lectura que no crea la historia clínica, los tres estados del
 PDF, reemplazo del conjunto de dientes sin duplicar filas, normalización a
-mayúsculas, creación de la ficha y rechazo (`422`/`404`) de dientes FDI
-inválidos, estados desconocidos, dientes repetidos, paciente u odontólogo
-inexistentes y cantidades fuera de rango.
+mayúsculas, dentición temporaria (51-85), creación de la ficha y rechazo
+(`422`/`404`) de dientes FDI inválidos, estados desconocidos, dientes repetidos,
+paciente u odontólogo inexistentes y cantidades fuera de rango. La **ficha
+médica del paciente** se prueba en `tests/test_ficha_medica.py`: lectura sin
+crear la historia, cabecera y estado bucal, saldo acumulado del libro «Trabajo
+realizado», reemplazo del libro descartando renglones en blanco, creación de la
+ficha y validaciones (`404`/`422`).
 
 El **contrato HTTP del panel** se verifica en
 `tests/test_contrato_http_turnos.py`: que `PATCH /api/v1/turnos/{id}` cancele y
@@ -1973,7 +2046,7 @@ historia previa, corrección sin duplicar la fila, recálculo de la alerta,
 `404` para un turno inexistente, `409` para uno cancelado, `422` para textos
 demasiado largos, la validación de las opciones cerradas y los rangos, y que el
 formulario del panel se arma con el catálogo compartido (`ficha_medica.js`)
-junto al botón del odontograma. Los **datos filiatorios** se prueban en los dos
+junto al botón de la ficha médica. Los **datos filiatorios** se prueban en los dos
 lados: el enlace público y el `PUT` interno los guardan en el registro del
 paciente (no en la tabla de la ficha), el reenvío con los campos vacíos no borra
 lo ya cargado, la lectura —pública y del panel— los devuelve en
@@ -1984,12 +2057,12 @@ El **envío manual de la ficha** se cubre en `tests/test_enviar_ficha.py`
 `GET /anamnesis/panel/{turno_id}/enlace` (también para un turno fuera de la
 ventana del panel y con un destino alternativo), el `POST .../enviar` con
 `canal=manual` (devuelve el enlace, no envía y no marca nada), con `canal=api`
-(sale **simulado** sin credenciales, exige un teléfono válido y guarda el `wamid`
-sólo en ese camino), los `404`/`409`/`422` de turno inexistente, cancelado y canal
-desconocido, los campos nuevos del panel (`mensaje`, `enlace`,
+(sale **simulado** sin credenciales, exige un teléfono válido y guarda el
+identificador sólo en ese camino), los `404`/`409`/`422` de turno inexistente,
+cancelado y canal desconocido, los campos nuevos del panel (`mensaje`, `enlace`,
 `enlace_whatsapp`), el **formato del mensaje** (el enlace va solo en la última
 línea, con una línea en blanco antes, tanto en el envío de la ficha como en el
-recordatorio, y el envío por API pide `preview_url`), el botón y el modal de
+recordatorio) y el payload de WAHA, el botón y el modal de
 envío (ids presentes en `index.html`, el clic que abre WhatsApp Web con el `wa.me`
 de la ficha y el respaldo al modal cuando no hay teléfono, el enlace del modal
 como `<a>` clickeable, el aviso de URL local, `canal=api` y aviso de envío

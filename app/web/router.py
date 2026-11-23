@@ -70,7 +70,7 @@ def ficha_de_salud(token: str) -> FileResponse:
 
 @router.get("/privacidad")
 def politica_de_privacidad() -> FileResponse:
-    """Política pública requerida por Meta para la integración de WhatsApp."""
+    """Política pública de privacidad para la integración de WhatsApp."""
     return FileResponse(PRIVACIDAD_FILE, media_type="text/html", headers=SIN_CACHE)
 
 

@@ -53,6 +53,17 @@ DIENTES_PERMANENTES: tuple[int, ...] = tuple(
     for diente in range(1, 9)
 )
 
+#: Dientes temporarios (decidua) en notación FDI: 51-55, 61-65, 71-75 y 81-85.
+#: El formulario de papel muestra las dos denticiones en el mismo cuadro.
+DIENTES_TEMPORARIOS: tuple[int, ...] = tuple(
+    cuadrante * 10 + diente
+    for cuadrante in (5, 6, 7, 8)
+    for diente in range(1, 6)
+)
+
+#: Todos los dientes que admite el odontograma (permanentes y temporarios).
+DIENTES_VALIDOS: tuple[int, ...] = DIENTES_PERMANENTES + DIENTES_TEMPORARIOS
+
 #: Estados posibles de un diente (los colores del PDF).
 ESTADOS_DIENTE: tuple[str, ...] = ("EXISTENTE", "REQUERIDO", "AUSENTE")
 
@@ -127,7 +138,7 @@ class OdontogramaDiente(Base):
         nullable=False,
         index=True,
     )
-    #: Número FDI del diente (11 a 48).
+    #: Número FDI del diente (permanente 11-48 o temporario 51-85).
     diente: Mapped[int] = mapped_column(Integer, nullable=False)
     #: ``EXISTENTE`` (rojo), ``REQUERIDO`` (azul) o ``AUSENTE`` (X).
     estado: Mapped[str] = mapped_column(String(12), nullable=False)

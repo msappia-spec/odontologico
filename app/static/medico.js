@@ -717,15 +717,18 @@
   }
 
   /* El detalle de la ficha lo arma el catálogo compartido
-     (``FICHA_MEDICA.renderResumen``), igual que en el Panel Principal. */
+     (``FICHA_MEDICA.renderResumen``), igual que en el Panel Principal.
+     El botón «Ficha médica» abre la hoja de papel completa (datos del
+     paciente, odontograma y libro «Trabajo realizado») con ``odontograma.js``. */
   function antecedentesSaludHTML(detalle) {
     const a = detalle && detalle.antecedentes_salud;
     const pacienteId = detalle && detalle.paciente_id;
-    const botonOdonto = pacienteId
-      ? `<button type="button" class="salud-btn-odonto"` +
-        ` data-odontograma="${esc(pacienteId)}"` +
-        ` data-odontograma-nombre="${esc((detalle && detalle.paciente_nombre) || "")}">` +
-        `Odontograma</button>`
+    const botonFicha = pacienteId
+      ? `<button type="button" class="salud-btn-ficha"` +
+        ` data-ficha-medica="${esc(pacienteId)}"` +
+        ` data-ficha-medica-nombre="${esc((detalle && detalle.paciente_nombre) || "")}"` +
+        ` title="Abrir la ficha médica (datos, odontograma y trabajo realizado)">` +
+        `Ficha médica</button>`
       : "";
     /* La Historia Clínica General se imprime sobre la plantilla de papel. */
     const botonPdf = pacienteId
@@ -749,7 +752,7 @@
         `</div>` +
         `<div class="salud-acciones">` +
         `<span class="badge badge-slate">Pendiente</span>` +
-        botonOdonto +
+        botonFicha +
         botonPdf +
         `</div>` +
         `</div>` +
@@ -779,7 +782,7 @@
       `</div>` +
       `<div class="salud-acciones">` +
       `<span class="badge ${alerta ? "badge-red" : "badge-green"}">${alerta ? "Alerta médica" : "Sin alertas"}</span>` +
-      botonOdonto +
+      botonFicha +
       botonPdf +
       `</div>` +
       `</div>` +
@@ -1096,9 +1099,32 @@
   }
 
   function detallePaciente(p) {
-    return [p.dni ? `DNI ${p.dni}` : "", p.telefono || "", p.obra_social || ""]
+    return [
+      p.dni ? `DNI ${p.dni}` : "",
+      p.telefono || "",
+      p.obra_social || "",
+      p.categoria === "MALO" ? "MALO" : "",
+    ]
       .filter(Boolean)
       .join(" · ");
+  }
+
+  /* Aviso del paciente MALO en la hoja de turno. Se muestra al elegir una ficha
+     ya registrada y permanece a la vista hasta que se elige otro paciente. */
+  function actualizarAlertaCategoriaPaciente(p) {
+    const caja = $("paciente-alerta-categoria");
+    const obs = $("paciente-alerta-categoria-obs");
+    if (!caja) return;
+    const esMalo = Boolean(p && p.categoria === "MALO");
+    caja.classList.toggle("hide", !esMalo);
+    if (esMalo && obs) {
+      obs.textContent = p.categoria_observaciones || "Sin observaciones cargadas.";
+    }
+  }
+
+  function ocultarAlertaCategoriaPaciente() {
+    const caja = $("paciente-alerta-categoria");
+    if (caja) caja.classList.add("hide");
   }
 
   function pacienteHTML(p) {
@@ -1145,12 +1171,14 @@
     $("paciente-elegido").classList.remove("hide");
     $("bloque-buscar").classList.add("hide");
     $("bloque-paciente-nuevo").classList.add("hide");
+    actualizarAlertaCategoriaPaciente(p);
   }
 
   /* Volver a la lista para elegir otra ficha. */
   function mostrarBuscadorPaciente() {
     state.pacienteId = null;
     state.pacienteNuevo = false;
+    ocultarAlertaCategoriaPaciente();
     $("paciente-elegido").classList.add("hide");
     $("bloque-paciente-nuevo").classList.add("hide");
     $("bloque-buscar").classList.remove("hide");
@@ -1166,6 +1194,7 @@
   function mostrarAltaPacienteNuevo(nombreSugerido) {
     state.pacienteId = null;
     state.pacienteNuevo = true;
+    ocultarAlertaCategoriaPaciente();
     $("paciente-elegido").classList.add("hide");
     $("bloque-buscar").classList.add("hide");
     $("bloque-paciente-nuevo").classList.remove("hide");
@@ -1273,6 +1302,7 @@
     $("paciente-elegido").classList.add("hide");
     $("bloque-paciente-nuevo").classList.add("hide");
     $("bloque-buscar").classList.remove("hide");
+    ocultarAlertaCategoriaPaciente();
     const buscador = $("nuevo-buscar");
     if (buscador) buscador.value = "";
     renderPacientes();
@@ -1357,6 +1387,8 @@
      ``null`` (con el error ya mostrado) si falta el dato obligatorio. */
   async function pacienteDelFormulario() {
     if (state.pacienteId) {
+      const elegido = porId(state.pacientes, state.pacienteId);
+      if (elegido) return Object.assign({}, elegido, { nuevo: false });
       return { id: state.pacienteId, nombre: nombrePaciente(state.pacienteId), nuevo: false };
     }
     const nombre = $("nuevo-nombre").value.trim();
@@ -1398,6 +1430,21 @@
       if (!paciente) return;
       // La ficha recién creada queda disponible en el buscador al instante.
       if (paciente.nuevo) state.pacientes = state.pacientes.concat([paciente]);
+
+      /* Antes de asignar un turno nuevo a un paciente MALO se muestran sus
+         observaciones y se pide confirmación. Al editar no se interrumpe. */
+      if (!modoEdicion && paciente.categoria === "MALO") {
+        actualizarAlertaCategoriaPaciente(paciente);
+        const observaciones =
+          (paciente.categoria_observaciones || "").trim() ||
+          "Sin observaciones cargadas.";
+        const confirmado = window.confirm(
+          `El paciente ${paciente.nombre} está categorizado como MALO.\n\n` +
+            `Observaciones:\n${observaciones}\n\n` +
+            "¿Asignar el turno igual?"
+        );
+        if (!confirmado) return;
+      }
 
       const rango = isoInicioFin(fecha, hora, dur);
       const payload = {

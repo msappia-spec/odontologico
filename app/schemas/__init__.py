@@ -71,6 +71,13 @@ from app.schemas.obra_social import (
     ObraSocialUpdate,
 )
 from app.schemas.paciente import PacienteCreate, PacienteRead, PacienteUpdate
+from app.schemas.presupuesto import (
+    PresupuestoCreate,
+    PresupuestoItemCreate,
+    PresupuestoItemRead,
+    PresupuestoRead,
+    PresupuestoUpdate,
+)
 from app.schemas.prestacion import (
     PrestacionCreate,
     PrestacionRead,
@@ -143,6 +150,11 @@ __all__ = [
     "PacienteCreate",
     "PacienteRead",
     "PacienteUpdate",
+    "PresupuestoCreate",
+    "PresupuestoItemCreate",
+    "PresupuestoItemRead",
+    "PresupuestoRead",
+    "PresupuestoUpdate",
     "RegistrarPagoRequest",
     "TransaccionCCRead",
     "TurnoCreate",

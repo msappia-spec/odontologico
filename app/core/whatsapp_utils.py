@@ -102,6 +102,75 @@ def normalizar_telefono_whatsapp(
     return prefijo + digitos
 
 
+def _quitar_prefijo_movil_15(numero: str) -> str:
+    """Quita el ``15`` que se intercala entre el área y el abonado en Argentina.
+
+    El formato internacional que usa WAHA no lleva ese prefijo: ``351 15
+    643-2863`` se convierte en ``351 643-2863``. Se prueban largos de área de 2,
+    3 y 4 dígitos y se exige que el número resultante tenga los 10 dígitos
+    nacionales habituales, para no confundir un ``15`` que forme parte del
+    abonado.
+    """
+    for largo_area in (2, 3, 4):
+        if (
+            len(numero) - 2 == 10
+            and numero[largo_area:largo_area + 2] == "15"
+        ):
+            return numero[:largo_area] + numero[largo_area + 2:]
+    return numero
+
+
+def normalizar_telefono_waha(telefono: Optional[str]) -> str:
+    """Deja un teléfono argentino en el formato que espera WAHA.
+
+    Reglas:
+
+    1. Sólo dígitos; se descarta el prefijo internacional ``00`` y los ceros de
+       larga distancia.
+    2. Si el número ya viene con ``549`` o ``54`` se respeta el país, pero se
+       normaliza el ``9`` de móvil.
+    3. Para números locales se antepone ``549``.
+    4. Se quita el ``15`` que va después del código de área.
+
+    Ejemplos::
+
+        "+54 9 351 643-2863"  -> "5493516432863"
+        "0351 15 643-2863"    -> "5493516432863"
+        "351 643-2863"        -> "5493516432863"
+    """
+    digitos = solo_digitos(telefono)
+    if not digitos:
+        return ""
+
+    if digitos.startswith("00"):
+        digitos = digitos[2:]
+    digitos = digitos.lstrip("0")
+    if not digitos:
+        return ""
+
+    if digitos.startswith("549"):
+        resto = digitos[3:]
+        return "549" + _quitar_prefijo_movil_15(resto)
+
+    if digitos.startswith("54"):
+        resto = digitos[2:]
+        if resto.startswith("9"):
+            resto = resto[1:]
+        return "549" + _quitar_prefijo_movil_15(resto)
+
+    return "549" + _quitar_prefijo_movil_15(digitos)
+
+
+def construir_chat_id_waha(telefono: Optional[str]) -> str:
+    """Arma el ``chatId`` que exige WAHA (``<número>@c.us``).
+
+    :return: el identificador listo para ``/api/sendText`` o ``""`` si no hay
+        un teléfono utilizable.
+    """
+    numero = normalizar_telefono_waha(telefono)
+    return f"{numero}@c.us" if numero else ""
+
+
 def formatear_fecha_recordatorio(fecha: datetime) -> str:
     """Devuelve la fecha "en letras" (``viernes 16 de octubre de 2026``)."""
     return (

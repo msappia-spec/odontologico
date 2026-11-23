@@ -9,11 +9,13 @@ from app.api.v1.endpoints import (
     doctores,
     egresos,
     facturacion,
+    fichas_medicas,
     finanzas,
     historias_clinicas,
     obras_sociales,
     odontogramas,
     pacientes,
+    presupuestos,
     prestaciones,
     tareas,
     turnos,
@@ -33,7 +35,11 @@ api_router.include_router(historias_clinicas.router)
 api_router.include_router(anamnesis.router)
 # Módulo 4: odontograma gráfico que completa el profesional (GET y PUT).
 api_router.include_router(odontogramas.router)
+# Módulo 4: ficha médica del paciente (cabecera, estado bucal y trabajos).
+api_router.include_router(fichas_medicas.router)
 api_router.include_router(turnos.router)
+# Módulo de presupuestos: cotizaciones de tratamientos con salida en PDF.
+api_router.include_router(presupuestos.router)
 # Módulo 3: prestaciones, aranceles, facturación, caja y liquidaciones.
 api_router.include_router(prestaciones.router)
 api_router.include_router(aranceles.router)

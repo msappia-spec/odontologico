@@ -11,6 +11,22 @@ class EstadoTurno(str, enum.Enum):
     CANCELADO = "CANCELADO"
 
 
+class CategoriaPaciente(str, enum.Enum):
+    """Categoría administrativa con la que la secretaría califica al paciente.
+
+    * ``SIN_CATEGORIZAR``: valor por defecto y el que conservan las fichas
+      históricas al migrar el esquema.
+    * ``EXCELENTE``: paciente sin antecedentes de incumplimiento.
+    * ``MALO``: paciente con antecedentes que la secretaría debe revisar antes
+      de asignarle un turno. Las observaciones explican el motivo y se muestran
+      en el aviso previo al alta del turno.
+    """
+
+    SIN_CATEGORIZAR = "SIN_CATEGORIZAR"
+    EXCELENTE = "EXCELENTE"
+    MALO = "MALO"
+
+
 class EstadoWhatsApp(str, enum.Enum):
     """Estado del flujo de notificación por WhatsApp asociado al turno."""
 
@@ -18,6 +34,18 @@ class EstadoWhatsApp(str, enum.Enum):
     ENVIADO = "ENVIADO"
     FALLIDO = "FALLIDO"
     RESPONDIDO = "RESPONDIDO"
+
+
+class EstadoConversacionWhatsApp(str, enum.Enum):
+    """Estado persistido de la conversación de un paciente por WhatsApp.
+
+    * ``MENU``: el paciente está en el menú numerado del FAQ Bot.
+    * ``CONFIRMACION_TURNO``: se le envió un recordatorio y el próximo ``1`` /
+      ``si`` o ``2`` / ``no`` confirma o cancela ese turno.
+    """
+
+    MENU = "MENU"
+    CONFIRMACION_TURNO = "CONFIRMACION_TURNO"
 
 
 class TipoOpcionMenu(str, enum.Enum):

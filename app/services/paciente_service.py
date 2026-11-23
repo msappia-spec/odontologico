@@ -24,7 +24,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictoError, RecursoNoEncontradoError
+from app.core.exceptions import (
+    ConflictoError,
+    RecursoNoEncontradoError,
+    ValidacionError,
+)
+from app.models.enums import CategoriaPaciente
 from app.models.paciente import Paciente
 from app.schemas.paciente import (
     PacienteCreate,
@@ -93,6 +98,46 @@ def obtener_paciente(db: Session, paciente_id: int) -> Paciente:
     return paciente
 
 
+def _normalizar_categoria(
+    datos: dict[str, Any], paciente: Optional[Paciente] = None
+) -> None:
+    """Normaliza la categoría y sus observaciones antes de guardar.
+
+    Reglas:
+
+    * ``categoria`` ausente en un ``PATCH`` conserva la actual; ``null`` vuelve
+      a ``SIN_CATEGORIZAR``.
+    * Las observaciones **sólo** tienen sentido con la categoría ``MALO``. Si
+      se intenta cargar un texto con otra categoría se responde ``422``; al
+      cambiar desde ``MALO`` a otra categoría el texto se limpia para no dejar
+      un aviso viejo que ya no corresponde.
+    """
+    if "categoria" in datos:
+        categoria = datos["categoria"]
+        if categoria is None:
+            categoria = CategoriaPaciente.SIN_CATEGORIZAR
+        elif not isinstance(categoria, CategoriaPaciente):
+            categoria = CategoriaPaciente(str(categoria))
+        datos["categoria"] = categoria
+    else:
+        categoria = (
+            paciente.categoria
+            if paciente is not None
+            else CategoriaPaciente.SIN_CATEGORIZAR
+        )
+
+    observaciones = datos.get("categoria_observaciones")
+    if categoria == CategoriaPaciente.MALO:
+        return
+    if observaciones:
+        raise ValidacionError(
+            "Sólo se pueden cargar observaciones cuando la categoría del "
+            "paciente es MALO."
+        )
+    if "categoria_observaciones" in datos or "categoria" in datos:
+        datos["categoria_observaciones"] = None
+
+
 def _resolver_cobertura(db: Session, cambios: dict) -> None:
     """Traduce la cobertura recibida a la clave foránea ``obra_social_id``.
 
@@ -148,6 +193,7 @@ def crear_paciente(db: Session, data: PacienteCreate) -> Paciente:
     # ``obra_social`` (texto heredado) se traduce a ``obra_social_id`` antes de
     # construir el ORM: el nombre ya no es una columna del paciente.
     _resolver_cobertura(db, datos)
+    _normalizar_categoria(datos)
 
     paciente = Paciente(**datos)
     db.add(paciente)
@@ -214,6 +260,7 @@ def actualizar_paciente(db: Session, paciente_id: int, data: PacienteUpdate) -> 
         _validar_dni_unico(db, cambios["dni"], excluir_paciente_id=paciente.id)
 
     _resolver_cobertura(db, cambios)
+    _normalizar_categoria(cambios, paciente)
 
     for campo, valor in cambios.items():
         setattr(paciente, campo, valor)

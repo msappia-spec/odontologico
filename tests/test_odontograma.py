@@ -9,8 +9,9 @@ paciente, separado de la ficha de salud:
    los tres estados del PDF (rojo, azul y X) y devuelve los totales.
 3. **Reemplazo**: cada ``PUT`` sustituye el conjunto de dientes; no se acumulan
    filas ni se duplica el odontograma.
-4. **Validación**: números FDI, estados conocidos, dientes repetidos y
-   referencias inexistentes (paciente u odontólogo) responden 422/404.
+4. **Validación**: números FDI de las dos denticiones (11-48 y 51-85),
+   estados conocidos, dientes repetidos y referencias inexistentes (paciente u
+   odontólogo) responden 422/404.
 """
 
 from sqlalchemy import func, select
@@ -105,6 +106,37 @@ def test_guardar_reemplaza_los_dientes_anteriores(client, db_session, paciente):
     ).scalar_one() == 1
 
 
+def test_puede_guardar_dos_veces_el_mismo_diente(client, db_session, paciente):
+    """Repetir un diente entre dos ``PUT`` no choca con la clave única.
+
+    Al reemplazar el conjunto, el ``DELETE`` de la fila vieja tiene que correr
+    antes del ``INSERT`` de la nueva: si ambos caen en el mismo flush, el
+    índice ``uq_odontograma_diente`` responde 500 y la ficha no se guarda.
+    """
+    primero = client.put(
+        _url(paciente.id),
+        json={"dientes": [{"diente": 26, "estado": "REQUERIDO"}]},
+    )
+    assert primero.status_code == 200
+
+    segundo = client.put(
+        _url(paciente.id),
+        json={"dientes": [{"diente": 26, "estado": "EXISTENTE"}]},
+    )
+
+    assert segundo.status_code == 200
+    datos = segundo.json()
+    assert datos["id"] == primero.json()["id"]
+    assert [(d["diente"], d["estado"]) for d in datos["dientes"]] == [
+        (26, "EXISTENTE")
+    ]
+    assert datos["total_existentes"] == 1
+    assert datos["total_requeridos"] == 0
+    assert db_session.execute(
+        select(func.count()).select_from(OdontogramaDiente)
+    ).scalar_one() == 1
+
+
 def test_acepta_el_estado_en_minusculas(client, paciente):
     """La API normaliza ``existente`` a ``EXISTENTE``."""
     respuesta = client.put(
@@ -140,8 +172,27 @@ def test_conserva_el_odontologo_si_no_se_informa(client, doctor, paciente):
     assert segundo["doctor_id"] == doctor.id
 
 
+def test_acepta_dientes_temporarios(client, paciente):
+    """El cuadro del papel incluye la dentición temporaria (51-85)."""
+    respuesta = client.put(
+        _url(paciente.id),
+        json={
+            "dientes": [
+                {"diente": 55, "estado": "EXISTENTE"},
+                {"diente": 85, "estado": "AUSENTE"},
+            ]
+        },
+    )
+
+    assert respuesta.status_code == 200
+    datos = respuesta.json()
+    assert [d["diente"] for d in datos["dientes"]] == [55, 85]
+    assert datos["total_existentes"] == 1
+    assert datos["total_ausentes"] == 1
+
+
 def test_rechaza_diente_fuera_de_la_notacion_fdi(client, paciente):
-    """Un número que no es diente permanente responde 422."""
+    """Un número que no corresponde a ningún diente responde 422."""
     respuesta = client.put(
         _url(paciente.id),
         json={"dientes": [{"diente": 19, "estado": "AUSENTE"}]},

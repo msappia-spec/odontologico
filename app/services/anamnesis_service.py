@@ -557,7 +557,7 @@ def enviar_ficha(
     canal: str = "manual",
     telefono: Optional[str] = None,
 ) -> FichaSaludEnvioRead:
-    """Prepara (o manda por la Cloud API) la ficha de salud de un turno.
+    """Prepara (o manda por WAHA) la ficha de salud de un turno.
 
     * ``manual``: no envía nada. Devuelve el enlace, el texto sugerido y el
       Click-to-Chat para que la secretaría lo mande desde su propio WhatsApp.

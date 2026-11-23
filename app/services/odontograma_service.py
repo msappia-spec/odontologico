@@ -101,18 +101,24 @@ def guardar_odontograma(
             odontograma = Odontograma(historia_clinica_id=historia.id)
             db.add(odontograma)
 
-        _aplicar_cabecera(odontograma, data)
-        odontograma.dientes.clear()
-        for item in data.dientes:
-            odontograma.dientes.append(
-                OdontogramaDiente(
-                    diente=item.diente,
-                    estado=item.estado,
-                    notas=item.notas,
-                )
-            )
-
         try:
+            _aplicar_cabecera(odontograma, data)
+            odontograma.dientes.clear()
+            # El ``DELETE`` de los dientes viejos tiene que salir **antes** del
+            # ``INSERT`` de los nuevos: si un diente se repite entre dos
+            # guardados, SQLAlchemy ordena las dos operaciones en el mismo
+            # flush y el índice ``uq_odontograma_diente`` rechaza la inserción
+            # (HTTP 500). Un flush intermedio deja la tabla limpia y conserva
+            # el reemplazo completo.
+            db.flush()
+            for item in data.dientes:
+                odontograma.dientes.append(
+                    OdontogramaDiente(
+                        diente=item.diente,
+                        estado=item.estado,
+                        notas=item.notas,
+                    )
+                )
             db.commit()
         except IntegrityError:
             # Dos guardados a la vez: la otra transacción ya creó la fila.

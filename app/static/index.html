@@ -30,6 +30,7 @@
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/ficha_medica.css" />
   <link rel="stylesheet" href="/static/odontograma.css" />
+  <link rel="stylesheet" href="/static/presupuestos.css" />
 </head>
 <body class="min-h-screen">
   <!-- Glifo oficial de WhatsApp, definido una sola vez y reutilizado con
@@ -83,6 +84,10 @@
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20M6 15h4"/></svg>
           <span class="flex-1">Facturación y Caja</span>
           <span id="nav-fact-pendientes" class="nav-badge hide">0</span>
+        </a>
+        <a class="nav-link" data-view="presupuestos">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9.5 14.5 12 12l2.5 2.5"/></svg>
+          <span class="flex-1">Presupuestos</span>
         </a>
         <a class="nav-link" data-view="cuenta-corriente">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 2v20M12 7h5M12 11h5"/></svg>
@@ -146,7 +151,7 @@
       <div class="px-4 sm:px-6 lg:px-8 pt-6">
         <div class="mb-6">
           <h1 id="page-title" class="text-3xl font-bold text-slate-800 tracking-tight">Calendario</h1>
-          <p id="page-subtitle" class="mt-1.5 text-sm text-slate-500">Calendario mensual de turnos y disponibilidad por día</p>
+          <p id="page-subtitle" class="mt-1.5 text-sm text-slate-500">Calendario mensual y semanal por odontólogo, con disponibilidad por día</p>
         </div>
       </div>
 
@@ -326,7 +331,7 @@
         <!-- ===================== VISTA: CALENDARIO ===================== -->
         <section id="view-calendario" class="anim-fade space-y-5 hide">
 
-          <!-- Barra del mes: navegación, totales y leyenda por odontólogo -->
+          <!-- Barra del mes/semana: navegación, totales y filtro por odontólogo -->
           <div class="card p-4 sm:p-5">
             <div class="flex flex-wrap items-center gap-3">
               <div class="flex items-center gap-2">
@@ -338,11 +343,19 @@
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                 </button>
               </div>
+              <div class="cal-vista-switch" role="group" aria-label="Vista del calendario">
+                <button type="button" class="cal-vista-btn activo" data-cal-vista="mes" aria-pressed="true">Mes</button>
+                <button type="button" class="cal-vista-btn" data-cal-vista="semana" aria-pressed="false">Semana</button>
+              </div>
               <div class="min-w-0">
                 <h2 id="cal-mes-titulo" class="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 capitalize">&mdash;</h2>
                 <p id="cal-mes-sub" class="text-xs text-slate-500">Turnos del mes por odontólogo</p>
               </div>
-              <div class="ml-auto flex items-center gap-3">
+              <div class="ml-auto flex flex-wrap items-center gap-3">
+                <div id="cal-semana-doctor-wrap" class="min-w-[210px] hide">
+                  <label class="field-label" for="cal-semana-doctor">Odontólogo de la semana</label>
+                  <select id="cal-semana-doctor" class="field"></select>
+                </div>
                 <span id="cal-resumen" class="badge badge-slate">&mdash;</span>
                 <button id="agenda-nuevo" class="btn btn-primary btn-sm">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
@@ -354,7 +367,7 @@
           </div>
 
           <!-- Calendario mensual (grilla de 7 columnas, lunes a domingo) -->
-          <div class="card p-3 sm:p-4">
+          <div id="cal-mes-panel" class="card p-3 sm:p-4">
             <div class="grid grid-cols-7 gap-1.5">
               <div class="cal-cabecera">Lun</div>
               <div class="cal-cabecera">Mar</div>
@@ -372,6 +385,27 @@
             </p>
           </div>
 
+          <!-- Vista semanal por odontólogo: lunes a viernes con todos sus turnos -->
+          <div id="cal-semana-panel" class="card p-3 sm:p-4 hide">
+            <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+              <div>
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Semana por odontólogo</h3>
+                <p class="text-xs text-slate-500">
+                  Todos los turnos de lunes a viernes del profesional elegido. Hac&eacute; clic en un turno
+                  para abrirlo en el panel del d&iacute;a, o en un d&iacute;a para seleccionarlo. Cada columna
+                  tiene su bot&oacute;n para imprimir la agenda de ese d&iacute;a.
+                </p>
+              </div>
+              <span class="badge badge-slate">Vista semanal</span>
+            </div>
+            <div id="cal-semana-grid" class="cal-semana-grid"></div>
+            <p class="text-[11px] text-slate-400 mt-3">
+              La semana se mueve con las flechas superiores y siempre corresponde al odont&oacute;logo
+              seleccionado en &laquo;Odont&oacute;logo de la semana&raquo;. Los turnos cancelados se muestran
+              atenuados para no perder el historial.
+            </p>
+          </div>
+
           <!-- Panel del día seleccionado: ocupados + horarios libres -->
           <div class="card p-4 sm:p-5">
             <div class="flex flex-wrap items-end gap-3">
@@ -380,13 +414,22 @@
                 <h3 id="agenda-titulo" class="text-base sm:text-lg font-bold text-slate-900 capitalize truncate"></h3>
                 <p id="agenda-origen" class="text-[11px] text-amber-600"></p>
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <button id="agenda-prev" class="btn btn-ghost btn-sm" title="Día anterior" aria-label="Día anterior">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
                 </button>
                 <button id="agenda-hoy" class="btn btn-soft btn-sm">Hoy</button>
                 <button id="agenda-next" class="btn btn-ghost btn-sm" title="Día siguiente" aria-label="Día siguiente">
                   <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+                <button id="agenda-imprimir" class="btn btn-ghost btn-sm" type="button"
+                        title="Imprimir la agenda de la fecha y el odontólogo elegidos"
+                        aria-label="Imprimir la agenda del día">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                    <path d="M6 14h12v8H6z"/>
+                  </svg>
+                  <span class="hidden sm:inline">Imprimir</span>
                 </button>
               </div>
               <div class="min-w-[150px]">
@@ -652,6 +695,23 @@
                   <p class="text-[11px] text-slate-400 mt-1">Número que figura en la credencial de la obra social.</p>
                 </div>
 
+                <!-- Categoría administrativa: un paciente «Malo» muestra una
+                     alerta con estas observaciones al asignarle un turno. -->
+                <div>
+                  <label class="field-label" for="pac-categoria">Categoría del paciente</label>
+                  <select id="pac-categoria" name="categoria" class="field">
+                    <option value="SIN_CATEGORIZAR" selected>Sin categorizar</option>
+                    <option value="EXCELENTE">Excelente</option>
+                    <option value="MALO">Malo</option>
+                  </select>
+                  <p class="text-[11px] text-slate-400 mt-1">Si elegís «Malo», el sistema avisa antes de darle un turno.</p>
+                </div>
+                <div id="pac-categoria-observaciones-bloque" class="hide">
+                  <label class="field-label" for="pac-categoria-observaciones">Observaciones <span class="text-slate-400 normal-case">(sólo para «Malo»)</span></label>
+                  <textarea id="pac-categoria-observaciones" name="categoria_observaciones" class="field" rows="3" maxlength="1000" placeholder="Ej.: faltó a tres turnos sin avisar; adeuda la seña…"></textarea>
+                  <p class="text-[11px] text-slate-400 mt-1">Este texto se muestra en la alerta al asignar el turno.</p>
+                </div>
+
                 <!-- Datos filiatorios de la Historia Clínica General: los mismos
                      campos de la ficha médica. Al guardar la ficha se
                      sincronizan acá y viceversa. -->
@@ -716,11 +776,126 @@
               <div class="overflow-x-auto">
                 <table class="data-table">
                   <thead>
-                    <tr><th>Paciente</th><th>DNI</th><th>Teléfono</th><th>Cobertura</th><th>Email</th><th>Turnos</th><th class="text-right">Acciones</th></tr>
+                    <tr><th>Paciente</th><th>DNI</th><th>Teléfono</th><th>Cobertura</th><th>Categoría</th><th>Email</th><th title="Hacé clic en el número para ver todos los turnos del paciente">Turnos</th><th class="text-right">Acciones</th></tr>
                   </thead>
                   <tbody id="lista-pacientes"></tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= VISTA: PRESUPUESTOS ================= -->
+        <section id="view-presupuestos" class="anim-fade space-y-5 hide">
+          <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,.65fr)] gap-5 items-start">
+
+            <!-- Alta / edición del presupuesto -->
+            <div class="card p-5">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <h2 id="pres-form-titulo" class="font-bold text-slate-900">Nuevo presupuesto</h2>
+                  <p class="text-xs text-slate-500 mt-1">
+                    Cargá el paciente y los trabajos. El PDF sale con el mismo diseño del documento del consultorio.
+                  </p>
+                </div>
+                <span id="pres-form-modo" class="badge badge-brand">Nuevo</span>
+              </div>
+
+              <form id="pres-form" class="mt-5 space-y-5" autocomplete="off">
+                <input type="hidden" id="pres-id" />
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="sm:col-span-2">
+                    <label class="field-label" for="pres-paciente">Paciente</label>
+                    <select id="pres-paciente" class="field" required>
+                      <option value="">Elegí un paciente…</option>
+                    </select>
+                    <p id="pres-paciente-ayuda" class="text-[11px] text-slate-400 mt-1">
+                      Si todavía no está registrado, dalo de alta en Pacientes y volvé a esta pestaña.
+                    </p>
+                  </div>
+                  <div>
+                    <label class="field-label" for="pres-fecha">Fecha</label>
+                    <input id="pres-fecha" type="date" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="pres-forma-pago">Forma de pago</label>
+                    <input id="pres-forma-pago" class="field" maxlength="120"
+                           placeholder="Contado / transferencia" />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="field-label" for="pres-direccion">Dirección <span class="text-slate-400 normal-case">(opcional)</span></label>
+                    <input id="pres-direccion" class="field" maxlength="200"
+                           placeholder="Si la dejás vacía se usa el domicilio del paciente" />
+                    <p class="text-[11px] text-slate-400 mt-1">
+                      Es la dirección que se imprime debajo del nombre del paciente.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="border-t border-slate-100 pt-5">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 class="font-bold text-slate-900">Detalle de los trabajos</h3>
+                      <p class="text-xs text-slate-500 mt-0.5">
+                        Elegí el código del catálogo de Prestaciones o escribilo a mano. La descripción se completa sola
+                        y admite varias líneas para agregar otros detalles; cada renglón puede llevar una entrega.
+                      </p>
+                    </div>
+                    <button type="button" id="pres-agregar-item" class="btn btn-soft btn-sm">
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                      Agregar trabajo
+                    </button>
+                  </div>
+                  <div id="pres-items" class="mt-3 space-y-3"></div>
+                  <datalist id="pres-prestaciones-catalogo"></datalist>
+                </div>
+
+                <div class="pres-totales">
+                  <div>
+                    <span>Total</span>
+                    <strong id="pres-total">$0</strong>
+                  </div>
+                  <div>
+                    <span>Entregas</span>
+                    <strong id="pres-entregas">$0</strong>
+                  </div>
+                  <div>
+                    <span>Saldo</span>
+                    <strong id="pres-saldo">$0</strong>
+                  </div>
+                </div>
+                <div id="pres-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+
+                <div class="flex flex-wrap gap-3 pt-1">
+                  <button type="button" id="pres-cancelar" class="btn btn-ghost hide">Cancelar edición</button>
+                  <button type="submit" id="pres-guardar" class="btn btn-primary flex-1 sm:flex-none">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                    <span id="pres-guardar-texto">Guardar presupuesto</span>
+                  </button>
+                  <a id="pres-pdf-ultimo" class="btn btn-ghost hide" href="#" target="_blank" rel="noopener">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+                    Ver PDF
+                  </a>
+                </div>
+              </form>
+            </div>
+
+            <!-- Listado y búsqueda -->
+            <div class="card p-5">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <h2 class="font-bold text-slate-900">Presupuestos guardados</h2>
+                  <p class="text-xs text-slate-500 mt-1">Abrí el PDF, editá los trabajos o eliminá un borrador.</p>
+                </div>
+                <span id="pres-count" class="badge badge-slate">0</span>
+              </div>
+              <div class="mt-4">
+                <label class="field-label" for="pres-buscar">Buscar</label>
+                <input id="pres-buscar" type="search" class="field" autocomplete="off"
+                       placeholder="Paciente, DNI, código o trabajo…" />
+              </div>
+              <div id="pres-lista" class="mt-4 space-y-3" aria-live="polite"></div>
             </div>
           </div>
         </section>
@@ -1920,6 +2095,14 @@
         <div>
           <label class="field-label" for="turno-paciente">Paciente</label>
           <select id="turno-paciente" class="field" required></select>
+          <div id="turno-alerta-paciente" class="hide mt-2 text-sm text-rose-800 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2" role="alert">
+            <p class="font-bold flex items-center gap-1.5">
+              <svg class="w-4 h-4 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+              Paciente categorizado como MALO
+            </p>
+            <p id="turno-alerta-paciente-nombre" class="font-bold mt-1"></p>
+            <p id="turno-alerta-paciente-observaciones" class="mt-1 whitespace-pre-line text-rose-700"></p>
+          </div>
         </div>
         <div>
           <label class="field-label" for="turno-doctor">Doctor</label>
@@ -1957,6 +2140,66 @@
           <button type="submit" id="modal-turno-save" class="btn btn-primary flex-1">Guardar turno</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ======== MODAL: ALERTA DE PACIENTE CATEGORIZADO COMO MALO ======== -->
+  <!-- Se muestra al guardar un turno nuevo para un paciente MALO. La
+       secretaría ve las observaciones y decide si igual le da el turno. -->
+  <div id="modal-alerta-paciente" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-md p-6" role="alertdialog" aria-modal="true" aria-labelledby="modal-alerta-paciente-titulo">
+      <div class="flex items-start gap-3">
+        <span class="flex-none w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        </span>
+        <div class="min-w-0 flex-1">
+          <h3 id="modal-alerta-paciente-titulo" class="text-lg font-extrabold text-slate-900">Paciente categorizado como MALO</h3>
+          <p class="text-xs text-slate-500 mt-1">Revisá las observaciones antes de asignar el turno.</p>
+        </div>
+        <button type="button" id="modal-alerta-paciente-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <p class="mt-4 text-sm text-slate-700">
+        Estás por asignar un turno a <strong id="modal-alerta-paciente-nombre">—</strong>.
+      </p>
+      <div class="mt-3 rounded-xl border border-rose-100 bg-rose-50 px-3.5 py-3">
+        <p class="text-[11px] font-bold uppercase tracking-wide text-rose-500">Observaciones</p>
+        <p id="modal-alerta-paciente-observaciones" class="mt-1 text-sm text-rose-800 whitespace-pre-line">Sin observaciones cargadas.</p>
+      </div>
+      <p class="mt-3 text-[11px] text-slate-500">Si decidís no asignarlo, el formulario del turno queda abierto para elegir otro paciente u horario.</p>
+
+      <div class="flex gap-3 pt-5">
+        <button type="button" id="modal-alerta-paciente-cancel" class="btn btn-ghost flex-1">No asignar</button>
+        <button type="button" id="modal-alerta-paciente-ok" class="btn btn-danger-soft flex-1">Asignar turno igual</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: HISTORIAL DE TURNOS DE UN PACIENTE ============ -->
+  <!-- Se abre desde la columna «Turnos» de «Pacientes registrados»: lista
+       todos los turnos que tuvo el paciente (pasados, próximos y cancelados),
+       del más reciente al más antiguo. -->
+  <div id="modal-turnos-paciente" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h3 id="modal-turnos-paciente-titulo" class="text-lg font-extrabold text-slate-900">Turnos del paciente</h3>
+          <p id="modal-turnos-paciente-sub" class="text-xs text-slate-500">Historial completo de turnos.</p>
+        </div>
+        <button type="button" id="modal-turnos-paciente-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <p id="modal-turnos-paciente-cargando" class="text-sm text-slate-500">Consultando los turnos…</p>
+      <div id="modal-turnos-paciente-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+      <div id="modal-turnos-paciente-lista" class="space-y-2.5"></div>
+
+      <div class="flex gap-3 pt-4">
+        <button type="button" id="modal-turnos-paciente-cancel" class="btn btn-ghost flex-1">Cerrar</button>
+      </div>
     </div>
   </div>
 
@@ -2622,6 +2865,7 @@
   <script src="/static/ficha_medica.js"></script>
   <script src="/static/odontograma.js"></script>
   <script src="/static/app.js"></script>
+  <script src="/static/presupuestos.js"></script>
   <script src="/static/calendar.js"></script>
 
   <script>

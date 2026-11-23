@@ -8,11 +8,11 @@ misma cadena de producción.
 Modos
 -----
 * ``operativo`` (recomendado): borra sólo los datos de trabajo (pacientes,
-  turnos, historias clínicas, evoluciones, antecedentes, adjuntos, caja,
-  movimientos, cuenta corriente con sus planes de cuotas y disponibilidad
-  específica). Conserva doctores, obras sociales, prestaciones, aranceles,
-  agenda semanal y menú del bot.
-* ``todo``: borra las 20 tablas del proyecto y vuelve a sembrar el menú del FAQ
+  turnos, historias clínicas, evoluciones, antecedentes, ficha médica con su
+  libro de trabajos, adjuntos, caja, movimientos, cuenta corriente con sus
+  planes de cuotas y disponibilidad específica). Conserva doctores, obras
+  sociales, prestaciones, aranceles, agenda semanal y menú del bot.
+* ``todo``: borra las 25 tablas del proyecto y vuelve a sembrar el menú del FAQ
   Bot con sus cuatro opciones históricas para que el panel no quede vacío.
 
 Sin ``--ejecutar`` es un **simulacro**: muestra cuántas filas hay y no escribe
@@ -74,6 +74,8 @@ TABLAS_OPERATIVAS: tuple[str, ...] = (
     "evoluciones_medicas",
     "odontograma_dientes",
     "odontogramas",
+    "ficha_medica_trabajos",
+    "fichas_medicas",
     "antecedentes_salud",
     "historias_clinicas",
     "turnos",
@@ -338,7 +340,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default="operativo",
         help=(
             "operativo: pacientes, turnos, historias y caja (conserva "
-            "catálogos); todo: las 20 tablas y resiembra el menú del bot."
+            "catálogos); todo: las 25 tablas y resiembra el menú del bot."
         ),
     )
     parser.add_argument(

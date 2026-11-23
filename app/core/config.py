@@ -8,7 +8,7 @@ import logging
 import os
 from typing import List, Optional
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("app.core.config")
@@ -18,12 +18,11 @@ logger = logging.getLogger("app.core.config")
 # redirige ahí cuando no hay una base PostgreSQL configurada.
 SQLITE_SERVERLESS_URL = "sqlite:////tmp/odontologico.db"
 
-#: Base de la Graph API de Meta (WhatsApp Cloud API). Se usa cuando no se define
-#: ``WHATSAPP_API_URL``: así, con sólo el token y el id del número, el envío real
-#: queda habilitado sin tener que pegar la URL de la API a mano.
-# La versión debe mantenerse alineada con la configurada en Meta Developers.
-# v21 dejó de estar disponible; el proyecto de producción usa v26.
-URL_WHATSAPP_POR_DEFECTO = "https://graph.facebook.com/v26.0"
+#: URL local por defecto de WAHA (WhatsApp HTTP API). El despliegue puede
+#: sobreescribirla con ``WAHA_URL``; por ejemplo ``http://turnos_waha:3000``
+#: cuando la app y WAHA comparten una red Docker, o una URL pública
+#: ``https://<host>.nip.io`` cuando WAHA corre en otra máquina.
+URL_WAHA_POR_DEFECTO = "http://localhost:3000"
 
 
 class Settings(BaseSettings):
@@ -38,10 +37,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
-        # Un valor vacío en el ``.env`` (p. ej. ``WHATSAPP_TOKEN=""``) significa
+        # Un valor vacío en el ``.env`` (p. ej. ``WAHA_API_KEY=""``) significa
         # "sin configurar": se ignora y queda el valor por defecto del atributo.
-        # Sin esto, un ``WHATSAPP_TOKEN`` vacío taparía un
-        # ``WHATSAPP_ACCESS_TOKEN`` real (ver ``whatsapp_access_token``).
         env_ignore_empty=True,
     )
 
@@ -122,60 +119,29 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _avisar_credenciales_whatsapp_dudosas(self) -> "Settings":
-        """Deja en el log un aviso si las credenciales de WhatsApp no encajan.
+    def _avisar_credenciales_waha_incompletas(self) -> "Settings":
+        """Deja un aviso cuando falta la API key de WAHA.
 
-        La Cloud API espera el **Phone Number ID** de Meta: un número largo, sólo
-        dígitos (p. ej. ``123456789012345``). El teléfono del consultorio
-        (``+5493516432863``) **no** sirve en ese lugar: el ``POST`` a
-        ``/<id>/messages`` responde 400/404 y el recordatorio queda ``FALLIDO``.
-        No se aborta el arranque —el valor se usa igual—, pero el aviso evita
-        diagnosticar a ciegas cuando el envío real falla.
+        Sin ``WAHA_API_KEY`` el cliente no puede autenticarse contra
+        ``POST /api/sendText``: los envíos se simulan para no romper el panel ni
+        las pruebas. El aviso evita diagnosticar a ciegas cuando el despliegue
+        parece configurado pero los mensajes no salen.
         """
-        telefono_o_id = (self.whatsapp_phone_number_id or "").strip()
-        if telefono_o_id and not telefono_o_id.isdigit():
+        if (self.waha_url or "").strip() and not (self.waha_api_key or "").strip():
             logger.warning(
-                "WHATSAPP_PHONE_NUMBER_ID=%r no parece el 'Phone Number ID' de "
-                "Meta (debe ser un número largo, sin '+', espacios ni guiones). "
-                "Si Meta responde 400/404, copiá el ID de WhatsApp -> API Setup.",
-                telefono_o_id,
-            )
-        if self.whatsapp_access_token and not self.whatsapp_verify_token:
-            logger.warning(
-                "WHATSAPP_VERIFY_TOKEN sin configurar: Meta no podrá verificar "
-                "el webhook GET /api/v1/whatsapp/webhook."
-            )
-        if self.whatsapp_access_token and not self.whatsapp_app_secret:
-            logger.warning(
-                "WHATSAPP_APP_SECRET sin configurar: se rechazarán los POST "
-                "del webhook para impedir mensajes falsificados."
+                "WAHA_API_KEY sin configurar: los mensajes de WhatsApp se "
+                "simularán. Definí WAHA_URL, WAHA_API_KEY y WAHA_SESSION."
             )
         return self
 
-    # --- WhatsApp Cloud API (opcional) ---
-    # Base de la Graph API de Meta; se puede sobreescribir desde el ``.env``.
-    whatsapp_api_url: Optional[str] = URL_WHATSAPP_POR_DEFECTO
-    whatsapp_phone_number_id: Optional[str] = None
-    # El token se acepta con los dos nombres que se ven en la documentación de
-    # Meta: ``WHATSAPP_ACCESS_TOKEN`` (el histórico del proyecto) y
-    # ``WHATSAPP_TOKEN`` (el corto). Gana el primero que esté definido.
-    whatsapp_access_token: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_TOKEN"),
-    )
-    # Secreto del webhook: el valor que se carga en Meta (Webhook -> Verify token)
-    # y que Meta reenvía como ``hub.verify_token`` en el ``GET`` de verificación.
-    # Es independiente del access token (nunca debe usarse el token de la API
-    # como verify token).
-    whatsapp_verify_token: Optional[str] = None
-    # Clave secreta de la aplicación de Meta (App Dashboard -> Settings -> Basic).
-    # Meta firma cada POST del webhook con esta clave en X-Hub-Signature-256;
-    # no es el verify token ni el access token de la Cloud API.
-    whatsapp_app_secret: Optional[str] = None
-    # Plantilla Utility aprobada en WhatsApp Manager. Debe tener cuatro
-    # variables en el cuerpo y dos botones de respuesta rápida (ver .env.example).
-    whatsapp_template_recordatorio: str = "recordatorio_turno"
-    whatsapp_template_idioma: str = "es_AR"
+    # --- WAHA (WhatsApp HTTP API) ---
+    # URL base del contenedor/servidor WAHA, sin ``/api``. En Docker suele ser
+    # ``http://turnos_waha:3000``; en local, ``http://localhost:3000``.
+    waha_url: Optional[str] = URL_WAHA_POR_DEFECTO
+    # Valor que WAHA espera en la cabecera ``X-Api-Key``.
+    waha_api_key: Optional[str] = None
+    # Sesión de WAHA que envía y recibe los mensajes.
+    waha_session: str = "default"
 
     # --- Chatbot de respuestas automáticas (FAQ Bot) ---
     # Código del nomenclador con el que se responde la tarifa de consulta
@@ -206,9 +172,9 @@ class Settings(BaseSettings):
     # ``http://localhost:8000``.
     public_base_url: Optional[str] = None
     # Secreto con el que se firman los tokens de la ficha de salud. Si no se
-    # define se reutiliza el ``WHATSAPP_VERIFY_TOKEN`` (o, en su defecto, una
-    # clave derivada de la configuración de la base). Conviene fijarlo en
-    # producción para que los enlaces sean estables e imposibles de falsificar.
+    # define se usa una clave derivada de la configuración de la base. Conviene
+    # fijarlo en producción para que los enlaces sean estables e imposibles de
+    # falsificar.
     anamnesis_token_secret: Optional[str] = None
 
     @property
@@ -232,29 +198,33 @@ class Settings(BaseSettings):
     def anamnesis_secreto_efectivo(self) -> str:
         """Clave usada para firmar/validar los tokens de anamnesis.
 
-        Prioridad: ``ANAMNESIS_TOKEN_SECRET`` -> ``WHATSAPP_VERIFY_TOKEN`` ->
-        una clave derivada de la URL de la base y del nombre de la app. La
-        última opción evita un secreto hardcodeado y sigue siendo impredecible
-        para quien no conozca la configuración del servidor.
+        Prioridad: ``ANAMNESIS_TOKEN_SECRET`` -> una clave derivada de la URL
+        de la base y del nombre de la app. La última opción evita un secreto
+        hardcodeado y sigue siendo impredecible para quien no conozca la
+        configuración del servidor.
         """
         if self.anamnesis_token_secret and self.anamnesis_token_secret.strip():
             return self.anamnesis_token_secret.strip()
-        if self.whatsapp_verify_token and self.whatsapp_verify_token.strip():
-            return self.whatsapp_verify_token.strip()
         semilla = f"{self.database_url}|{self.app_name}|anamnesis"
         return hashlib.sha256(semilla.encode("utf-8")).hexdigest()
 
     @property
     def whatsapp_envio_real(self) -> bool:
-        """Indica si hay credenciales completas para enviar mensajes reales.
+        """Indica si WAHA está configurado para enviar mensajes reales.
 
-        Alcanza con el token (``WHATSAPP_TOKEN`` o ``WHATSAPP_ACCESS_TOKEN``) y
-        el id del número: la URL de la API tiene un valor por defecto
-        (``URL_WHATSAPP_POR_DEFECTO``), así que no hace falta definirla. Si falta
-        alguna de esas dos credenciales el envío se SIMULA (se registra en logs y
-        se genera un identificador de mensaje ficticio).
+        Hacen falta la URL y la API key: ``WAHA_URL`` tiene un valor local por
+        defecto, pero sin ``WAHA_API_KEY`` no se puede autenticar el ``POST`` a
+        ``/api/sendText``. En ese caso el envío se SIMULA (se registra en logs y
+        se genera un identificador de mensaje ficticio), igual que antes.
         """
-        return bool(self.whatsapp_phone_number_id and self.whatsapp_access_token)
+        return bool(
+            (self.waha_url or "").strip() and (self.waha_api_key or "").strip()
+        )
+
+    @property
+    def waha_url_base(self) -> str:
+        """URL de WAHA sin la barra final (``http://host:3000``)."""
+        return (self.waha_url or "").strip().rstrip("/")
 
 
 # Instancia única reutilizable en toda la aplicación.

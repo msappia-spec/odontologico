@@ -13,6 +13,10 @@ dist/
 
 # --- Variables de entorno y base de datos locales ---
 .env
+# Credenciales locales de Vercel CLI y variantes (.env.local, .env.dev.local...):
+# nunca se commitean. .env.example sí queda versionado como plantilla.
+.env.local
+.env.*.local
 *.db
 *.sqlite3
 # Archivos sueltos con credenciales (ej. el token que se copia desde Meta).

@@ -1,14 +1,19 @@
-"""Pruebas del flujo de WhatsApp: tarea programada de recordatorios + webhook."""
+"""Pruebas del flujo de WhatsApp sobre WAHA: recordatorios + respuestas de texto."""
 
 import logging
 from datetime import timedelta
 
 from app.core.config import settings
 from app.core.datetime_utils import utcnow
-from app.models.enums import EstadoTurno
+from app.models.conversacion_whatsapp import ConversacionWhatsApp
+from app.models.enums import (
+    EstadoConversacionWhatsApp,
+    EstadoTurno,
+)
 from app.models.turno import Turno
 
 API = "/api/v1"
+TELEFONO = "5491122334455"
 
 
 def _crear_turno(client, doctor, paciente, *, dias: int = 3, hora: int = 10) -> dict:
@@ -26,40 +31,26 @@ def _crear_turno(client, doctor, paciente, *, dias: int = 3, hora: int = 10) -> 
     return r.json()
 
 
-def _webhook(mensaje_contextual_id: str, boton_id: str, title: str = "Botón") -> dict:
-    """Construye un payload de webhook simulado (respuesta de botón)."""
+def _webhook(texto: str, *, telefono: str = TELEFONO) -> dict:
     return {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "WABA_ID",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "messages": [
-                                {
-                                    "from": "5491122334455",
-                                    "id": "wamid.ENTRANTE.123",
-                                    "timestamp": "1712345678",
-                                    "type": "interactive",
-                                    "context": {
-                                        "from": "5491100000000",
-                                        "id": mensaje_contextual_id,
-                                    },
-                                    "interactive": {
-                                        "type": "button_reply",
-                                        "button_reply": {"id": boton_id, "title": title},
-                                    },
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
+        "event": "message",
+        "session": "default",
+        "payload": {
+            "id": f"waha.ENTRANTE.{texto}",
+            "from": f"{telefono}@c.us",
+            "fromMe": False,
+            "body": texto,
+            "type": "chat",
+        },
     }
+
+
+def _enviar_texto(client, texto: str, *, telefono: str = TELEFONO) -> dict:
+    r = client.post(
+        f"{API}/whatsapp/webhook", json=_webhook(texto, telefono=telefono)
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
 
 
 def test_tarea_envia_recordatorio_y_actualiza_estado(client, doctor, paciente):
@@ -77,9 +68,8 @@ def test_tarea_envia_recordatorio_y_actualiza_estado(client, doctor, paciente):
     detalle = data["detalles"][0]
     assert detalle["turno_id"] == turno["id"]
     assert detalle["resultado"] == "ENVIADO"
-    assert detalle["whatsapp_mensaje_id"].startswith("wamid.SIMULADO.")
+    assert detalle["whatsapp_mensaje_id"].startswith("waha.SIMULADO.")
 
-    # El turno quedó con estado_whatsapp ENVIADO y con el wamid persistido.
     actualizado = client.get(f"{API}/turnos/{turno['id']}").json()
     assert actualizado["estado_whatsapp"] == "ENVIADO"
     assert actualizado["whatsapp_mensaje_id"] == detalle["whatsapp_mensaje_id"]
@@ -134,76 +124,60 @@ def test_tarea_ignora_turnos_no_pendientes(client, doctor, paciente, db_session)
     assert data["evaluados"] == 0
 
 
-def test_webhook_confirma_turno(client, doctor, paciente):
-    turno = _crear_turno(client, doctor, paciente, dias=3, hora=14)
-    resp = client.post(f"{API}/tareas/enviar-recordatorios").json()
-    wamid = resp["detalles"][0]["whatsapp_mensaje_id"]
+def test_la_tarea_guarda_el_turno_pendiente_de_confirmacion(
+    client, db_session, doctor, paciente
+):
+    turno = _crear_turno(client, doctor, paciente, dias=3, hora=12)
+    client.post(f"{API}/tareas/enviar-recordatorios")
 
-    r = client.post(
-        f"{API}/whatsapp/webhook",
-        json=_webhook(wamid, "confirmar_turno", "Confirmar"),
-    )
-    assert r.status_code == 200, r.text
-    data = r.json()
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.telefono == TELEFONO
+    assert conversacion.estado == EstadoConversacionWhatsApp.CONFIRMACION_TURNO
+    assert conversacion.turno_id == turno["id"]
+
+
+def test_webhook_confirma_turno_con_texto(client, doctor, paciente):
+    turno = _crear_turno(client, doctor, paciente, dias=3, hora=14)
+    client.post(f"{API}/tareas/enviar-recordatorios")
+
+    data = _enviar_texto(client, "1")
+
+    assert data["tipo"] == "CONFIRMACION"
     assert data["turno_id"] == turno["id"]
     assert data["estado_turno"] == "CONFIRMADO"
     assert data["estado_whatsapp"] == "RESPONDIDO"
 
 
-def test_webhook_cancela_turno(client, doctor, paciente):
+def test_webhook_cancela_turno_con_texto(client, doctor, paciente):
     turno = _crear_turno(client, doctor, paciente, dias=3, hora=15)
-    resp = client.post(f"{API}/tareas/enviar-recordatorios").json()
-    wamid = resp["detalles"][0]["whatsapp_mensaje_id"]
+    client.post(f"{API}/tareas/enviar-recordatorios")
 
-    r = client.post(
-        f"{API}/whatsapp/webhook",
-        json=_webhook(wamid, "cancelar_turno", "Cancelar"),
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["estado_turno"] == "CANCELADO"
+    data = _enviar_texto(client, "no")
+
+    assert data["estado_turno"] == "CANCELADO"
 
     actualizado = client.get(f"{API}/turnos/{turno['id']}").json()
     assert actualizado["estado_turno"] == "CANCELADO"
     assert actualizado["estado_whatsapp"] == "RESPONDIDO"
 
 
-def test_webhook_turno_no_encontrado_devuelve_404(client):
-    r = client.post(
-        f"{API}/whatsapp/webhook",
-        json=_webhook("wamid.INEXISTENTE.999", "confirmar_turno"),
-    )
-    assert r.status_code == 404
+def test_webhook_sin_confirmacion_pendiente_muestra_el_menu(client):
+    data = _enviar_texto(client, "hola")
+
+    assert data["tipo"] == "BOT"
+    assert data["atencion_manual"] is False
+    assert "Precio de la consulta" in data["respuesta"]
 
 
-def test_webhook_sin_boton_devuelve_400(client):
-    payload = {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "WABA_ID",
-                "changes": [
-                    {
-                        "value": {
-                            "messages": [
-                                {"from": "5491122334455", "id": "wamid.X", "type": "text"}
-                            ]
-                        }
-                    }
-                ],
-            }
-        ],
-    }
-    r = client.post(f"{API}/whatsapp/webhook", json=payload)
-    assert r.status_code == 400
+def test_webhook_ignora_mensajes_propios_y_de_grupo(client):
+    propio = _webhook("1")
+    propio["payload"]["fromMe"] = True
+    r = client.post(f"{API}/whatsapp/webhook", json=propio)
+    assert r.status_code == 200
+    assert r.json()["tipo"] == "IGNORADO"
 
-
-def test_webhook_boton_desconocido_devuelve_400(client, doctor, paciente):
-    _crear_turno(client, doctor, paciente, dias=3, hora=16)
-    resp = client.post(f"{API}/tareas/enviar-recordatorios").json()
-    wamid = resp["detalles"][0]["whatsapp_mensaje_id"]
-
-    r = client.post(
-        f"{API}/whatsapp/webhook",
-        json=_webhook(wamid, "boton_raro", "No sé"),
-    )
-    assert r.status_code == 400
+    grupo = _webhook("1")
+    grupo["payload"]["from"] = "120363000000000000@g.us"
+    r = client.post(f"{API}/whatsapp/webhook", json=grupo)
+    assert r.status_code == 200
+    assert r.json()["tipo"] == "IGNORADO"

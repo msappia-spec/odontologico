@@ -10,7 +10,7 @@ Rutas (prefijo ``/api/v1``):
 * ``GET  /anamnesis/panel/{turno_id}/enlace`` — enlace firmado + mensaje listo
   para mandarle al paciente (sin importar la fecha del turno).
 * ``POST /anamnesis/panel/{turno_id}/enviar`` — manda la ficha a mano (devuelve
-  el enlace para copiar) o por la WhatsApp Cloud API.
+  el enlace para copiar) o por WAHA.
 * ``GET  /anamnesis/{token}`` — contexto del turno y estado de la ficha.
 * ``POST /anamnesis/{token}`` — envía/actualiza la declaración de salud.
 
@@ -131,7 +131,7 @@ def obtener_enlace_ficha_salud(
     description=(
         "Con 'canal=manual' (por defecto) no envía nada: devuelve el enlace y el "
         "texto para copiarlos en WhatsApp Web o en el celular. Con 'canal=api' "
-        "envía el mensaje por la WhatsApp Cloud API; si el servidor no tiene "
+        "envía el mensaje por WAHA; si el servidor no tiene "
         "credenciales el envío queda simulado ('simulado=true'). No marca el "
         "recordatorio del turno como enviado: la ficha se completa recién cuando "
         "el paciente envía el formulario. Un turno inexistente responde **404**, "

@@ -14,6 +14,8 @@ from pydantic import (
     field_validator,
 )
 
+from app.models.enums import CategoriaPaciente
+
 # Documento del paciente (DNI, CUIT o pasaporte): entre 5 y 20 caracteres
 # alfanuméricos, ya sin los separadores habituales (puntos, guiones, espacios).
 _RE_DOCUMENTO = re.compile(r"^[0-9A-Za-z]{5,20}$")
@@ -29,6 +31,9 @@ _LARGOS_FILIATORIOS: dict[str, int] = {
     "lugar_trabajo": 120,
     "jerarquia": 60,
 }
+
+#: Largo máximo de las observaciones de la categoría del paciente.
+MAX_OBSERVACIONES_CATEGORIA = 1000
 
 
 class PacienteDatosFiliatorios(BaseModel):
@@ -160,6 +165,22 @@ class PacienteDatosAdministrativos(PacienteDatosFiliatorios):
         max_length=60,
         description="Número de afiliado dentro de la obra social.",
     )
+    categoria: CategoriaPaciente = Field(
+        CategoriaPaciente.SIN_CATEGORIZAR,
+        description=(
+            "Categoría administrativa del paciente: SIN_CATEGORIZAR (por "
+            "defecto), EXCELENTE o MALO. Un paciente MALO muestra una alerta "
+            "con sus observaciones antes de asignarle un turno."
+        ),
+    )
+    categoria_observaciones: Optional[str] = Field(
+        None,
+        max_length=MAX_OBSERVACIONES_CATEGORIA,
+        description=(
+            "Motivo por el que el paciente está categorizado como MALO. Sólo "
+            "se admite cuando la categoría es MALO."
+        ),
+    )
 
     @field_validator("dni", "obra_social", "numero_afiliado", mode="before")
     @classmethod
@@ -178,6 +199,15 @@ class PacienteDatosAdministrativos(PacienteDatosFiliatorios):
                     "(se ignoran puntos, guiones y espacios)."
                 )
         return texto
+
+    @field_validator("categoria_observaciones", mode="before")
+    @classmethod
+    def _normalizar_observaciones_categoria(cls, valor):
+        """Recorta las observaciones y convierte el texto vacío en ``NULL``."""
+        if valor is None:
+            return None
+        texto = str(valor).strip()
+        return texto or None
 
     @field_validator("obra_social_id", mode="before")
     @classmethod
@@ -217,6 +247,9 @@ class PacienteUpdate(PacienteDatosAdministrativos):
     nombre: Optional[str] = Field(None, min_length=1, max_length=120)
     telefono: Optional[str] = Field(None, min_length=6, max_length=30)
     email: Optional[EmailStr] = None
+    # En un PATCH la categoría es opcional: si no se envía se conserva la
+    # actual. ``null`` se interpreta como «volver a SIN_CATEGORIZAR».
+    categoria: Optional[CategoriaPaciente] = None
 
 
 class PacienteRead(PacienteBase):

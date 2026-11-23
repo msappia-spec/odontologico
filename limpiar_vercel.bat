@@ -11,7 +11,7 @@ REM    1) Operativo: pacientes, turnos, historias, evoluciones, anamnesis,
 REM       adjuntos, caja, cuenta corriente y disponibilidad especifica.
 REM       Conserva doctores, obras sociales, prestaciones, aranceles, agenda
 REM       semanal y menu del bot.
-REM    2) Todo: las 20 tablas. Vuelve a sembrar el menu del FAQ Bot.
+REM    2) Todo: las 25 tablas. Vuelve a sembrar el menu del FAQ Bot.
 REM
 REM  Uso:
 REM    Doble clic sobre este archivo.
@@ -86,7 +86,7 @@ echo      Conserva doctores, obras sociales, prestaciones, aranceles, agenda
 echo      semanal y menu del bot.
 echo.
 echo   2. TODAS las tablas
-echo      Las 20 tablas, incluidos doctores y catalogos.
+echo      Las 25 tablas, incluidos doctores y catalogos.
 echo      Vuelve a sembrar el menu del bot.
 echo.
 echo   3. Cancelar

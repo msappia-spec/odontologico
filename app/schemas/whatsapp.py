@@ -8,91 +8,44 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.enums import EstadoTurno, EstadoWhatsApp
 
 # ---------------------------------------------------------------------------
-# Payload entrante del webhook (estructura simplificada de WhatsApp Cloud API)
+# Payload entrante del webhook (WAHA - WhatsApp HTTP API)
 # ---------------------------------------------------------------------------
 
 
-class WhatsAppText(BaseModel):
-    """Cuerpo de un mensaje de **texto** entrante (``type`` = ``text``)."""
+class WAHAMessagePayload(BaseModel):
+    """Mensaje dentro del campo ``payload`` del evento de WAHA."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
+    id: Optional[str] = Field(default=None, description="ID del mensaje en WhatsApp")
+    from_: Optional[str] = Field(
+        default=None, alias="from", description="Remitente, p. ej. '549...@c.us'"
+    )
+    to: Optional[str] = None
     body: Optional[str] = Field(
         default=None, description="Texto que escribió el paciente"
     )
-    preview_url: Optional[bool] = None
-
-
-class WhatsAppButtonReply(BaseModel):
-    """Respuesta de botón/interactiva enviada por el paciente."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
-    id: str = Field(..., description="Identificador del botón, p. ej. 'confirmar_turno'")
-    title: Optional[str] = Field(default=None, description="Texto visible del botón")
-
-
-class WhatsAppContext(BaseModel):
-    """Contexto que referencia el mensaje saliente que originó la respuesta."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
-    from_: Optional[str] = Field(default=None, alias="from")
-    id: Optional[str] = Field(
-        default=None,
-        description="ID (wamid) del mensaje originalmente enviado por el negocio",
+    from_me: bool = Field(
+        default=False, alias="fromMe", description="True si lo envió el consultorio"
     )
-
-
-class WhatsAppInteractive(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
+    timestamp: Optional[int | str] = None
     type: Optional[str] = None
-    button_reply: Optional[WhatsAppButtonReply] = None
 
 
-class WhatsAppInboundMessage(BaseModel):
-    """Mensaje entrante de WhatsApp."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
-    from_: Optional[str] = Field(default=None, alias="from")
-    id: str = Field(..., description="ID del mensaje entrante")
-    timestamp: Optional[str] = None
-    type: Optional[str] = None
-    context: Optional[WhatsAppContext] = None
-    interactive: Optional[WhatsAppInteractive] = None
-    text: Optional[WhatsAppText] = None
-
-
-class WhatsAppChangeValue(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    messaging_product: Optional[str] = None
-    messages: Optional[List[WhatsAppInboundMessage]] = None
-
-
-class WhatsAppChange(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    field: Optional[str] = None
-    value: WhatsAppChangeValue
-
-
-class WhatsAppEntry(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id: Optional[str] = None
-    changes: List[WhatsAppChange] = Field(default_factory=list)
-
-
-class WhatsAppWebhookPayload(BaseModel):
-    """Cuerpo completo (JSON) que WhatsApp envía a nuestro webhook."""
+class WAHAWebhookPayload(BaseModel):
+    """Evento que WAHA envía al webhook configurado."""
 
     model_config = ConfigDict(extra="ignore")
 
-    object: Optional[str] = None
-    entry: List[WhatsAppEntry] = Field(default_factory=list)
+    event: Optional[str] = Field(
+        default=None, description="'message' para mensajes entrantes"
+    )
+    session: Optional[str] = None
+    payload: Optional[WAHAMessagePayload] = None
+
+
+# Alias histórico: el resto del proyecto importa este nombre.
+WhatsAppWebhookPayload = WAHAWebhookPayload
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +64,7 @@ class WebhookProcesadoResponse(BaseModel):
       ``estado_whatsapp``, ``boton``).
     * ``BOT`` — mensaje de **texto libre** del paciente: lo contesta el FAQ Bot
       (``app.services.whatsapp_bot_service``) y se devuelve la ``opcion``
-      detectada, el ``respuesta`` enviado y el ``mensaje_id_saliente`` de Meta.
+      detectada, el ``respuesta`` enviado y el ``mensaje_id_saliente`` de WAHA.
       ``atencion_manual`` queda en ``True`` cuando el texto no es una opción del
       menú: no hay respuesta automática y lo tiene que atender una secretaria.
 
@@ -120,14 +73,20 @@ class WebhookProcesadoResponse(BaseModel):
     """
 
     status: str = "ok"
-    tipo: Literal["BOTON", "BOT"] = Field(
-        default="BOTON", description="Tipo de mensaje procesado: 'BOTON' o 'BOT'"
+    tipo: Literal["CONFIRMACION", "BOT", "IGNORADO", "BOTON"] = Field(
+        default="BOT",
+        description=(
+            "Tipo de mensaje procesado: 'CONFIRMACION' (1/si o 2/no), 'BOT' "
+            "(menú o respuesta), 'IGNORADO' (fromMe, grupo u otro evento)"
+        ),
     )
 
-    # --- Rama 1: respuesta de botón de un recordatorio ---
+    # --- Rama 1: confirmación/cancelación de un recordatorio ---
     turno_id: Optional[int] = None
     mensaje_id_contextual: Optional[str] = None
-    boton: Optional[str] = None
+    boton: Optional[str] = Field(
+        default=None, description="Compatibilidad: 'confirmar_turno' o 'cancelar_turno'"
+    )
     estado_turno: Optional[EstadoTurno] = None
     estado_whatsapp: Optional[EstadoWhatsApp] = None
 
@@ -138,7 +97,7 @@ class WebhookProcesadoResponse(BaseModel):
     mensaje_id_saliente: Optional[str] = None
     atencion_manual: bool = Field(
         default=False,
-        description="True cuando el mensaje necesita atención humana (opción 4 o texto libre)",
+        description="True cuando el mensaje necesita atención humana (opción 4)",
     )
 
     # --- Común a las dos ramas ---
@@ -155,7 +114,15 @@ class RespuestaBot(BaseModel):
     telefono: str
     texto_entrante: str
     tipo: Literal[
-        "MENU", "PRECIO", "OBRAS_SOCIALES", "UBICACION", "TEXTO", "MANUAL"
+        "MENU",
+        "PRECIO",
+        "OBRAS_SOCIALES",
+        "UBICACION",
+        "TEXTO",
+        "MANUAL",
+        "CONFIRMACION",
+        "CANCELACION",
+        "CONFIRMACION_PENDIENTE",
     ]
     opcion: Optional[str] = Field(
         default=None, description="Opción del menú detectada ('1'..'4'), si hubo"
@@ -164,11 +131,16 @@ class RespuestaBot(BaseModel):
         default=None, description="Texto enviado al paciente; None si requiere atención manual"
     )
     mensaje_id_saliente: Optional[str] = Field(
-        default=None, description="wamid devuelto por Meta (o 'wamid.SIMULADO...')"
+        default=None, description="ID devuelto por WAHA (o 'waha.SIMULADO...')"
     )
     atencion_manual: bool = Field(
         default=False, description="True cuando no hubo respuesta automática"
     )
+    turno_id: Optional[int] = Field(
+        default=None, description="Turno confirmado/cancelado, si aplica"
+    )
+    estado_turno: Optional[EstadoTurno] = None
+    estado_whatsapp: Optional[EstadoWhatsApp] = None
 
 
 class RecordatorioEnviado(BaseModel):

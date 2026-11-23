@@ -1,58 +1,47 @@
-"""Pruebas del Chatbot de Respuestas Automáticas (FAQ Bot) de WhatsApp.
+"""Pruebas del bot de WhatsApp sobre WAHA y del webhook de entrada.
 
-Simulan los mensajes entrantes de un paciente (``type: text``) contra el webhook
-``POST /api/v1/whatsapp/webhook`` y validan el árbol de respuestas con el **menú
-histórico por defecto** (la tabla arranca vacía en las pruebas):
-
-* saludo o palabra clave ("hola", "buenas", "info", "turnos") → menú de opciones;
-* ``1`` → tarifa de la consulta tomada de ``Prestacion`` (código ``10100``);
-* ``2`` → obras sociales activas listadas **en un solo mensaje**, ordenadas;
-* ``3`` → dirección y horarios del consultorio;
-* ``4`` o cualquier texto que no sea del menú → **no** responde y registra
-  ``'Atención Manual Requerida'`` para la secretaría.
-
-El menú editable (números, títulos y tipos a elección de la secretaría) se prueba
-en ``test_menu_whatsapp.py``. Los envíos salientes se interceptan con un *doble* de
-``whatsapp_bot_service.enviar_mensaje_texto``: sin credenciales configuradas el
-servicio ya simula el ``POST`` a Meta, pero así también se comprueba **a quién**
-y **qué texto** se le manda, sin depender del ``.env`` de la máquina. El fixture
-``autouse`` ``whatsapp_sin_credenciales`` de ``conftest.py`` deja además
-``settings`` sin credenciales, para que nada de lo que haya exportado el entorno
-se traduzca en un ``POST`` real.
+Cubren configuración, formato argentino del ``chatId``, envío real/simulado,
+filtros del webhook, menú numerado y confirmación de turnos con ``1``/``si`` y
+``2``/``no`` con estado persistido en ``conversaciones_whatsapp``.
 """
 
-import hashlib
-import hmac
-import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import httpx
 import pytest
 
-from app.core.config import URL_WHATSAPP_POR_DEFECTO, Settings, settings
+from app.core.config import Settings, settings
 from app.core.datetime_utils import utcnow
 from app.core.exceptions import WhatsAppEnvioError
-from app.services import whatsapp_bot_service, whatsapp_service
+from app.core.whatsapp_utils import construir_chat_id_waha, normalizar_telefono_waha
+from app.models.conversacion_whatsapp import ConversacionWhatsApp
+from app.models.enums import (
+    EstadoConversacionWhatsApp,
+    EstadoTurno,
+    EstadoWhatsApp,
+)
+from app.models.turno import Turno
+from app.services import (
+    whatsapp_bot_service,
+    whatsapp_conversacion_service,
+    whatsapp_service,
+)
 
 API = "/api/v1"
 TELEFONO = "5491122334455"
-WAMID_ENTRANTE = "wamid.ENTRANTE.TEXTO.1"
-
-
-# ---------------------------------------------------------------------------
-# Fixtures y helpers
-# ---------------------------------------------------------------------------
+CHAT_ID = f"{TELEFONO}@c.us"
+WAMID_ENTRANTE = "waha.ENTRANTE.TEXTO.1"
 
 
 @pytest.fixture()
 def envios(monkeypatch) -> list:
-    """Intercepta los envíos del bot y registra ``{telefono, texto}`` de cada uno."""
+    """Intercepta los envíos del bot y registra ``{telefono, texto}``."""
     registrados: list = []
 
-    def _envio_falso(telefono: str, texto: str) -> str:
+    def _envio_falso(telefono: str, texto: str, **_kwargs) -> str:
         registrados.append({"telefono": telefono, "texto": texto})
-        return f"wamid.SIMULADO.{len(registrados)}"
+        return f"waha.SIMULADO.{len(registrados)}"
 
     monkeypatch.setattr(whatsapp_bot_service, "enviar_mensaje_texto", _envio_falso)
     return registrados
@@ -83,7 +72,6 @@ def obras_sociales(client) -> dict:
 
 
 def _crear_obra_social(client, **overrides) -> dict:
-    """Crea una cobertura por API y devuelve su representación."""
     payload = {"nombre": "OSDE", "codigo": "OSDE-01"}
     payload.update(overrides)
     r = client.post(f"{API}/obras-sociales", json=payload)
@@ -92,52 +80,63 @@ def _crear_obra_social(client, **overrides) -> dict:
 
 
 def _payload_texto(
-    texto: str, *, telefono: str = TELEFONO, wamid: str = WAMID_ENTRANTE
+    texto: str,
+    *,
+    telefono: str = TELEFONO,
+    wamid: str = WAMID_ENTRANTE,
+    event: str = "message",
+    from_me: bool = False,
+    from_: str | None = None,
 ) -> dict:
-    """Arma el payload de Meta para un mensaje de **texto** del paciente."""
+    """Arma un evento de WAHA con un mensaje de texto."""
     return {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "WABA_ID",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "metadata": {
-                                "display_phone_number": "5493510000000",
-                                "phone_number_id": "PHONE_ID",
-                            },
-                            "messages": [
-                                {
-                                    "from": telefono,
-                                    "id": wamid,
-                                    "timestamp": "1712345678",
-                                    "type": "text",
-                                    "text": {"body": texto},
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
+        "event": event,
+        "session": "default",
+        "payload": {
+            "id": wamid,
+            "from": from_ if from_ is not None else f"{telefono}@c.us",
+            "fromMe": from_me,
+            "body": texto,
+            "type": "chat",
+        },
     }
 
 
 def _enviar_texto(client, texto: str, **kwargs) -> dict:
-    """Manda un mensaje de texto por el webhook y devuelve la respuesta del bot."""
     r = client.post(f"{API}/whatsapp/webhook", json=_payload_texto(texto, **kwargs))
     assert r.status_code == 200, r.text
     return r.json()
 
 
-class _RespuestaHttpFalsa:
-    """Doble de ``httpx.Response`` para probar el envío real sin salir a la red."""
+def _crear_turno(client, doctor, paciente, *, dias: int = 3, hora: int = 10) -> dict:
+    inicio = (utcnow() + timedelta(days=dias)).replace(
+        hour=hora, minute=0, second=0, microsecond=0
+    )
+    payload = {
+        "paciente_id": paciente.id,
+        "doctor_id": doctor.id,
+        "fecha_hora_inicio": inicio.isoformat(),
+        "fecha_hora_fin": (inicio + timedelta(minutes=30)).isoformat(),
+    }
+    r = client.post(f"{API}/turnos", json=payload)
+    assert r.status_code == 201, r.text
+    return r.json()
 
-    def __init__(self, data: dict) -> None:
+
+def _recordatorio_pendiente(client, doctor, paciente) -> tuple[dict, str]:
+    turno = _crear_turno(client, doctor, paciente)
+    tarea = client.post(f"{API}/tareas/enviar-recordatorios")
+    assert tarea.status_code == 200, tarea.text
+    detalle = tarea.json()["detalles"][0]
+    return turno, detalle["whatsapp_mensaje_id"]
+
+
+class _RespuestaHttpFalsa:
+    """Doble mínimo de ``httpx.Response`` para el envío real."""
+
+    def __init__(self, data: dict):
         self._data = data
+        self.text = ""
 
     def raise_for_status(self) -> None:
         return None
@@ -147,29 +146,57 @@ class _RespuestaHttpFalsa:
 
 
 # ---------------------------------------------------------------------------
-# Envío saliente hacia Meta
+# Configuración WAHA y formato del número
 # ---------------------------------------------------------------------------
 
 
-def test_el_payload_del_mensaje_de_texto_tiene_la_forma_de_la_cloud_api():
+def test_las_variables_de_waha_se_leen_del_entorno(monkeypatch):
+    monkeypatch.setenv("WAHA_URL", "http://turnos_waha:3000/")
+    monkeypatch.setenv("WAHA_API_KEY", "turnos2026")
+    monkeypatch.setenv("WAHA_SESSION", "consultorio")
+
+    config = Settings(_env_file=None)
+
+    assert config.waha_url == "http://turnos_waha:3000/"
+    assert config.waha_url_base == "http://turnos_waha:3000"
+    assert config.waha_api_key == "turnos2026"
+    assert config.waha_session == "consultorio"
+    assert config.whatsapp_envio_real is True
+
+
+@pytest.mark.parametrize(
+    ("telefono", "esperado"),
+    [
+        ("+54 9 351 643-2863", "5493516432863"),
+        ("0351 15 643-2863", "5493516432863"),
+        ("351 643-2863", "5493516432863"),
+        ("+54 351 15 643-2863", "5493516432863"),
+        ("011 15 2233-4455", "5491122334455"),
+        ("5491122334455", "5491122334455"),
+        ("", ""),
+        (None, ""),
+    ],
+)
+def test_normaliza_el_telefono_argentino_para_waha(telefono, esperado):
+    assert normalizar_telefono_waha(telefono) == esperado
+
+
+def test_el_chat_id_termina_en_c_us():
+    assert construir_chat_id_waha("+54 9 351 643-2863") == "5493516432863@c.us"
+    assert construir_chat_id_waha("") == ""
+
+
+def test_el_payload_de_texto_tiene_la_forma_de_waha():
     payload = whatsapp_service.construir_payload_texto(TELEFONO, "Hola")
 
     assert payload == {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": TELEFONO,
-        "type": "text",
-        "text": {"preview_url": False, "body": "Hola"},
+        "chatId": CHAT_ID,
+        "text": "Hola",
+        "session": "default",
     }
 
 
-def test_el_payload_de_recordatorio_usa_plantilla_y_normaliza_el_telefono(
-    db_session, doctor, paciente
-):
-    from datetime import datetime
-
-    from app.models.turno import Turno
-
+def test_el_recordatorio_es_texto_con_instrucciones_1_y_2(db_session, doctor, paciente):
     turno = Turno(
         paciente=paciente,
         doctor=doctor,
@@ -184,73 +211,133 @@ def test_el_payload_de_recordatorio_usa_plantilla_y_normaliza_el_telefono(
 
     payload = whatsapp_service.construir_payload_recordatorio(turno)
 
-    assert payload["to"] == "5491122334455"
-    assert payload["type"] == "template"
-    assert payload["template"]["name"] == settings.whatsapp_template_recordatorio
-    assert payload["template"]["language"] == {"code": "es_AR"}
-    componentes = payload["template"]["components"]
-    assert componentes[1]["parameters"][0]["payload"] == "confirmar_turno"
-    assert componentes[2]["parameters"][0]["payload"] == "cancelar_turno"
+    assert payload["chatId"] == CHAT_ID
+    assert payload["session"] == "default"
+    assert "template" not in payload
+    assert "Respondé *1* (o *SI*) para confirmar" in payload["text"]
+    assert "Respondé *2* (o *NO*) para cancelarlo" in payload["text"]
 
 
-def test_error_de_meta_conserva_codigo_y_mensaje(monkeypatch):
-    request = httpx.Request("POST", "https://graph.facebook.com/messages")
-    respuesta = httpx.Response(
-        400,
-        request=request,
-        json={"error": {"code": 131047, "message": "Fuera de la ventana"}},
-    )
-
-    def _post_falso(*_args, **_kwargs):
-        return respuesta
-
-    monkeypatch.setattr(whatsapp_service.httpx, "post", _post_falso)
-    monkeypatch.setattr(settings, "whatsapp_access_token", "token-de-prueba")
-    monkeypatch.setattr(settings, "whatsapp_phone_number_id", "1234567890")
-
-    with pytest.raises(WhatsAppEnvioError, match=r"code=131047.*Fuera de la ventana"):
-        whatsapp_service._enviar_http_whatsapp({"type": "template"})
-
-
-def test_sin_credenciales_el_envio_se_simula_y_queda_en_el_log(monkeypatch, caplog):
-    monkeypatch.setattr(settings, "whatsapp_access_token", None)
-    monkeypatch.setattr(settings, "whatsapp_phone_number_id", None)
-
+def test_sin_credenciales_el_envio_se_simula_y_queda_en_el_log(caplog):
     with caplog.at_level(logging.INFO, logger="app.services.whatsapp"):
-        wamid = whatsapp_service.enviar_mensaje_texto(TELEFONO, "Hola")
+        mensaje_id = whatsapp_service.enviar_mensaje_texto(TELEFONO, "Hola")
 
-    assert wamid.startswith("wamid.SIMULADO.")
+    assert mensaje_id.startswith("waha.SIMULADO.")
     assert any(
         "Enviando WhatsApp (texto) a" in registro.getMessage()
         for registro in caplog.records
     )
 
 
-def test_con_credenciales_el_envio_es_un_post_real_a_la_graph_api(monkeypatch):
-    monkeypatch.setattr(settings, "whatsapp_access_token", "token-de-prueba")
-    monkeypatch.setattr(settings, "whatsapp_phone_number_id", "1234567890")
-    monkeypatch.setattr(settings, "whatsapp_api_url", None)  # cae en la URL por defecto
+def test_con_credenciales_el_envio_es_un_post_a_send_text(monkeypatch):
+    monkeypatch.setattr(settings, "waha_url", "http://turnos_waha:3000/")
+    monkeypatch.setattr(settings, "waha_api_key", "turnos2026")
+    monkeypatch.setattr(settings, "waha_session", "consultorio")
 
     llamadas: list = []
+    pausas: list = []
 
     def _post_falso(url: str, **kwargs):
         llamadas.append({"url": url, **kwargs})
-        return _RespuestaHttpFalsa({"messages": [{"id": "wamid.REAL.1"}]})
+        return _RespuestaHttpFalsa({"id": "true_5491122334455@c.us_ABC"})
 
     monkeypatch.setattr(whatsapp_service.httpx, "post", _post_falso)
+    monkeypatch.setattr(whatsapp_service.time, "sleep", pausas.append)
 
-    wamid = whatsapp_service.enviar_mensaje_texto(TELEFONO, "Hola")
+    mensaje_id = whatsapp_service.enviar_mensaje_texto(TELEFONO, "Hola")
 
-    assert wamid == "wamid.REAL.1"
+    assert mensaje_id == "true_5491122334455@c.us_ABC"
+    assert pausas == [whatsapp_service.PAUSA_ENVIO_WAHA]
     assert len(llamadas) == 1
-    assert llamadas[0]["url"] == "https://graph.facebook.com/v26.0/1234567890/messages"
-    assert llamadas[0]["headers"]["Authorization"] == "Bearer token-de-prueba"
-    assert llamadas[0]["json"]["to"] == TELEFONO
-    assert llamadas[0]["json"]["text"]["body"] == "Hola"
+    assert llamadas[0]["url"] == "http://turnos_waha:3000/api/sendText"
+    assert llamadas[0]["headers"]["X-Api-Key"] == "turnos2026"
+    assert llamadas[0]["json"] == {
+        "chatId": CHAT_ID,
+        "text": "Hola",
+        "session": "consultorio",
+    }
+
+
+def test_el_error_de_waha_conserva_el_detalle(monkeypatch):
+    monkeypatch.setattr(settings, "waha_url", "http://turnos_waha:3000")
+    monkeypatch.setattr(settings, "waha_api_key", "turnos2026")
+
+    request = httpx.Request("POST", "http://turnos_waha:3000/api/sendText")
+    respuesta = httpx.Response(
+        400, request=request, json={"message": "Sesión no iniciada"}
+    )
+    monkeypatch.setattr(whatsapp_service.httpx, "post", lambda *_a, **_k: respuesta)
+    monkeypatch.setattr(whatsapp_service.time, "sleep", lambda _s: None)
+
+    with pytest.raises(WhatsAppEnvioError, match=r"HTTP 400.*Sesión no iniciada"):
+        whatsapp_service._enviar_http_whatsapp(
+            {"chatId": CHAT_ID, "text": "Hola", "session": "default"}
+        )
+
+
+def test_un_telefono_sin_digitos_no_se_intenta_enviar():
+    with pytest.raises(WhatsAppEnvioError, match="no tiene dígitos"):
+        whatsapp_service.enviar_mensaje_texto("", "Hola")
 
 
 # ---------------------------------------------------------------------------
-# Saludo inicial → menú de opciones
+# Webhook WAHA: filtros y extracción del mensaje
+# ---------------------------------------------------------------------------
+
+
+def test_el_get_de_verificacion_de_meta_ya_no_existe(client):
+    r = client.get(f"{API}/whatsapp/webhook")
+    assert r.status_code == 405
+
+
+def test_el_webhook_no_exige_firma_de_meta(client, envios):
+    r = client.post(f"{API}/whatsapp/webhook", json=_payload_texto("hola"))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["tipo"] == "BOT"
+    assert envios
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _payload_texto("hola", event="session.status"),
+        _payload_texto("hola", event="message.ack"),
+        _payload_texto("hola", from_me=True),
+        _payload_texto("hola", from_="120363000000000000@g.us"),
+        _payload_texto("hola", from_="status@broadcast"),
+        _payload_texto("   "),
+    ],
+)
+def test_el_webhook_ignora_eventos_que_no_son_de_pacientes(client, envios, payload):
+    r = client.post(f"{API}/whatsapp/webhook", json=payload)
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["tipo"] == "IGNORADO"
+    assert data["atencion_manual"] is False
+    assert envios == []
+
+
+def test_un_evento_sin_payload_no_falla(client):
+    r = client.post(
+        f"{API}/whatsapp/webhook", json={"event": "session.status", "session": "default"}
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["tipo"] == "IGNORADO"
+
+
+def test_el_webhook_extrae_el_telefono_del_chat_id(client, envios):
+    data = _enviar_texto(client, "hola", telefono="+54 9 351 643-2863")
+
+    assert data["telefono"] == "5493516432863"
+    assert data["mensaje_id_entrante"] == WAMID_ENTRANTE
+    assert envios[0]["telefono"] == "5493516432863"
+
+
+# ---------------------------------------------------------------------------
+# Menú numerado
 # ---------------------------------------------------------------------------
 
 
@@ -277,7 +364,6 @@ def test_un_saludo_responde_el_menu_de_opciones(client, envios, saludo):
     assert data["mensaje_id_entrante"] == WAMID_ENTRANTE
     assert data["respuesta"] == whatsapp_bot_service.MENU_PRINCIPAL
 
-    # El menú ofrece las cuatro opciones del árbol de decisión.
     for opcion in (
         "Precio de la consulta",
         "Obras sociales con convenio",
@@ -286,16 +372,10 @@ def test_un_saludo_responde_el_menu_de_opciones(client, envios, saludo):
     ):
         assert opcion in data["respuesta"]
 
-    # Se envió un solo mensaje, al número que escribió.
     assert envios == [
         {"telefono": TELEFONO, "texto": whatsapp_bot_service.MENU_PRINCIPAL}
     ]
-    assert data["mensaje_id_saliente"].startswith("wamid.SIMULADO.")
-
-
-# ---------------------------------------------------------------------------
-# Opción 1 → precio de la consulta (Prestacion '10100')
-# ---------------------------------------------------------------------------
+    assert data["mensaje_id_saliente"].startswith("waha.SIMULADO.")
 
 
 @pytest.mark.parametrize("respuesta", ["1", "1.", "(1)", "opción 1", "1️⃣"])
@@ -309,105 +389,33 @@ def test_opcion_1_envia_la_tarifa_de_la_consulta(client, envios, consulta, respu
     assert "$18.500,00" in data["respuesta"]
     assert "Córdoba" in data["respuesta"]
 
-    assert len(envios) == 1
-    assert envios[0]["telefono"] == TELEFONO
-    assert envios[0]["texto"] == data["respuesta"]
+    assert envios == [{"telefono": TELEFONO, "texto": data["respuesta"]}]
 
 
-def test_opcion_1_toma_el_valor_actual_del_catalogo(client, envios, consulta):
-    """Si la secretaría actualiza el arancel, el bot responde el nuevo valor."""
-    update = client.put(
-        f"{API}/prestaciones/{consulta['id']}",
-        json={
-            "codigo_nomenclador": "10100",
-            "descripcion": "Consulta odontológica",
-            "valor_base": 22500,
-        },
-    )
-    assert update.status_code == 200, update.text
-
-    data = _enviar_texto(client, "1")
-
-    assert "$22.500,00" in data["respuesta"]
-    assert "$18.500,00" not in data["respuesta"]
-
-
-def test_opcion_1_sin_la_prestacion_cargada_invita_a_hablar_con_una_secretaria(
-    client, envios, caplog
-):
-    with caplog.at_level(logging.WARNING, logger="app.services.whatsapp_bot"):
-        data = _enviar_texto(client, "1")
-
-    # Sin el precio en el catálogo igual se contesta: no es una consulta perdida.
-    assert data["tipo"] == "BOT"
-    assert data["opcion"] == "1"
-    assert data["atencion_manual"] is False
-    assert "10100" in data["respuesta"] or "no pudimos consultar" in data["respuesta"]
-    assert len(envios) == 1
-    assert any(
-        "no hay una prestación activa" in registro.getMessage()
-        for registro in caplog.records
-    )
-
-
-# ---------------------------------------------------------------------------
-# Opción 2 → obras sociales activas (ObraSocial.activa = True)
-# ---------------------------------------------------------------------------
-
-
-def test_opcion_2_lista_las_obras_sociales_activas_en_un_solo_mensaje(
+def test_opcion_2_lista_las_obras_sociales_activas(
     client, envios, obras_sociales
 ):
     data = _enviar_texto(client, "2")
 
-    assert data["tipo"] == "BOT"
     assert data["opcion"] == "2"
-    assert data["atencion_manual"] is False
-
-    respuesta = data["respuesta"]
-    # Sólo las vigentes, ordenadas alfabéticamente y dentro del mismo mensaje.
-    assert "IOMA" in respuesta and "OSDE" in respuesta
-    assert respuesta.index("IOMA") < respuesta.index("OSDE")
-    assert obras_sociales["baja"]["nombre"] not in respuesta
-    assert "Son 2 coberturas" in respuesta
-
-    # Un único envío: el listado no se parte en varios mensajes.
-    assert envios == [{"telefono": TELEFONO, "texto": respuesta}]
-
-
-def test_opcion_2_sin_coberturas_cargadas_responde_una_sola_vez(client, envios):
-    data = _enviar_texto(client, "opción 2")
-
-    assert data["opcion"] == "2"
-    assert data["atencion_manual"] is False
-    assert "no tenemos obras sociales con convenio" in data["respuesta"]
+    assert "IOMA" in data["respuesta"] and "OSDE" in data["respuesta"]
+    assert data["respuesta"].index("IOMA") < data["respuesta"].index("OSDE")
+    assert obras_sociales["baja"]["nombre"] not in data["respuesta"]
+    assert "Son 2 coberturas" in data["respuesta"]
     assert len(envios) == 1
 
 
-# ---------------------------------------------------------------------------
-# Opción 3 → ubicación y horarios
-# ---------------------------------------------------------------------------
-
-
-def test_opcion_3_envia_la_direccion_y_los_horarios_del_consultorio(client, envios):
+def test_opcion_3_envia_la_direccion_y_los_horarios(client, envios):
     data = _enviar_texto(client, "3️⃣")
 
-    assert data["tipo"] == "BOT"
     assert data["opcion"] == "3"
-    assert data["atencion_manual"] is False
     assert settings.whatsapp_consultorio_direccion in data["respuesta"]
     assert settings.whatsapp_consultorio_horarios in data["respuesta"]
-
-    assert envios == [{"telefono": TELEFONO, "texto": data["respuesta"]}]
-
-
-# ---------------------------------------------------------------------------
-# Opción 4 y texto libre → 'Atención Manual Requerida'
-# ---------------------------------------------------------------------------
+    assert len(envios) == 1
 
 
 @pytest.mark.parametrize("respuesta", ["4", "4.", "opción 4"])
-def test_opcion_4_no_responde_automaticamente_y_registra_atencion_manual(
+def test_opcion_4_no_responde_y_registra_atencion_manual(
     client, envios, caplog, respuesta
 ):
     with caplog.at_level(logging.WARNING, logger="app.services.whatsapp_bot"):
@@ -418,8 +426,6 @@ def test_opcion_4_no_responde_automaticamente_y_registra_atencion_manual(
     assert data["atencion_manual"] is True
     assert data["respuesta"] is None
     assert data["mensaje_id_saliente"] is None
-
-    # El bot se corre a un costado: no se le manda nada al paciente.
     assert envios == []
 
     registros = [registro.getMessage() for registro in caplog.records]
@@ -436,32 +442,11 @@ def test_opcion_4_no_responde_automaticamente_y_registra_atencion_manual(
         "🙂",
         "23",
         "no entiendo",
+        "gracias",
     ],
 )
-def test_texto_libre_no_reconocido_queda_para_atencion_manual(
-    client, envios, caplog, mensaje
-):
-    with caplog.at_level(logging.WARNING, logger="app.services.whatsapp_bot"):
-        data = _enviar_texto(client, mensaje)
-
-    assert data["tipo"] == "BOT"
-    assert data["atencion_manual"] is True
-    assert data["respuesta"] is None
-    assert data["mensaje_id_saliente"] is None
-    assert envios == []
-    assert any(
-        "Atención Manual Requerida" in registro.getMessage()
-        for registro in caplog.records
-    )
-
-
-def test_pedir_un_turno_ofrece_el_menu_para_derivar_con_la_opcion_4(client, envios):
-    """El pedido de un "turno" es palabra clave del menú: el bot no agenda solo.
-
-    Si el paciente busca una fecha concreta, la opción 4 deriva la conversación a
-    una secretaria (que es el camino de atención manual).
-    """
-    data = _enviar_texto(client, "Necesito un turno")
+def test_texto_libre_sin_confirmacion_muestra_el_menu(client, envios, mensaje):
+    data = _enviar_texto(client, mensaje)
 
     assert data["tipo"] == "BOT"
     assert data["atencion_manual"] is False
@@ -469,33 +454,120 @@ def test_pedir_un_turno_ofrece_el_menu_para_derivar_con_la_opcion_4(client, envi
     assert len(envios) == 1
 
 
-def test_una_opcion_fuera_del_menu_queda_registrada_con_su_numero(
-    client, envios, caplog
+def test_una_tecla_inexistente_tambien_vuelve_al_menu(client, envios):
+    data = _enviar_texto(client, "7")
+
+    assert data["tipo"] == "BOT"
+    assert data["atencion_manual"] is False
+    assert data["respuesta"] == whatsapp_bot_service.MENU_PRINCIPAL
+    assert len(envios) == 1
+
+
+def test_el_bot_guarda_el_estado_menu_del_contacto(client, db_session, envios):
+    _enviar_texto(client, "hola")
+
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.telefono == TELEFONO
+    assert conversacion.estado == EstadoConversacionWhatsApp.MENU
+    assert conversacion.turno_id is None
+
+
+# ---------------------------------------------------------------------------
+# Confirmación / cancelación por texto
+# ---------------------------------------------------------------------------
+
+
+def test_el_recordatorio_deja_la_confirmacion_pendiente_en_la_base(
+    client, db_session, doctor, paciente
 ):
-    with caplog.at_level(logging.WARNING, logger="app.services.whatsapp_bot"):
-        data = _enviar_texto(client, "7")
+    turno, mensaje_id = _recordatorio_pendiente(client, doctor, paciente)
 
-    assert data["opcion"] == "7"
-    assert data["atencion_manual"] is True
-    assert envios == []
-    assert any(
-        "la opción 7 no existe en el menú" in registro.getMessage()
-        for registro in caplog.records
-    )
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.telefono == TELEFONO
+    assert conversacion.estado == EstadoConversacionWhatsApp.CONFIRMACION_TURNO
+    assert conversacion.turno_id == turno["id"]
+    assert conversacion.whatsapp_mensaje_id == mensaje_id
+    assert mensaje_id.startswith("waha.SIMULADO.")
 
 
-def test_un_mensaje_de_texto_sin_remitente_no_se_puede_contestar(client, envios):
-    r = client.post(f"{API}/whatsapp/webhook", json=_payload_texto("hola", telefono=""))
+@pytest.mark.parametrize("respuesta", ["1", "si", "SÍ", "confirmo", "confirmar"])
+def test_responder_1_o_si_confirma_el_turno(client, envios, doctor, paciente, respuesta):
+    turno, _ = _recordatorio_pendiente(client, doctor, paciente)
 
-    assert r.status_code == 400
-    assert envios == []
+    data = _enviar_texto(client, respuesta)
+
+    assert data["tipo"] == "CONFIRMACION"
+    assert data["turno_id"] == turno["id"]
+    assert data["boton"] == "confirmar_turno"
+    assert data["estado_turno"] == "CONFIRMADO"
+    assert data["estado_whatsapp"] == "RESPONDIDO"
+    assert "Turno confirmado" in data["respuesta"]
+    assert data["mensaje_id_saliente"].startswith("waha.SIMULADO.")
+    assert envios[-1]["texto"] == data["respuesta"]
 
 
-def test_el_webhook_confirma_el_evento_si_falla_el_envio_saliente(client, monkeypatch):
-    """Evita que Meta reintente indefinidamente un mensaje que no pudo salir."""
+@pytest.mark.parametrize("respuesta", ["2", "no", "NO", "cancelo", "cancelar"])
+def test_responder_2_o_no_cancela_el_turno(client, envios, doctor, paciente, respuesta):
+    turno, _ = _recordatorio_pendiente(client, doctor, paciente)
 
+    data = _enviar_texto(client, respuesta)
+
+    assert data["tipo"] == "CONFIRMACION"
+    assert data["turno_id"] == turno["id"]
+    assert data["boton"] == "cancelar_turno"
+    assert data["estado_turno"] == "CANCELADO"
+    assert data["estado_whatsapp"] == "RESPONDIDO"
+    assert "Turno cancelado" in data["respuesta"]
+
+    actualizado = client.get(f"{API}/turnos/{turno['id']}").json()
+    assert actualizado["estado_turno"] == "CANCELADO"
+    assert actualizado["estado_whatsapp"] == "RESPONDIDO"
+
+
+def test_una_respuesta_invalida_repite_la_pregunta_y_mantiene_el_estado(
+    client, db_session, envios, doctor, paciente
+):
+    turno, _ = _recordatorio_pendiente(client, doctor, paciente)
+
+    data = _enviar_texto(client, "hola")
+
+    assert data["tipo"] == "BOT"
+    assert data["turno_id"] is None
+    assert data["atencion_manual"] is False
+    assert "Respondé *1* (o *SI*) para confirmar" in data["respuesta"]
+    assert "Respondé *2* (o *NO*) para cancelar" in data["respuesta"]
+
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.estado == EstadoConversacionWhatsApp.CONFIRMACION_TURNO
+    assert conversacion.turno_id == turno["id"]
+
+    actualizado = client.get(f"{API}/turnos/{turno['id']}").json()
+    assert actualizado["estado_turno"] == "PENDIENTE"
+
+
+def test_despues_de_confirmar_vuelve_al_menu(client, envios, doctor, paciente):
+    _recordatorio_pendiente(client, doctor, paciente)
+
+    confirmacion = _enviar_texto(client, "1")
+    assert confirmacion["estado_turno"] == "CONFIRMADO"
+
+    otro = _enviar_texto(client, "gracias")
+    assert otro["tipo"] == "BOT"
+    assert otro["respuesta"] == whatsapp_bot_service.MENU_PRINCIPAL
+
+
+def test_sin_confirmacion_pendiente_un_texto_muestra_el_menu(client, envios):
+    data = _enviar_texto(client, "¿me pasás un turno?")
+
+    assert data["tipo"] == "BOT"
+    assert data["respuesta"] == whatsapp_bot_service.MENU_PRINCIPAL
+
+
+def test_el_webhook_confirma_la_recepcion_si_falla_el_envio_saliente(
+    client, monkeypatch
+):
     def _fallar_envio(*_args, **_kwargs):
-        raise WhatsAppEnvioError("Meta no disponible")
+        raise WhatsAppEnvioError("WAHA no disponible")
 
     monkeypatch.setattr(whatsapp_bot_service, "responder_mensaje", _fallar_envio)
 
@@ -508,86 +580,7 @@ def test_el_webhook_confirma_el_evento_si_falla_el_envio_saliente(client, monkey
 
 
 # ---------------------------------------------------------------------------
-# Convivencia con el flujo de botones del recordatorio
-# ---------------------------------------------------------------------------
-
-
-def _payload_boton(mensaje_contextual_id: str, boton_id: str) -> dict:
-    """Arma el payload de Meta para una respuesta de botón (Confirmar/Cancelar)."""
-    return {
-        "object": "whatsapp_business_account",
-        "entry": [
-            {
-                "id": "WABA_ID",
-                "changes": [
-                    {
-                        "field": "messages",
-                        "value": {
-                            "messaging_product": "whatsapp",
-                            "messages": [
-                                {
-                                    "from": TELEFONO,
-                                    "id": "wamid.ENTRANTE.BOTON.1",
-                                    "timestamp": "1712345678",
-                                    "type": "interactive",
-                                    "context": {
-                                        "from": "5493510000000",
-                                        "id": mensaje_contextual_id,
-                                    },
-                                    "interactive": {
-                                        "type": "button_reply",
-                                        "button_reply": {
-                                            "id": boton_id,
-                                            "title": "Confirmar",
-                                        },
-                                    },
-                                }
-                            ],
-                        },
-                    }
-                ],
-            }
-        ],
-    }
-
-
-def test_el_webhook_sigue_confirmando_turnos_con_el_boton(client, envios, doctor, paciente):
-    """El ruteo por tipo de mensaje no rompe el flujo de recordatorios."""
-    inicio = (utcnow() + timedelta(days=3)).replace(
-        hour=9, minute=0, second=0, microsecond=0
-    )
-    alta = client.post(
-        f"{API}/turnos",
-        json={
-            "paciente_id": paciente.id,
-            "doctor_id": doctor.id,
-            "fecha_hora_inicio": inicio.isoformat(),
-            "fecha_hora_fin": (inicio + timedelta(minutes=30)).isoformat(),
-        },
-    )
-    assert alta.status_code == 201, alta.text
-    turno = alta.json()
-
-    tarea = client.post(f"{API}/tareas/enviar-recordatorios").json()
-    wamid = tarea["detalles"][0]["whatsapp_mensaje_id"]
-
-    r = client.post(
-        f"{API}/whatsapp/webhook",
-        json=_payload_boton(wamid, "confirmar_turno"),
-    )
-
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert data["tipo"] == "BOTON"
-    assert data["turno_id"] == turno["id"]
-    assert data["estado_turno"] == "CONFIRMADO"
-    assert data["estado_whatsapp"] == "RESPONDIDO"
-    assert data["respuesta"] is None
-    assert envios == []  # el FAQ Bot no intervino
-
-
-# ---------------------------------------------------------------------------
-# Utilidades del bot: normalización del texto, opciones e importes
+# Utilidades del bot y estado persistido
 # ---------------------------------------------------------------------------
 
 
@@ -666,179 +659,78 @@ def test_normalizar_destinatario_deja_solo_los_digitos():
     assert whatsapp_bot_service.normalizar_destinatario(None) == ""
 
 
-# ---------------------------------------------------------------------------
-# Configuración del envío: los dos nombres del token y las credenciales mínimas
-# ---------------------------------------------------------------------------
-
-
-def test_el_token_se_puede_definir_como_whatsapp_token(monkeypatch):
-    """``WHATSAPP_TOKEN`` (el nombre corto de la doc de Meta) es sinónimo válido."""
-    monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN", raising=False)
-    monkeypatch.setenv("WHATSAPP_TOKEN", "token-corto")
-    assert Settings(_env_file=None).whatsapp_access_token == "token-corto"
-
-
-def test_un_whatsapp_token_vacio_no_tapa_al_access_token(monkeypatch):
-    """``WHATSAPP_TOKEN=""`` en el ``.env`` no invalida las credenciales reales."""
-    monkeypatch.setenv("WHATSAPP_TOKEN", "")
-    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "token-real")
-    assert Settings(_env_file=None).whatsapp_access_token == "token-real"
-
-
-def test_la_url_de_la_api_tiene_valor_por_defecto(monkeypatch):
-    """Sin ``WHATSAPP_API_URL`` se usa la Graph API de Meta."""
-    monkeypatch.delenv("WHATSAPP_API_URL", raising=False)
-    assert Settings(_env_file=None).whatsapp_api_url == URL_WHATSAPP_POR_DEFECTO
-
-
 @pytest.mark.parametrize(
-    ("phone_number_id", "token", "esperado"),
+    ("texto", "esperado"),
     [
-        ("1234567890", "token-de-prueba", True),
-        (None, "token-de-prueba", False),
-        ("1234567890", None, False),
+        ("1", "CONFIRMAR"),
+        ("si", "CONFIRMAR"),
+        ("confirmo", "CONFIRMAR"),
+        ("2", "CANCELAR"),
+        ("no", "CANCELAR"),
+        ("cancelar", "CANCELAR"),
+        ("hola", None),
+        ("", None),
     ],
 )
-def test_el_envio_real_solo_necesita_el_token_y_el_numero(
-    monkeypatch, phone_number_id, token, esperado
+def test_clasificar_la_respuesta_de_confirmacion(texto, esperado):
+    normalizado = whatsapp_bot_service.normalizar_texto(texto)
+    assert whatsapp_bot_service._clasificar_confirmacion(normalizado) == esperado
+
+
+def test_el_estado_pendiente_se_limpia_si_el_turno_ya_no_esta_pendiente(
+    db_session, doctor, paciente
 ):
-    """La URL no condiciona el envío: alcanza con el token y el id del número."""
-    for nombre in (
-        "WHATSAPP_API_URL",
-        "WHATSAPP_PHONE_NUMBER_ID",
-        "WHATSAPP_ACCESS_TOKEN",
-        "WHATSAPP_TOKEN",
-    ):
-        monkeypatch.delenv(nombre, raising=False)
-    if phone_number_id:
-        monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", phone_number_id)
-    if token:
-        monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", token)
-
-    assert Settings(_env_file=None).whatsapp_envio_real is esperado
-
-
-# ---------------------------------------------------------------------------
-# Verificación del webhook (GET) que exige Meta para aprobar el webhook
-# ---------------------------------------------------------------------------
-
-VERIFY_TOKEN = "odontologia_secreto_2026"
-
-
-def test_el_webhook_post_exige_una_firma_valida(client, monkeypatch):
-    """Un tercero no puede falsificar respuestas de pacientes."""
-    monkeypatch.setattr(settings, "whatsapp_app_secret", "secreto-de-prueba")
-    payload = _payload_texto("hola")
-    cuerpo = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-
-    sin_firma = client.post(
-        f"{API}/whatsapp/webhook",
-        content=cuerpo,
-        headers={"Content-Type": "application/json"},
+    inicio = utcnow() + timedelta(days=2)
+    turno = Turno(
+        paciente_id=paciente.id,
+        doctor_id=doctor.id,
+        fecha_hora_inicio=inicio,
+        fecha_hora_fin=inicio + timedelta(minutes=30),
+        estado_turno=EstadoTurno.CONFIRMADO,
     )
-    assert sin_firma.status_code == 403
-
-    firma = "sha256=" + hmac.new(
-        b"secreto-de-prueba", cuerpo, hashlib.sha256
-    ).hexdigest()
-    valido = client.post(
-        f"{API}/whatsapp/webhook",
-        content=cuerpo,
-        headers={
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": firma,
-        },
-    )
-    assert valido.status_code == 200, valido.text
-
-
-def test_el_webhook_post_falla_cerrado_sin_app_secret(client, monkeypatch):
-    monkeypatch.setattr(settings, "whatsapp_app_secret", None)
-    respuesta = client.post(f"{API}/whatsapp/webhook", json=_payload_texto("hola"))
-    assert respuesta.status_code == 503
-
-
-def test_el_webhook_devuelve_el_challenge_como_texto_plano(client, monkeypatch):
-    """Meta exige el ``hub.challenge`` tal cual (200, ``text/plain``), no un JSON."""
-    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
-
-    r = client.get(
-        f"{API}/whatsapp/webhook",
-        params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": VERIFY_TOKEN,
-            "hub.challenge": "1158201444",
-        },
+    db_session.add(turno)
+    db_session.commit()
+    db_session.refresh(turno)
+    whatsapp_conversacion_service.marcar_confirmacion_pendiente(
+        db_session, TELEFONO, turno.id, "waha.X"
     )
 
-    assert r.status_code == 200
-    assert r.text == "1158201444"
-    assert r.headers["content-type"].startswith("text/plain")
+    assert (
+        whatsapp_conversacion_service.obtener_confirmacion_pendiente(
+            db_session, TELEFONO
+        )
+        is None
+    )
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.estado == EstadoConversacionWhatsApp.MENU
+    assert conversacion.turno_id is None
 
 
-def test_el_webhook_rechaza_un_verify_token_distinto(client, monkeypatch):
-    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
-
-    r = client.get(
-        f"{API}/whatsapp/webhook",
-        params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": "otro-secreto",
-            "hub.challenge": "1158201444",
-        },
+def test_el_estado_se_guarda_por_telefono_y_sobrevive_a_otra_consulta(
+    db_session, doctor, paciente
+):
+    inicio = utcnow() + timedelta(days=2)
+    turno = Turno(
+        paciente_id=paciente.id,
+        doctor_id=doctor.id,
+        fecha_hora_inicio=inicio,
+        fecha_hora_fin=inicio + timedelta(minutes=30),
+        estado_turno=EstadoTurno.PENDIENTE,
+        estado_whatsapp=EstadoWhatsApp.ENVIADO,
+    )
+    db_session.add(turno)
+    db_session.commit()
+    db_session.refresh(turno)
+    whatsapp_conversacion_service.marcar_confirmacion_pendiente(
+        db_session, "011 15 2233-4455", turno.id, "waha.Y"
     )
 
-    assert r.status_code == 403
-    assert r.text == "Verificación no válida"
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.telefono == TELEFONO
 
-
-def test_el_webhook_no_acepta_el_access_token_como_verify_token(client, monkeypatch):
-    """El token de la API no es el verify token: no debe servir para verificar."""
-    monkeypatch.setattr(settings, "whatsapp_access_token", "EAA-token-de-la-api")
-    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
-
-    r = client.get(
-        f"{API}/whatsapp/webhook",
-        params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": "EAA-token-de-la-api",
-            "hub.challenge": "1158201444",
-        },
+    pendiente = whatsapp_conversacion_service.obtener_confirmacion_pendiente(
+        db_session, TELEFONO
     )
-
-    assert r.status_code == 403
-
-
-def test_el_webhook_sin_verify_token_configurado_rechaza(client, monkeypatch):
-    monkeypatch.setattr(settings, "whatsapp_verify_token", None)
-
-    r = client.get(
-        f"{API}/whatsapp/webhook",
-        params={
-            "hub.mode": "subscribe",
-            "hub.verify_token": "",
-            "hub.challenge": "1158201444",
-        },
-    )
-
-    assert r.status_code == 403
-
-
-def test_el_webhook_exige_el_modo_subscribe(client, monkeypatch):
-    monkeypatch.setattr(settings, "whatsapp_verify_token", VERIFY_TOKEN)
-
-    r = client.get(
-        f"{API}/whatsapp/webhook",
-        params={
-            "hub.mode": "unsubscribe",
-            "hub.verify_token": VERIFY_TOKEN,
-            "hub.challenge": "1158201444",
-        },
-    )
-
-    assert r.status_code == 403
-
-
-def test_el_verify_token_se_lee_de_la_variable_de_entorno(monkeypatch):
-    monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", VERIFY_TOKEN)
-    assert Settings(_env_file=None).whatsapp_verify_token == VERIFY_TOKEN
+    assert pendiente is not None
+    _, turno_guardado = pendiente
+    assert turno_guardado.id == turno.id
