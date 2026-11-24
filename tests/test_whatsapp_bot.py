@@ -14,7 +14,12 @@ import pytest
 from app.core.config import Settings, settings
 from app.core.datetime_utils import utcnow
 from app.core.exceptions import WhatsAppEnvioError
-from app.core.whatsapp_utils import construir_chat_id_waha, normalizar_telefono_waha
+from app.core.whatsapp_utils import (
+    construir_chat_id_waha,
+    normalizar_destinatario_waha,
+    normalizar_telefono_waha,
+    numero_de_jid,
+)
 from app.models.conversacion_whatsapp import ConversacionWhatsApp
 from app.models.enums import (
     EstadoConversacionWhatsApp,
@@ -32,6 +37,11 @@ API = "/api/v1"
 TELEFONO = "5491122334455"
 CHAT_ID = f"{TELEFONO}@c.us"
 WAMID_ENTRANTE = "waha.ENTRANTE.TEXTO.1"
+#: Identificador de privacidad con el que WAHA puede entregar el remitente.
+LID = "50783827554549@lid"
+#: Número real del mismo paciente, tal como lo publica WAHA en ``_data.key``.
+TELEFONO_REAL = "5493515945075"
+JID_REAL = f"{TELEFONO_REAL}@s.whatsapp.net"
 
 
 @pytest.fixture()
@@ -106,6 +116,18 @@ def _enviar_texto(client, texto: str, **kwargs) -> dict:
     r = client.post(f"{API}/whatsapp/webhook", json=_payload_texto(texto, **kwargs))
     assert r.status_code == 200, r.text
     return r.json()
+
+
+def _payload_lid(texto: str, *, alt: str | None = JID_REAL, **kwargs) -> dict:
+    """Evento de WAHA con el remitente como ``@lid`` (privacidad del número).
+
+    ``_data.key`` reproduce lo que publica WAHA: ``remoteJidAlt`` con el JID
+    real del paciente (``alt=None`` arma el caso en que no viene).
+    """
+    evento = _payload_texto(texto, from_=LID, **kwargs)
+    if alt is not None:
+        evento["payload"]["_data"] = {"key": {"remoteJidAlt": alt}}
+    return evento
 
 
 def _crear_turno(client, doctor, paciente, *, dias: int = 3, hora: int = 10) -> dict:
@@ -184,6 +206,49 @@ def test_normaliza_el_telefono_argentino_para_waha(telefono, esperado):
 def test_el_chat_id_termina_en_c_us():
     assert construir_chat_id_waha("+54 9 351 643-2863") == "5493516432863@c.us"
     assert construir_chat_id_waha("") == ""
+
+
+def test_un_chat_id_ya_armado_no_se_vuelve_a_normalizar():
+    assert construir_chat_id_waha(CHAT_ID) == CHAT_ID
+    # El @lid es un identificador opaco: si se normaliza deja de existir.
+    assert construir_chat_id_waha(LID) == LID
+    # Un JID de teléfono sí se convierte al dominio que espera /api/sendText.
+    assert construir_chat_id_waha(JID_REAL) == f"{TELEFONO_REAL}@c.us"
+    assert construir_chat_id_waha(f"{TELEFONO_REAL}:12@s.whatsapp.net") == (
+        f"{TELEFONO_REAL}@c.us"
+    )
+
+
+@pytest.mark.parametrize(
+    ("jid", "esperado"),
+    [
+        (JID_REAL, TELEFONO_REAL),
+        (f"{TELEFONO_REAL}@c.us", TELEFONO_REAL),
+        ("+54 9 351 594-5075", TELEFONO_REAL),
+        (LID, ""),
+        ("120363000000000000@g.us", ""),
+        ("status@broadcast", ""),
+        ("", ""),
+        (None, ""),
+    ],
+)
+def test_numero_de_jid_solo_devuelve_telefonos(jid, esperado):
+    assert numero_de_jid(jid) == esperado
+
+
+def test_normalizar_destinatario_conserva_el_lid():
+    assert normalizar_destinatario_waha(LID) == LID
+    assert normalizar_destinatario_waha("+54 9 11 2233-4455") == TELEFONO
+    assert normalizar_destinatario_waha(None) == ""
+    # Los dos servicios que usan la clave de contacto respetan el @lid.
+    assert whatsapp_bot_service.normalizar_destinatario(LID) == LID
+    assert whatsapp_conversacion_service.normalizar_telefono_contacto(LID) == LID
+
+
+def test_telefono_de_chat_no_inventa_un_numero_para_un_lid():
+    assert whatsapp_service.telefono_de_chat(LID) == LID
+    assert whatsapp_service.telefono_de_chat(CHAT_ID) == TELEFONO
+    assert whatsapp_service.telefono_de_chat("120363000000000000@g.us") == ""
 
 
 def test_el_payload_de_texto_tiene_la_forma_de_waha():
@@ -334,6 +399,89 @@ def test_el_webhook_extrae_el_telefono_del_chat_id(client, envios):
     assert data["telefono"] == "5493516432863"
     assert data["mensaje_id_entrante"] == WAMID_ENTRANTE
     assert envios[0]["telefono"] == "5493516432863"
+
+
+# ---------------------------------------------------------------------------
+# Remitentes con identificador de privacidad (@lid)
+# ---------------------------------------------------------------------------
+
+
+def test_el_webhook_resuelve_el_numero_real_de_un_lid(client, envios):
+    r = client.post(f"{API}/whatsapp/webhook", json=_payload_lid("hola"))
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["tipo"] == "BOT"
+    assert data["telefono"] == TELEFONO_REAL
+    assert data["respuesta"] == whatsapp_bot_service.MENU_PRINCIPAL
+    # La respuesta sale al número real, no al identificador @lid.
+    assert envios == [
+        {"telefono": TELEFONO_REAL, "texto": whatsapp_bot_service.MENU_PRINCIPAL}
+    ]
+    payload = whatsapp_service.construir_payload_texto(data["telefono"], "Hola")
+    assert payload["chatId"] == f"{TELEFONO_REAL}@c.us"
+
+
+def test_el_numero_real_tambien_aparece_en_sender_pn_o_participant_alt(client, envios):
+    for campo in ("senderPn", "participantAlt"):
+        evento = _payload_texto("hola", from_=LID)
+        evento["payload"]["_data"] = {"key": {campo: JID_REAL}}
+
+        r = client.post(f"{API}/whatsapp/webhook", json=evento)
+
+        assert r.status_code == 200, r.text
+        assert r.json()["telefono"] == TELEFONO_REAL
+    assert [envio["telefono"] for envio in envios] == [TELEFONO_REAL, TELEFONO_REAL]
+
+
+@pytest.mark.parametrize("alt", [None, "99999999999999@lid"])
+def test_sin_numero_real_el_webhook_contesta_al_lid_original(client, envios, alt):
+    r = client.post(f"{API}/whatsapp/webhook", json=_payload_lid("hola", alt=alt))
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["tipo"] == "BOT"
+    assert data["telefono"] == LID
+    assert envios == [{"telefono": LID, "texto": whatsapp_bot_service.MENU_PRINCIPAL}]
+    # El chatId viaja intacto: sin 549 adelante y sin cambiarle el dominio.
+    payload = whatsapp_service.construir_payload_texto(data["telefono"], "Hola")
+    assert payload["chatId"] == LID
+
+
+def test_un_lid_con_numero_real_confirma_el_turno_del_paciente(
+    client, envios, doctor, paciente
+):
+    turno, _ = _recordatorio_pendiente(client, doctor, paciente)
+
+    r = client.post(
+        f"{API}/whatsapp/webhook",
+        json=_payload_lid("1", alt=f"{TELEFONO}@s.whatsapp.net"),
+    )
+
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["tipo"] == "CONFIRMACION"
+    assert data["turno_id"] == turno["id"]
+    assert data["estado_turno"] == "CONFIRMADO"
+    assert envios[-1]["texto"] == data["respuesta"]
+    assert envios[-1]["telefono"] == TELEFONO
+
+
+def test_la_conversacion_del_lid_se_guarda_con_el_numero_real(
+    client, db_session, envios
+):
+    client.post(f"{API}/whatsapp/webhook", json=_payload_lid("hola"))
+
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.telefono == TELEFONO_REAL
+    assert conversacion.estado == EstadoConversacionWhatsApp.MENU
+
+
+def test_sin_numero_real_la_conversacion_conserva_el_lid(client, db_session, envios):
+    client.post(f"{API}/whatsapp/webhook", json=_payload_lid("hola", alt=None))
+
+    conversacion = db_session.query(ConversacionWhatsApp).one()
+    assert conversacion.telefono == LID
 
 
 # ---------------------------------------------------------------------------

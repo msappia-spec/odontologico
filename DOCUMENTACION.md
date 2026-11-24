@@ -476,8 +476,12 @@ adicional.
 1. `whatsapp_service.extraer_mensaje()` descarta `fromMe`, grupos (`@g.us`),
    estados (`@broadcast`), eventos distintos de `message` y mensajes vacíos.
    Esos casos responden `200` con `tipo = IGNORADO`.
-2. Extrae el teléfono desde `payload.from` (quitando `@c.us`) y el texto desde
-   `payload.body`.
+2. Extrae el teléfono desde `payload.from`. Si termina en `@lid`
+   (identificador de privacidad de WhatsApp), busca el número real en
+   `payload._data.key.remoteJidAlt` (o `senderPn` / `participantAlt`), le quita
+   `@s.whatsapp.net` o `@c.us` y usa ese número; si no viniera, contesta al
+   `@lid` original. Los `@lid` nunca se normalizan con `549` ni se les cambia
+   el dominio (dejarían de existir). El texto sale de `payload.body`.
 3. `whatsapp_bot_service.responder_mensaje()` normaliza texto y teléfono y
    consulta `conversaciones_whatsapp`.
 4. Si hay un recordatorio pendiente, `1`/`si` confirma y `2`/`no` cancela el
@@ -944,7 +948,7 @@ Si no hay pendientes, responde `422`.
 | `reporte_pdf_service.py` | `pdf_presentacion_obra_social`, `pdf_liquidacion_profesionales`, `nombre_archivo_presentacion`, `nombre_archivo_liquidacion` | Render PDF de los dos reportes de facturación. |
 | `whatsapp_menu_service.py` | `opciones_por_defecto`, `contar_opciones`, `listar_opciones`, `obtener_menu_vigente`, `obtener_opcion`, `crear_opcion`, `actualizar_opcion`, `desactivar_opcion`, `sembrar_menu_por_defecto`, `restaurar_menu_por_defecto` | Menú configurable, unicidad de tecla y seed inicial. |
 | `whatsapp_bot_service.py` | `normalizar_texto`, `detectar_opcion`, `es_saludo_inicial`, `normalizar_destinatario`, `formatear_importe`, `obtener_prestacion_consulta`, `listar_obras_sociales_activas`, `mensaje_menu`, `mensaje_precio_consulta`, `mensaje_obras_sociales`, `mensaje_ubicacion`, `responder_mensaje` | Árbol de decisión del FAQ Bot y redacción de respuestas. |
-| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `enviar_recordatorios`, `es_evento_de_mensaje`, `telefono_de_chat`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA, recordatorios, webhook y enlaces `wa.me`. |
+| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `enviar_recordatorios`, `es_evento_de_mensaje`, `telefono_de_chat`, `numero_real_de_mensaje`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA, recordatorios, webhook (incluye remitentes `@lid`) y enlaces `wa.me`. |
 | `whatsapp_conversacion_service.py` | `obtener_conversacion`, `marcar_confirmacion_pendiente`, `marcar_menu`, `cerrar_confirmacion`, `obtener_confirmacion_pendiente` | Estado de conversación por teléfono (menú / confirmación pendiente). |
 
 **Orden de dependencia entre servicios (resumen):**

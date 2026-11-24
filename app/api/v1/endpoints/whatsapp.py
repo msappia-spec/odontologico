@@ -9,6 +9,12 @@ El ``POST /whatsapp/webhook`` recibe los eventos de WAHA. Sólo procesa
   que muestra el menú numerado configurable desde *Bot WhatsApp*
   (``/whatsapp/menu``).
 
+WhatsApp puede entregar el remitente como un identificador de privacidad
+(``50783827554549@lid``) en lugar del número. En ese caso el webhook usa el
+teléfono real que WAHA publica en ``payload._data.key`` (``remoteJidAlt``,
+``senderPn`` o ``participantAlt``) y, si no viniera, contesta al ``@lid``
+original: el detalle está en ``whatsapp_service.extraer_mensaje``.
+
 El GET de verificación de Meta ya no existe: WAHA no lo usa. El panel también
 ofrece el enlace *Click-to-Chat* de los recordatorios pendientes.
 """
@@ -96,6 +102,10 @@ def _procesar_texto_del_bot(
         "Procesa los eventos de WAHA. Sólo se atienden los mensajes de pacientes "
         "('event': 'message', 'fromMe': false y remitente distinto de un grupo "
         "o estado); el resto se responde 200 con 'tipo': 'IGNORADO'.\n\n"
+        "Si el remitente llega como identificador de privacidad ('...@lid'), se "
+        "usa el número real de 'payload._data.key' ('remoteJidAlt', 'senderPn' "
+        "o 'participantAlt') y la respuesta sale a ese número; sin él se "
+        "contesta al mismo '@lid'.\n\n"
         "* Si hay un recordatorio pendiente para ese teléfono, '1' o 'si' "
         "confirma el turno y '2' o 'no' lo cancela ('tipo': 'CONFIRMACION').\n"
         "* Cualquier otro texto lo contesta el *FAQ Bot* con el menú numerado "

@@ -40,6 +40,7 @@ from app.core.config import settings
 from app.core.money import redondear_monto
 from app.core.whatsapp_utils import (
     formatear_fecha_recordatorio,
+    normalizar_destinatario_waha,
     normalizar_telefono_waha,
     profesional_con_articulo,
 )
@@ -189,8 +190,14 @@ def es_saludo_inicial(texto_normalizado: str) -> bool:
 
 
 def normalizar_destinatario(telefono: Optional[str]) -> str:
-    """Deja el número en el formato canónico de WAHA (``549...``)."""
-    return normalizar_telefono_waha(telefono)
+    """Clave canónica del contacto: ``549...`` para teléfonos y ``@lid`` intacto.
+
+    Los ``@lid`` son identificadores opacos de WhatsApp: se conservan tal cual
+    para que la respuesta vuelva al mismo chat y la fila de
+    ``conversaciones_whatsapp`` siga coincidiendo (ver
+    :func:`app.core.whatsapp_utils.normalizar_destinatario_waha`).
+    """
+    return normalizar_destinatario_waha(telefono)
 
 
 def formatear_importe(valor: Optional[float]) -> str:

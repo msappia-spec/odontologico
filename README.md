@@ -1905,6 +1905,16 @@ muestra el **menú principal numerado**.
 Los mensajes se parsean con esquemas Pydantic tolerantes a campos extra. Los
 eventos ignorados también responden `200`.
 
+**Remitentes con `@lid`** → WhatsApp puede entregar el chat con un identificador
+de privacidad (`50783827554549@lid`) en lugar del número. El webhook busca el
+teléfono real en `payload._data.key` (`remoteJidAlt`; `senderPn` y
+`participantAlt` como respaldo), lo limpia de `@s.whatsapp.net` / `@c.us` y usa
+ese número: así la confirmación coincide con el teléfono de la ficha y la
+respuesta sale a `549...@c.us`. Si WAHA no manda el número real, se contesta al
+`@lid` original. En el envío, `construir_chat_id_waha` deja intactos los `@lid`
+y los `@c.us` y sólo aplica la normalización argentina (`549...@c.us`) cuando
+recibe un teléfono limpio.
+
 ### Recordatorios por enlace *Click-to-Chat*
 
 Como alternativa manual a WAHA, el panel ofrece la vía gratuita: el backend

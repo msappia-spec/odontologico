@@ -32,9 +32,12 @@ from app.core.whatsapp_utils import (  # noqa: F401
     MESES,
     construir_chat_id_waha,
     construir_enlace_click_to_chat,
+    es_identificador_lid,
     formatear_fecha_recordatorio,
+    normalizar_destinatario_waha,
     normalizar_telefono_waha,
     normalizar_telefono_whatsapp,
+    numero_de_jid,
     profesional_con_articulo,
     solo_digitos,
 )
@@ -357,11 +360,43 @@ def es_evento_de_mensaje(payload: WAHAWebhookPayload) -> bool:
 
 
 def telefono_de_chat(chat_id: Optional[str]) -> str:
-    """Extrae el número canónico del ``from`` de WAHA (``549...@c.us``)."""
+    """Extrae el teléfono canónico del ``from`` de WAHA (``549...@c.us``).
+
+    Los ``@lid`` son identificadores opacos de WhatsApp (privacidad del
+    número): no contienen un teléfono, así que se devuelven tal cual para poder
+    contestarle al mismo chat. El número real, cuando viene, lo resuelve
+    :func:`numero_real_de_mensaje`.
+    """
     crudo = (chat_id or "").strip()
-    if "@" in crudo:
-        crudo = crudo.split("@", 1)[0]
-    return normalizar_telefono_waha(crudo)
+    if not crudo:
+        return ""
+    if es_identificador_lid(crudo):
+        return crudo
+    return numero_de_jid(crudo)
+
+
+def numero_real_de_mensaje(mensaje: WAHAMessagePayload) -> str:
+    """Teléfono real del paciente cuando WhatsApp entrega el chat como ``@lid``.
+
+    WAHA publica la clave interna del mensaje en ``payload._data.key``: ahí
+    ``remoteJidAlt`` (y, según la versión, ``senderPn`` o ``participantAlt``)
+    trae el número de verdad, por ejemplo ``5493515945075@s.whatsapp.net``.
+
+    :return: el teléfono normalizado (``549...``) o ``""`` si no viene.
+    """
+    datos = mensaje.raw_data
+    clave = datos.key if datos is not None else None
+    if clave is None:
+        return ""
+    for candidato in (
+        clave.remote_jid_alt,
+        clave.sender_pn,
+        clave.participant_alt,
+    ):
+        numero = numero_de_jid(candidato)
+        if numero:
+            return numero
+    return ""
 
 
 def extraer_mensaje(
@@ -371,6 +406,11 @@ def extraer_mensaje(
 
     Aplica los filtros de :func:`es_evento_de_mensaje` y descarta los mensajes sin
     remitente o sin texto: no hay nada que contestar y WAHA no debe reintentar.
+
+    Si el ``from`` es un ``@lid`` se usa el número real que viene en
+    ``payload._data.key`` (así la respuesta coincide con el teléfono de la
+    ficha del paciente); si no estuviera, se devuelve el ``@lid`` original para
+    contestarle a ese mismo chat.
     """
     if not es_evento_de_mensaje(payload):
         return None
@@ -378,6 +418,8 @@ def extraer_mensaje(
     mensaje = payload.payload
     assert mensaje is not None  # garantizado por es_evento_de_mensaje
     telefono = telefono_de_chat(mensaje.from_)
+    if es_identificador_lid(telefono):
+        telefono = numero_real_de_mensaje(mensaje) or telefono
     texto = (mensaje.body or "").strip()
     if not telefono or not texto:
         return None

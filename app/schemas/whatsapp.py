@@ -12,6 +12,35 @@ from app.models.enums import EstadoTurno, EstadoWhatsApp
 # ---------------------------------------------------------------------------
 
 
+class WAHAKeyPayload(BaseModel):
+    """``payload._data.key``: los JID internos que arma whatsmeow.
+
+    WhatsApp puede entregar el chat con un identificador de privacidad
+    (``@lid``) en lugar del número del paciente. Cuando eso pasa, el teléfono
+    real viene en ``remoteJidAlt`` y, según la versión de WAHA y el tipo de
+    chat, también en ``senderPn`` o ``participantAlt``, siempre con el formato
+    ``549...@s.whatsapp.net``.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    remote_jid_alt: Optional[str] = Field(default=None, alias="remoteJidAlt")
+    sender_pn: Optional[str] = Field(default=None, alias="senderPn")
+    participant_alt: Optional[str] = Field(default=None, alias="participantAlt")
+
+
+class WAHAMessageData(BaseModel):
+    """``payload._data``: estructura cruda del mensaje que agrega WAHA.
+
+    Se modela sólo lo que necesita el webhook (la clave con los JID) y el resto
+    se ignora: WAHA agrega ahí decenas de campos internos de whatsmeow.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    key: Optional[WAHAKeyPayload] = None
+
+
 class WAHAMessagePayload(BaseModel):
     """Mensaje dentro del campo ``payload`` del evento de WAHA."""
 
@@ -30,6 +59,14 @@ class WAHAMessagePayload(BaseModel):
     )
     timestamp: Optional[int | str] = None
     type: Optional[str] = None
+    raw_data: Optional[WAHAMessageData] = Field(
+        default=None,
+        alias="_data",
+        description=(
+            "Datos crudos de whatsmeow; 'key.remoteJidAlt' trae el número real "
+            "del paciente cuando el remitente llega como '@lid'."
+        ),
+    )
 
 
 class WAHAWebhookPayload(BaseModel):

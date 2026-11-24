@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.datetime_utils import utcnow
-from app.core.whatsapp_utils import normalizar_telefono_waha
+from app.core.whatsapp_utils import normalizar_destinatario_waha
 from app.models.conversacion_whatsapp import ConversacionWhatsApp
 from app.models.enums import EstadoConversacionWhatsApp, EstadoTurno
 from app.models.turno import Turno
@@ -32,8 +32,11 @@ def normalizar_telefono_contacto(telefono: Optional[str]) -> str:
     Se usa ``549...`` para que el teléfono guardado en la ficha (que puede estar
     en formato local, con ``0`` y ``15``) coincida con el ``from`` que envía WAHA
     (``549...@c.us``) y la confirmación pendiente se encuentre.
+
+    Los identificadores ``@lid`` (privacidad del número) se conservan tal cual:
+    no son teléfonos y normalizarlos los convierte en un número inexistente.
     """
-    return normalizar_telefono_waha(telefono)
+    return normalizar_destinatario_waha(telefono)
 
 
 def obtener_conversacion(

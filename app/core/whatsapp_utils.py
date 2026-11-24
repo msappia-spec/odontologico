@@ -161,13 +161,91 @@ def normalizar_telefono_waha(telefono: Optional[str]) -> str:
     return "549" + _quitar_prefijo_movil_15(digitos)
 
 
+#: Dominio de los identificadores opacos de WhatsApp (privacidad del número).
+#: No son teléfonos: ``50783827554549@lid`` es un chat válido pero sin dígitos
+#: de teléfono, así que normalizarlo lo convierte en un destinatario inválido.
+DOMINIO_LID = "@lid"
+
+#: Dominios de los JID que sí contienen el número real del contacto.
+DOMINIOS_TELEFONO = ("@s.whatsapp.net", "@c.us")
+
+
+def es_identificador_lid(valor: Optional[str]) -> bool:
+    """Indica si ``valor`` es un ``chatId`` opaco de WhatsApp (``...@lid``)."""
+    return (valor or "").strip().lower().endswith(DOMINIO_LID)
+
+
+def numero_de_jid(jid: Optional[str]) -> str:
+    """Extrae el teléfono (``549...``) de un JID de WhatsApp.
+
+    Devuelve ``""`` cuando el valor no trae un número: identificadores
+    ``@lid``, grupos (``@g.us``), estados (``@broadcast``) o texto sin dígitos.
+    También descarta el sufijo de dispositivo que agrega whatsmeow
+    (``5493515945075:12@s.whatsapp.net``).
+
+    Ejemplos::
+
+        "5493515945075@s.whatsapp.net" -> "5493515945075"
+        "5493515945075@c.us"           -> "5493515945075"
+        "+54 9 351 594-5075"           -> "5493515945075"
+        "50783827554549@lid"           -> ""
+    """
+    crudo = (jid or "").strip()
+    if not crudo or es_identificador_lid(crudo):
+        return ""
+
+    bajo = crudo.lower()
+    for dominio in DOMINIOS_TELEFONO:
+        if bajo.endswith(dominio):
+            crudo = crudo[: -len(dominio)]
+            break
+    else:
+        if "@" in crudo:
+            # Grupo (@g.us), estado (@broadcast) u otro JID sin teléfono.
+            return ""
+
+    return normalizar_telefono_waha(crudo.split(":", 1)[0])
+
+
+def normalizar_destinatario_waha(valor: Optional[str]) -> str:
+    """Clave canónica de un contacto: ``549...`` para teléfonos, ``@lid`` intacto.
+
+    WAHA entrega algunos mensajes con un identificador ``@lid`` en lugar del
+    número. Ese valor **no** es un teléfono: si se le antepone ``549`` y se le
+    cambia el dominio, la respuesta no llega a nadie ni coincide con el
+    teléfono guardado en la ficha del paciente. Por eso se conserva tal cual.
+    """
+    crudo = (valor or "").strip()
+    if not crudo:
+        return ""
+    if es_identificador_lid(crudo):
+        return crudo
+    return normalizar_telefono_waha(crudo)
+
+
 def construir_chat_id_waha(telefono: Optional[str]) -> str:
     """Arma el ``chatId`` que exige WAHA (``<número>@c.us``).
+
+    Reglas:
+
+    * Un ``chatId`` ya armado (``...@c.us`` o ``...@lid``) se devuelve tal
+      cual: el ``@lid`` es un identificador opaco y normalizarlo lo rompe.
+    * Un JID de teléfono (``...@s.whatsapp.net``) se pasa a ``...@c.us``.
+    * Un teléfono limpio (``5493515945075`` o ``+54 9 351 594-5075``) se
+      normaliza al formato argentino y se le agrega ``@c.us``.
 
     :return: el identificador listo para ``/api/sendText`` o ``""`` si no hay
         un teléfono utilizable.
     """
-    numero = normalizar_telefono_waha(telefono)
+    crudo = (telefono or "").strip()
+    if not crudo:
+        return ""
+
+    bajo = crudo.lower()
+    if bajo.endswith(DOMINIO_LID) or bajo.endswith("@c.us"):
+        return crudo
+
+    numero = numero_de_jid(crudo)
     return f"{numero}@c.us" if numero else ""
 
 
