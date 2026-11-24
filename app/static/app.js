@@ -1496,6 +1496,21 @@
     }
   }
 
+  /* Refresco liviano de la agenda: vuelve a pedir sólo los turnos y redibuja el
+     panel y el calendario. Sirve para ver lo que cambió por fuera del panel,
+     como la respuesta «1/SI» o «2/NO» de un paciente al recordatorio, que el
+     webhook guarda como CONFIRMADO / CANCELADO sin que la secretaría haga nada. */
+  async function refrescarTurnos() {
+    try {
+      state.turnos = (await api("/turnos?limit=500")) || [];
+      renderDashboard();
+      renderAgenda();
+      document.dispatchEvent(new CustomEvent("odonto:datos"));
+    } catch (_err) {
+      /* Es un refresco de cortesía: la vista conserva lo que ya tenía. */
+    }
+  }
+
   function estadoApi(ok) {
     const dot = document.getElementById("api-status-dot");
     const txt = document.getElementById("api-status-text");
@@ -6112,6 +6127,12 @@
       actualizarSubtituloRecordatorios();
       cargarRecordatorios();
     }
+    if (v === "dashboard" || v === "calendario") {
+      // La respuesta del paciente al recordatorio (1/SI o 2/NO) llega por el
+      // webhook de WhatsApp y cambia el turno sin pasar por el panel: al volver
+      // a la agenda se releen los turnos para mostrar CONFIRMADO / CANCELADO.
+      refrescarTurnos();
+    }
     if (v === "fichas-salud") {
       // El panel de anamnesis se refresca al entrar para ver los cambios que
       // hizo el paciente desde el enlace público.
@@ -7163,6 +7184,14 @@
         `${ICON.whatsapp}<span>Enviar por WhatsApp</span></a>`
       : `<span class="btn-wa btn-wa-off" title="El paciente no tiene un teléfono válido cargado">` +
         `${ICON.whatsapp}<span>Sin teléfono</span></span>`;
+    // Envío automático: lo manda el servidor con la API de WAHA, sin abrir el
+    // celular. El backend marca el turno y deja la conversación esperando el
+    // 1/SI o 2/NO del paciente.
+    const automatico = r.telefono_whatsapp
+      ? `<button type="button" class="btn btn-primary btn-sm" data-rec-api="${r.turno_id}" ` +
+        `title="Enviar el recordatorio automáticamente con la API de WhatsApp">` +
+        `${ICON.whatsapp}<span>Enviar automático</span></button>`
+      : "";
 
     return (
       `<div class="turno-row rec-row" data-rec-fila="${r.turno_id}">` +
@@ -7187,8 +7216,8 @@
           `</div>` +
           `<p class="rec-mensaje" title="Mensaje que se enviará">${esc(r.mensaje)}</p>` +
         `</div>` +
-        `<div class="rec-acciones">${boton}` +
-          `<span class="text-[10px] text-slate-400 text-right leading-tight">Al abrirlo se marca<br>como enviado</span>` +
+        `<div class="rec-acciones">${boton}${automatico}` +
+          `<span class="text-[10px] text-slate-400 text-right leading-tight">Al enviarlo se marca<br>como enviado</span>` +
         `</div>` +
       `</div>`
     );
@@ -7235,32 +7264,162 @@
   }
 
   // Marca el turno como ENVIADO después de abrir el enlace de WhatsApp. El
-  // backend acepta estado_whatsapp en el PATCH /turnos/{id}, así que la fila se
-  // quita de la lista sin recargar todo el panel.
+  // backend además deja el teléfono esperando la respuesta, así que el "1"/"si"
+  // o "2"/"no" del paciente confirma o cancela el turno aunque el mensaje haya
+  // salido a mano desde el WhatsApp del consultorio.
   async function marcarRecordatorioEnviado(turnoId, paciente) {
     const fila = document.querySelector(`[data-rec-fila="${turnoId}"]`);
     if (fila) fila.classList.add("enviando");
     try {
-      await api(`/turnos/${turnoId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ estado_whatsapp: "ENVIADO" }),
+      const r = await api(`/whatsapp/recordatorios-pendientes/${turnoId}/enviado`, {
+        method: "POST",
       });
       state.recordatorios = state.recordatorios.filter(
-        (r) => String(r.turno_id) !== String(turnoId)
+        (x) => String(x.turno_id) !== String(turnoId)
       );
       const turno = state.turnos.find((t) => String(t.id) === String(turnoId));
-      if (turno) turno.estado_whatsapp = "ENVIADO";
+      if (turno) turno.estado_whatsapp = r.estado_whatsapp;
       renderRecordatorios();
       renderDashboard();
       toast(
         "exito",
         "WhatsApp abierto",
-        `${paciente || "Turno #" + turnoId} · recordatorio marcado como enviado.`
+        `${paciente || "Turno #" + turnoId} · recordatorio marcado como enviado. ` +
+          (r.confirmacion_pendiente
+            ? "Cuando responda 1/SI o 2/NO el turno se actualiza solo."
+            : "Sin teléfono válido no se puede procesar la respuesta.")
       );
     } catch (err) {
       if (fila) fila.classList.remove("enviando");
       toast("error", "No se pudo marcar el recordatorio como enviado", err.message);
     }
+  }
+
+  // Envío automático de un recordatorio puntual: el servidor manda el mensaje
+  // con la API de WAHA, marca el turno en ENVIADO y deja la conversación
+  // esperando la respuesta del paciente (1/SI confirma, 2/NO cancela).
+  async function enviarRecordatorioPorApi(turnoId, paciente) {
+    const fila = document.querySelector(`[data-rec-fila="${turnoId}"]`);
+    const btn = document.querySelector(`[data-rec-api="${turnoId}"]`);
+    if (fila) fila.classList.add("enviando");
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.txt = btn.innerHTML;
+      btn.innerHTML = `<span>Enviando…</span>`;
+    }
+    try {
+      const r = await api(`/whatsapp/recordatorios-pendientes/${turnoId}/enviar`, {
+        method: "POST",
+      });
+      if (r.resultado !== "ENVIADO") {
+        throw new Error(r.error || "El servidor no pudo enviar el recordatorio.");
+      }
+      state.recordatorios = state.recordatorios.filter(
+        (x) => String(x.turno_id) !== String(turnoId)
+      );
+      const turno = state.turnos.find((t) => String(t.id) === String(turnoId));
+      if (turno) turno.estado_whatsapp = "ENVIADO";
+      renderRecordatorios();
+      renderDashboard();
+      if (r.simulado) {
+        toast(
+          "info",
+          "Envío simulado",
+          "El servidor no tiene credenciales de WhatsApp (WAHA_URL / WAHA_API_KEY): " +
+            "el mensaje no salió. Usá el botón verde o configurá la API."
+        );
+      } else {
+        toast(
+          "exito",
+          "Recordatorio enviado",
+          `${paciente || "Turno #" + turnoId} · el paciente ya puede responder 1/SI o 2/NO ` +
+            "y el turno se confirma o cancela solo."
+        );
+      }
+    } catch (err) {
+      if (fila) fila.classList.remove("enviando");
+      if (btn) {
+        btn.disabled = false;
+        if (btn.dataset.txt) btn.innerHTML = btn.dataset.txt;
+      }
+      toast("error", "No se pudo enviar el recordatorio", err.message);
+    }
+  }
+
+  // "Enviar todos": recorre la lista de a un turno con el mismo endpoint que el
+  // botón de cada fila. Va de a uno para no saturar la sesión de WAHA (que
+  // recomienda espaciar los envíos) y para que la lista se actualice a medida
+  // que cada paciente queda avisado.
+  async function enviarRecordatoriosTodos() {
+    const pendientes = state.recordatorios.filter((r) => r.telefono_whatsapp);
+    const sinTelefono = state.recordatorios.length - pendientes.length;
+    if (!pendientes.length) {
+      toast(
+        "info",
+        "Nada para enviar",
+        "Los turnos de la lista no tienen un teléfono válido para WhatsApp."
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `¿Enviar el recordatorio automáticamente a ${pendientes.length} ` +
+        `paciente${pendientes.length === 1 ? "" : "s"}?` +
+        (sinTelefono
+          ? ` Los otros ${sinTelefono} no tienen teléfono y se saltean.`
+          : "") +
+        " El mensaje sale desde el WhatsApp del consultorio y el paciente " +
+        "confirma respondiendo 1/SI o 2/NO."
+    );
+    if (!ok) return;
+
+    const btn = document.getElementById("rec-enviar-todos");
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.txt = btn.innerHTML;
+      btn.innerHTML = `<span>Enviando…</span>`;
+    }
+    let enviados = 0;
+    let fallidos = 0;
+    let simulados = 0;
+    for (const r of pendientes) {
+      try {
+        const res = await api(
+          `/whatsapp/recordatorios-pendientes/${r.turno_id}/enviar`,
+          { method: "POST" }
+        );
+        if (res.resultado !== "ENVIADO") {
+          fallidos += 1;
+          continue;
+        }
+        enviados += 1;
+        if (res.simulado) simulados += 1;
+        state.recordatorios = state.recordatorios.filter(
+          (x) => String(x.turno_id) !== String(r.turno_id)
+        );
+        const turno = state.turnos.find((t) => String(t.id) === String(r.turno_id));
+        if (turno) turno.estado_whatsapp = "ENVIADO";
+        renderRecordatorios();
+      } catch (_err) {
+        fallidos += 1;
+      }
+    }
+    if (btn) {
+      btn.disabled = false;
+      if (btn.dataset.txt) btn.innerHTML = btn.dataset.txt;
+    }
+    renderRecordatorios();
+    renderDashboard();
+    const detalle =
+      `${enviados} enviado${enviados === 1 ? "" : "s"}` +
+      (fallidos ? `, ${fallidos} con error` : "") +
+      (simulados
+        ? `. ${simulados} simulado${simulados === 1 ? "" : "s"}: el servidor no tiene credenciales de WhatsApp.`
+        : ".");
+    toast(
+      fallidos ? "error" : simulados ? "info" : "exito",
+      "Recordatorios automáticos",
+      detalle
+    );
   }
 
   /* ------------------------- Fichas de salud (Módulo 4) ------------------ */
@@ -7991,6 +8150,11 @@
     document.getElementById("rec-actualizar").addEventListener("click", function () {
       cargarRecordatorios(true);
     });
+    // Envío automático de toda la lista (uno por uno con la API de WAHA).
+    const btnEnviarTodos = document.getElementById("rec-enviar-todos");
+    if (btnEnviarTodos) {
+      btnEnviarTodos.addEventListener("click", enviarRecordatoriosTodos);
+    }
     const selectorDias = document.getElementById("rec-dias");
     if (selectorDias) {
       selectorDias.value = String(diasRecordatorio());
@@ -8249,7 +8413,8 @@
 
     // Delegación: botón verde de WhatsApp de cada recordatorio pendiente. El <a>
     // abre wa.me en otra pestaña (navegación por defecto del enlace); este
-    // manejador sólo marca el turno como ENVIADO, sin cancelar el clic.
+    // manejador sólo marca el turno como ENVIADO y deja el teléfono esperando la
+    // respuesta, sin cancelar el clic.
     document.addEventListener("click", function (e) {
       const btn = e.target.closest("[data-rec-enviar]");
       if (!btn) return;
@@ -8257,6 +8422,16 @@
         (x) => String(x.turno_id) === String(btn.dataset.recEnviar)
       );
       marcarRecordatorioEnviado(btn.dataset.recEnviar, r ? r.paciente : "");
+    });
+
+    // Delegación: envío automático por la API de WAHA de una fila de la lista.
+    document.addEventListener("click", function (e) {
+      const btn = e.target.closest("[data-rec-api]");
+      if (!btn) return;
+      const r = state.recordatorios.find(
+        (x) => String(x.turno_id) === String(btn.dataset.recApi)
+      );
+      enviarRecordatorioPorApi(btn.dataset.recApi, r ? r.paciente : "");
     });
 
     /* Delegación: botón "Cobrar" de la tarjeta de un turno (agenda del día y
@@ -8860,6 +9035,14 @@
     document.getElementById("agenda-fecha").value = state.agendaFecha;
     cambiarVista(state.vista);
     cargarTodo();
+    // Las respuestas de WhatsApp (1/SI o 2/NO) llegan por el webhook y cambian
+    // el turno sin pasar por el panel: cada minuto, con la pestaña visible y la
+    // agenda abierta, se releen los turnos para mostrar CONFIRMADO / CANCELADO.
+    setInterval(function () {
+      if (document.visibilityState !== "visible") return;
+      if (state.vista !== "dashboard" && state.vista !== "calendario") return;
+      refrescarTurnos();
+    }, 60000);
   });
   /* --------------------- Puente para módulos externos -------------------- */
   // calendar.js (calendario mensual + panel de disponibilidad) consume esta API
@@ -8901,6 +9084,9 @@
     renderAgenda,
     renderRecordatorios,
     cargarRecordatorios,
+    refrescarTurnos,
+    enviarRecordatoriosTodos,
+    enviarRecordatorioPorApi,
     // Fichas de salud (Módulo 4: anamnesis)
     renderFichasSalud,
     cargarFichasSalud,

@@ -187,8 +187,22 @@ class RecordatorioEnviado(BaseModel):
     telefono: str
     doctor: str
     fecha_hora_inicio: str
-    resultado: str  # ENVIADO | FALLIDO
+    resultado: str = Field(
+        ...,
+        description=(
+            "Resultado del envío: 'ENVIADO' (WAHA aceptó el mensaje), 'FALLIDO' "
+            "(WAHA o la red devolvieron un error) o 'SIN_TELEFONO' (el paciente "
+            "no tiene un número utilizable)."
+        ),
+    )
     whatsapp_mensaje_id: Optional[str] = None
+    simulado: bool = Field(
+        default=False,
+        description=(
+            "True cuando el servidor no tiene credenciales de WAHA: el mensaje "
+            "NO salió y sólo se registró el envío simulado."
+        ),
+    )
     error: Optional[str] = None
 
 
@@ -240,3 +254,26 @@ class RecordatorioPendiente(BaseModel):
             "teléfono válido cargado."
         ),
     )
+
+
+class RecordatorioMarcado(BaseModel):
+    """Resultado de marcar un recordatorio como enviado desde el panel.
+
+    Lo devuelve ``POST /whatsapp/recordatorios-pendientes/{turno_id}/enviado``
+    cuando la secretaría manda el mensaje a mano (Click-to-Chat): además de
+    dejar el turno en ``ENVIADO``, el teléfono queda esperando la respuesta para
+    que el próximo ``1`` / ``si`` o ``2`` / ``no`` del paciente confirme o
+    cancele el turno.
+    """
+
+    turno_id: int
+    estado_turno: EstadoTurno
+    estado_whatsapp: EstadoWhatsApp
+    confirmacion_pendiente: bool = Field(
+        ...,
+        description=(
+            "True si el teléfono del paciente quedó esperando la confirmación "
+            "del turno (sin teléfono válido no hay a quién correlacionar)."
+        ),
+    )
+    whatsapp_mensaje_id: Optional[str] = None

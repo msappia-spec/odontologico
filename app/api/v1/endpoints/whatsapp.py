@@ -16,7 +16,9 @@ teléfono real que WAHA publica en ``payload._data.key`` (``remoteJidAlt``,
 original: el detalle está en ``whatsapp_service.extraer_mensaje``.
 
 El GET de verificación de Meta ya no existe: WAHA no lo usa. El panel también
-ofrece el enlace *Click-to-Chat* de los recordatorios pendientes.
+ofrece el enlace *Click-to-Chat* de los recordatorios pendientes y el **envío
+automático** de cada uno por la API de WAHA
+(``POST /whatsapp/recordatorios-pendientes/{turno_id}/enviar``).
 """
 
 import logging
@@ -29,6 +31,8 @@ from app.core.config import settings
 from app.core.exceptions import WhatsAppEnvioError
 from app.db.session import get_db
 from app.schemas.whatsapp import (
+    RecordatorioEnviado,
+    RecordatorioMarcado,
     RecordatorioPendiente,
     WAHAWebhookPayload,
     WebhookProcesadoResponse,
@@ -169,3 +173,45 @@ def listar_recordatorios_pendientes(
     db: Session = Depends(get_db),
 ) -> List[RecordatorioPendiente]:
     return whatsapp_service.listar_recordatorios_click_to_chat(db, dias=dias)
+
+
+@router.post(
+    "/recordatorios-pendientes/{turno_id}/enviar",
+    response_model=RecordatorioEnviado,
+    status_code=status.HTTP_200_OK,
+    summary="Enviar un recordatorio automático por WAHA",
+    description=(
+        "Envía el recordatorio de un turno con la misma API de WAHA que la "
+        "tarea programada ('POST {WAHA_URL}/api/sendText'): el mensaje sale "
+        "solo, sin abrir WhatsApp. El turno queda en 'ENVIADO' y la "
+        "conversación del teléfono queda esperando la respuesta, así que el "
+        "'1' / 'si' del paciente lo confirma y el '2' / 'no' lo cancela.\n\n"
+        "Si el servidor no tiene credenciales de WAHA el envío se **simula** "
+        "('simulado': true) y el panel avisa que el mensaje no salió."
+    ),
+)
+def enviar_recordatorio_pendiente(
+    turno_id: int,
+    db: Session = Depends(get_db),
+) -> RecordatorioEnviado:
+    return whatsapp_service.enviar_recordatorio_pendiente(db, turno_id)
+
+
+@router.post(
+    "/recordatorios-pendientes/{turno_id}/enviado",
+    response_model=RecordatorioMarcado,
+    status_code=status.HTTP_200_OK,
+    summary="Marcar como enviado el recordatorio mandado por Click-to-Chat",
+    description=(
+        "Lo llama el panel cuando la secretaría abre el enlace 'wa.me' y manda "
+        "el mensaje desde el WhatsApp del consultorio. Deja el turno en "
+        "'ENVIADO' y registra que ese teléfono espera la confirmación: la "
+        "respuesta del paciente ('1' / 'si' o '2' / 'no') confirma o cancela "
+        "el turno en la base y el panel lo muestra actualizado."
+    ),
+)
+def marcar_recordatorio_enviado(
+    turno_id: int,
+    db: Session = Depends(get_db),
+) -> RecordatorioMarcado:
+    return whatsapp_service.marcar_recordatorio_enviado(db, turno_id)

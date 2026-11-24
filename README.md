@@ -24,10 +24,14 @@ El **Módulo 1** implementa:
    configurable** en la vista *Bot WhatsApp* (texto libre, precio de la consulta,
    obras sociales, ubicación o derivar a una secretaria; lo que no es del menú
    queda como *Atención Manual Requerida*).
-4. **Recordatorios por enlace *Click-to-Chat*** (`GET
-   /api/v1/whatsapp/recordatorios-pendientes`): la pestaña *Recordatorios
-   Pendientes* del panel lista los turnos próximos, arma el enlace `wa.me` con
-   el mensaje ya redactado y, al abrirlo, marca el turno como `ENVIADO`.
+4. **Recordatorios del panel con dos caminos y respuesta automática**
+   (`GET /api/v1/whatsapp/recordatorios-pendientes`): la pestaña *Recordatorios
+   Pendientes* lista los turnos próximos y permite mandar el aviso **por la API
+   de WAHA** (`POST …/{turno_id}/enviar`, envío real sin abrir el celular) o por
+   el enlace *Click-to-Chat* (`wa.me`) con el mensaje ya redactado. En los dos
+   casos el turno queda `ENVIADO` y el teléfono espera la respuesta: si el
+   paciente contesta **1 / SI** el turno pasa a `CONFIRMADO` y si contesta
+   **2 / NO** queda `CANCELADO`, actualizado en la agenda del panel.
 5. **Disponibilidad flexible por odontólogo** (`DisponibilidadDoctor`): rangos
    horarios por día de la semana —**varios por día**, p. ej. lunes 08:00-12:00 y
    16:00-20:00— que la secretaría administra en la pestaña *Disponibilidad*. El
@@ -594,6 +598,7 @@ Odontologico/
 │   ├── test_obras_sociales.py      # Catálogo de coberturas y su vínculo con pacientes
 │   ├── test_pacientes.py
 │   ├── test_recordatorios_click_to_chat.py # Enlaces wa.me y recordatorios pendientes
+│   ├── test_recordatorios_automaticos.py # Envío por WAHA desde el panel y respuesta 1/2
 │   ├── test_seed_nomenclador_cba.py # Seed del nomenclador de Córdoba (idempotente)
 │   ├── test_importar_nomenclador_excel.py # Nomenclador desde Excel (lectura, altas y bajas)
 │   ├── test_ficha_medica.py        # Módulo 4: cabecera, estado bucal y libro de trabajos
@@ -922,7 +927,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Doctores** | Formulario de alta estilizado + tabla con la **forma de pago** de cada profesional, la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT` que incluye el desplegable **Tipo de pago** —*Dueño*, *Comisión por porcentaje* o *Sueldo fijo*— y habilita el campo numérico del porcentaje o del sueldo mensual), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
 | **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**—, Nº de afiliado y **datos filiatorios**: fecha de nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, lugar de trabajo y jerarquía) + tabla de pacientes con acción *Editar*, donde la fecha de nacimiento se muestra con la **edad calculada**. Los filiatorios son los mismos que carga la ficha médica: al guardar la ficha, el panel refresca la tabla de pacientes para mostrar los datos recién sincronizados. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
-| **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. |
+| **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y **dos formas de enviarlo**: el botón **Enviar automático** (API de WAHA, sin abrir el celular) de cada fila o **Enviar todos** para la lista completa, y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. Cuando el paciente responde **1 / SI** el turno queda confirmado y con **2 / NO** se cancela. |
 | **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
 | **Facturación y Caja** | **Módulo 3.** Cinco pestañas: *Caja del día* (KPIs de efectivo, **transferencia**, **ingresos del día** y saldo de obras sociales + movimientos del día con acciones *Cobrar* / *Debitar* y columna **Medio**, más la tabla de **cobros de cuentas corrientes** del día con sus totales por medio), *Liquidación de obras sociales* (cobertura + mes, totales del período, botón **Generar presentación del período**, tildado de órdenes pagadas o debitadas, cierre en lote y **exportación a CSV** o **PDF para la cobertura**), *Liquidación de médicos* (elegís el profesional y el mes: **tabla de subtotales** con la producción, el efectivo, lo presentado a las obras sociales, los honorarios por profesional y los totales del consultorio al pie —según la forma de pago configurada en *Doctores*— más exportación a CSV o **PDF de la liquidación**, que respeta el profesional elegido), *Prestaciones y aranceles* (catálogo de prácticas y tabla de aranceles por cobertura) y *Convenios* (**todo el nomenclador de Córdoba** para la cobertura elegida, con el campo **Monto que cubre la OS**, el **coseguro sugerido** calculado en vivo, los totales de la grilla, guardado en lote y el **importador masivo**: *Descargar Plantilla Excel de Ejemplo* —dos columnas: `codigo` y `precio_cobertura`, en `.csv` o `.xlsx`— + recuadro de **arrastrar y soltar** con vista previa por fila y confirmación). El **formulario de cobro** —que se abre con el botón *Cobrar una visita* o desde la tarjeta de un turno— tiene un **buscador rápido** por código del nomenclador o nombre, muestra por cada práctica su **arancel**, lo que **cubre la obra social** y el **coseguro**, avisa que el saldo queda **PENDIENTE para la liquidación de la cobertura** y calcula el cartel **«Cobrar Coseguro en mostrador: $X.XXX»** con el total de las prácticas; se confirma con **Confirmar y cerrar atención**, que registra el movimiento de caja y finaliza el turno. |
 
@@ -968,23 +973,33 @@ El estado clínico manda sobre el color del odontólogo, tanto en la grilla mens
 | Respondió **Confirmar** | ✔️ **tilde verde** — *Confirmado* |
 | Respondió **Cancelar** | ✖️ **cruz roja** — *Cancelado* |
 
-### Recordatorios Pendientes (*Click-to-Chat*)
+### Recordatorios Pendientes (envío automático y *Click-to-Chat*)
 
-Alternativa **manual** al envío automático por WAHA, pensada para el
-día a día del consultorio: la secretaría abre el chat del paciente con el
-mensaje ya redactado y lo envía desde el WhatsApp del consultorio.
+La pestaña ofrece las dos formas de avisar al paciente, con el mismo mensaje y el
+mismo seguimiento de la respuesta:
 
-- La pestaña **Recordatorios Pendientes** lista los turnos de los próximos
-  **3 días** (la ventana se cambia con el selector *Días a futuro*: 1, 2, 3, 5,
-  7 o 14 días), ordenados cronológicamente, con el teléfono, los días restantes
-  y la vista previa del mensaje.
-- El botón verde **Enviar por WhatsApp** abre
+- **Envío automático por la API (WAHA).** El botón **Enviar automático** de cada
+  fila llama a `POST /api/v1/whatsapp/recordatorios-pendientes/{turno_id}/enviar`
+  y el servidor manda el mensaje con `POST {WAHA_URL}/api/sendText`, desde el
+  WhatsApp del consultorio y sin abrir el celular. **Enviar todos** recorre la
+  lista de a uno (WAHA recomienda espaciar los envíos) y cuenta enviados,
+  fallidos y simulados. Si el servidor no tiene `WAHA_URL`/`WAHA_API_KEY` el
+  envío se **simula** (`simulado: true`) y el panel avisa que el mensaje no salió.
+- **Click-to-Chat (`wa.me`).** El botón verde abre
   `https://wa.me/<teléfono>?text=<mensaje>` con el texto **codificado (URL
-  Encoding)**, en una pestaña nueva. Si el paciente no tiene teléfono, el botón
-  queda deshabilitado.
-- Al abrir el enlace, el panel marca el turno con
-  `PATCH /api/v1/turnos/{id}` (`{"estado_whatsapp": "ENVIADO"}`) **sin tocar el
-  estado clínico**, y el turno desaparece de la lista y del contador.
+  Encoding)** en una pestaña nueva; la secretaría revisa y envía desde el
+  WhatsApp del consultorio. Al abrirlo, el panel llama a
+  `POST /api/v1/whatsapp/recordatorios-pendientes/{turno_id}/enviado`, que marca
+  el turno como `ENVIADO` **sin tocar el estado clínico**. Si el paciente no
+  tiene teléfono, el botón queda deshabilitado y la API responde `422` al
+  intentar el envío automático.
+- **La respuesta del paciente actualiza el turno.** Los dos caminos dejan el
+  teléfono en `CONFIRMACION_TURNO` (`conversaciones_whatsapp`). Cuando el
+  paciente contesta **1 / SI**, el webhook deja el turno en `CONFIRMADO`; con
+  **2 / NO** lo deja en `CANCELADO` y `estado_whatsapp` en `RESPONDIDO`. La
+  agenda y el panel principal releen los turnos **cada minuto** (con la pestaña
+  visible) y al volver a la vista, así el estado nuevo aparece solo: verde si
+  confirmó y gris si canceló.
 - El mensaje no depende del idioma del sistema: la fecha se arma "en letras"
   (`viernes 16 de octubre de 2026 a las 10:00`) y el profesional se nombra con
   su artículo (`con la Dra. Gómez`, `con el Dr. House`). Los teléfonos se
@@ -1009,8 +1024,13 @@ El panel principal consume los mismos endpoints del backend:
 - `POST /api/v1/tareas/enviar-recordatorios` → botones de recordatorios del Panel Principal.
 - `GET /api/v1/whatsapp/recordatorios-pendientes?dias=N` → pestaña **Recordatorios
   Pendientes** (lista, contador del menú y de la cabecera).
-- `PATCH /api/v1/turnos/{id}` con `{"estado_whatsapp": "ENVIADO"}` → se envía al
-  abrir el enlace de WhatsApp de una fila de *Recordatorios Pendientes*.
+- `POST /api/v1/whatsapp/recordatorios-pendientes/{turno_id}/enviar` → botones
+  **Enviar automático** / **Enviar todos** de *Recordatorios Pendientes* (envío
+  real por WAHA, sin abrir el celular).
+- `POST /api/v1/whatsapp/recordatorios-pendientes/{turno_id}/enviado` → se llama al
+  abrir el enlace de WhatsApp de una fila de *Recordatorios Pendientes*; marca el
+  turno como enviado y deja la respuesta del paciente esperando para confirmar o
+  cancelar.
 - `POST /api/v1/whatsapp/webhook` → botones **“Responder: Confirma / Cancela”**,
   que aparecen en el turno una vez enviado el recordatorio. Reproducen un evento
   de WAHA con el teléfono del paciente y el texto `1` o `2`, lo que permite ver
@@ -1479,6 +1499,8 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `PATCH`| `/turnos/{id}` | Actualizar turno (reprogramar, reasignar, cancelar o reactivar) con las mismas validaciones |
 | `GET` / `POST` | `/tareas/enviar-recordatorios` | **Tarea programada** de recordatorios WhatsApp; requiere `Bearer CRON_SECRET` |
 | `GET`  | `/whatsapp/recordatorios-pendientes` | **Recordatorios pendientes** con enlace Click-to-Chat (`?dias=1..30`, por defecto 3) |
+| `POST` | `/whatsapp/recordatorios-pendientes/{turno_id}/enviar` | **Envío automático** del recordatorio por WAHA (`404`, `409` cancelado, `422` sin teléfono) |
+| `POST` | `/whatsapp/recordatorios-pendientes/{turno_id}/enviado` | Marca `ENVIADO` el aviso mandado por Click-to-Chat y deja la confirmación pendiente |
 | `POST` | `/whatsapp/webhook` | **Webhook de WAHA**: `1`/`si` o `2`/`no` confirman/cancelan; otro texto → FAQ Bot o menú |
 | `GET`  | `/whatsapp/menu` | **Bot WhatsApp:** opciones del menú (`?activas=true/false`; sin filtro, todas) |
 | `POST` | `/whatsapp/menu` | Crear opción del menú (tecla única → `409`; `TEXTO` sin `respuesta` → `422`) |

@@ -2,8 +2,8 @@
 
 Contiene tres responsabilidades separadas:
 
-1. **Envío saliente** de recordatorios (tarea programada), que se puede
-   *simular* o *ejecutar* con ``POST {WAHA_URL}/api/sendText``.
+1. **Envío saliente** de recordatorios (tarea programada y botones del panel),
+   que se puede *simular* o *ejecutar* con ``POST {WAHA_URL}/api/sendText``.
 2. **Envío saliente de texto libre** (``enviar_mensaje_texto``), que reutiliza el
    FAQ Bot (``whatsapp_bot_service``) para contestar los mensajes del paciente.
 3. **Lectura del webhook** de WAHA: extrae el teléfono y el texto y los deriva
@@ -23,7 +23,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.anamnesis_token import construir_enlace_anamnesis
 from app.core.config import settings
 from app.core.datetime_utils import rango_del_dia, to_naive_utc, utcnow
-from app.core.exceptions import WhatsAppEnvioError
+from app.core.exceptions import (
+    ConflictoError,
+    TurnoNoEncontradoError,
+    ValidacionError,
+    WhatsAppEnvioError,
+)
 # Formato de teléfonos, fechas y enlaces wa.me: vive en ``app/core`` para que el
 # servicio de anamnesis también lo use. Se reexporta acá para no romper los
 # imports históricos (``from app.services.whatsapp_service import ...``).
@@ -48,6 +53,7 @@ from app.models.paciente import Paciente
 from app.models.turno import Turno
 from app.schemas.whatsapp import (
     RecordatorioEnviado,
+    RecordatorioMarcado,
     RecordatorioPendiente,
     RecordatorioResultado,
     WAHAWebhookPayload,
@@ -252,6 +258,7 @@ def _procesar_envio_turno(db: Session, turno: Turno) -> RecordatorioEnviado:
             doctor=doctor,
             fecha_hora_inicio=turno.fecha_hora_inicio.isoformat(),
             resultado="FALLIDO",
+            simulado=not settings.whatsapp_envio_real,
             error=str(exc),
         )
 
@@ -274,6 +281,7 @@ def _procesar_envio_turno(db: Session, turno: Turno) -> RecordatorioEnviado:
         fecha_hora_inicio=turno.fecha_hora_inicio.isoformat(),
         resultado="ENVIADO",
         whatsapp_mensaje_id=mensaje_id,
+        simulado=not settings.whatsapp_envio_real,
     )
 
 
@@ -330,6 +338,105 @@ def enviar_recordatorios(
         enviados=enviados,
         fallidos=fallidos,
         detalles=detalles,
+    )
+
+# ===========================================================================
+#  1.b) ENVÍO AUTOMÁTICO DESDE EL PANEL (misma API de WAHA)
+# ===========================================================================
+#
+#  La tarea programada (``enviar_recordatorios``) mira un único día exacto. La
+#  pestaña *Recordatorios Pendientes* del panel, en cambio, lista una **ventana**
+#  de días y permite mandar el aviso en el momento con ``POST /api/sendText``.
+#  Estas dos funciones son el camino que usa esa pantalla:
+#
+#  * ``enviar_recordatorio_pendiente`` envía un turno puntual por la API.
+#  * ``marcar_recordatorio_enviado`` cierra el envío manual (Click-to-Chat): deja
+#    el teléfono esperando la respuesta para que el webhook confirme o cancele.
+
+
+def enviar_recordatorio_pendiente(db: Session, turno_id: int) -> RecordatorioEnviado:
+    """Envía (o simula) el recordatorio de un turno puntual desde el panel.
+
+    Reutiliza el mismo camino que la tarea programada
+    (``_procesar_envio_turno``): deja el turno en ``ENVIADO``, guarda el
+    ``whatsapp_mensaje_id`` que devuelve WAHA y registra en
+    ``conversaciones_whatsapp`` que ese teléfono espera la respuesta, de modo
+    que el ``1`` / ``si`` o ``2`` / ``no`` del paciente confirme o cancele el
+    turno en la base.
+
+    :raises TurnoNoEncontradoError: el turno no existe.
+    :raises ConflictoError: el turno está cancelado (no tiene aviso pendiente).
+    :raises ValidacionError: el paciente no tiene un teléfono utilizable.
+    """
+    turno = db.get(Turno, turno_id)
+    if turno is None:
+        raise TurnoNoEncontradoError(f"No existe el turno id={turno_id}.")
+    if turno.estado_turno == EstadoTurno.CANCELADO:
+        raise ConflictoError(
+            "El turno está cancelado: no tiene un recordatorio pendiente."
+        )
+
+    telefono = turno.paciente.telefono if turno.paciente else ""
+    if not normalizar_telefono_whatsapp(telefono):
+        raise ValidacionError(
+            "El paciente no tiene un teléfono válido para WhatsApp: cargá el "
+            "número en su ficha o avisale por otro medio."
+        )
+
+    return _procesar_envio_turno(db, turno)
+
+
+def marcar_recordatorio_enviado(db: Session, turno_id: int) -> RecordatorioMarcado:
+    """Marca como enviado el recordatorio que la secretaría mandó a mano.
+
+    El enlace Click-to-Chat (``wa.me``) lo abre el panel en el WhatsApp del
+    consultorio, así que el backend no ve ese envío. Al pulsar el botón se
+    marca el turno en ``ENVIADO`` y —lo importante— se deja el teléfono en
+    ``CONFIRMACION_TURNO``: la respuesta ``1`` / ``si`` o ``2`` / ``no`` que el
+    paciente mande después llega al webhook de WAHA y confirma o cancela
+    **este** turno (``whatsapp_bot_service._responder_confirmacion``).
+
+    Si el turno ya fue respondido (``RESPONDIDO``) no se reabre la
+    confirmación: el estado que dejó la respuesta del paciente manda.
+
+    :raises TurnoNoEncontradoError: el turno no existe.
+    :raises ConflictoError: el turno está cancelado.
+    """
+    turno = db.get(Turno, turno_id)
+    if turno is None:
+        raise TurnoNoEncontradoError(f"No existe el turno id={turno_id}.")
+    if turno.estado_turno == EstadoTurno.CANCELADO:
+        raise ConflictoError(
+            "El turno está cancelado: no tiene un recordatorio pendiente."
+        )
+
+    confirmacion_pendiente = False
+    if turno.estado_whatsapp != EstadoWhatsApp.RESPONDIDO:
+        turno.estado_whatsapp = EstadoWhatsApp.ENVIADO
+        db.commit()
+        db.refresh(turno)
+
+        telefono = turno.paciente.telefono if turno.paciente else ""
+        conversacion = whatsapp_conversacion_service.marcar_confirmacion_pendiente(
+            db, telefono, turno.id, turno.whatsapp_mensaje_id
+        )
+        confirmacion_pendiente = conversacion is not None
+    else:
+        db.refresh(turno)
+
+    logger.info(
+        "Recordatorio enviado desde el panel: turno id=%s estado_whatsapp=%s "
+        "confirmacion_pendiente=%s",
+        turno.id,
+        turno.estado_whatsapp,
+        confirmacion_pendiente,
+    )
+    return RecordatorioMarcado(
+        turno_id=turno.id,
+        estado_turno=turno.estado_turno,
+        estado_whatsapp=turno.estado_whatsapp,
+        confirmacion_pendiente=confirmacion_pendiente,
+        whatsapp_mensaje_id=turno.whatsapp_mensaje_id,
     )
 
 

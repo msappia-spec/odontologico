@@ -426,11 +426,12 @@ servicios ni de `services` desde modelos.
    - parte los rangos en bloques de la duración pedida (30 minutos por defecto);
    - descarta los bloques que se cruzan con turnos vigentes.
 
-#### 3.4.2. Recordatorios y enlaces Click-to-Chat
+#### 3.4.2. Recordatorios: envío automático y enlaces Click-to-Chat
 
-Hay dos caminos distintos:
+Hay tres caminos que usan el **mismo** texto y el **mismo** seguimiento de la
+respuesta (`conversaciones_whatsapp`):
 
-**A. Envío automático (`GET` / `POST /api/v1/tareas/enviar-recordatorios`)**
+**A. Tarea programada (`GET` / `POST /api/v1/tareas/enviar-recordatorios`)**
 
 - Busca turnos cuya `fecha_hora_inicio` cae exactamente en el día
   `hoy + N` (`RECORDATORIO_DIAS`, por defecto 3).
@@ -466,8 +467,25 @@ adicional.
 - Lista turnos no cancelados desde “ahora” hasta el final del día `hoy + N`.
 - Incluye los que sigan en `PENDIENTE_ENVIO`, aunque ya estén confirmados.
 - Devuelve el mensaje ya redactado y un enlace `https://wa.me/<número>?text=...`.
-- La secretaría abre el enlace desde su propio WhatsApp; el panel marca el turno
-  como `ENVIADO` con `PATCH /turnos/{id}` sin cambiar el estado clínico.
+- La secretaría abre el enlace desde su propio WhatsApp; el panel llama a
+  `POST /whatsapp/recordatorios-pendientes/{turno_id}/enviado`, que deja el
+  turno en `ENVIADO` sin cambiar el estado clínico **y registra la confirmación
+  pendiente** en `conversaciones_whatsapp`. Así el `1`/`si` o `2`/`no` que el
+  paciente contesta después también confirma o cancela el turno.
+
+**C. Envío automático desde el panel (`POST
+/whatsapp/recordatorios-pendientes/{turno_id}/enviar`)**
+
+- La pestaña *Recordatorios Pendientes* muestra una **ventana** de días (1, 2, 3,
+  5, 7 o 14), no un único día como la tarea programada.
+- El botón **Enviar automático** de cada fila manda el mensaje en el momento con
+  `POST {WAHA_URL}/api/sendText` (mismo transporte y misma pausa de 1,5 s que la
+  tarea programada); **Enviar todos** recorre la lista de a uno desde el panel.
+- Deja el turno en `ENVIADO`, guarda `whatsapp_mensaje_id` y la confirmación
+  pendiente; con WAHA sin credenciales responde `simulado: true` para que el
+  panel avise que el mensaje no salió.
+- Errores: `404` turno inexistente, `409` turno cancelado, `422` paciente sin
+  teléfono válido (el turno sigue en `PENDIENTE_ENVIO`).
 
 #### 3.4.3. Webhook de WhatsApp y FAQ Bot
 
@@ -486,7 +504,10 @@ adicional.
    consulta `conversaciones_whatsapp`.
 4. Si hay un recordatorio pendiente, `1`/`si` confirma y `2`/`no` cancela el
    turno (`tipo = CONFIRMACION`); cualquier otra respuesta repite la pregunta y
-   mantiene el estado.
+   mantiene el estado. El turno queda en `CONFIRMADO` o `CANCELADO` con
+   `estado_whatsapp = RESPONDIDO` y el panel lo refleja: la agenda y el Panel
+   Principal releen los turnos cada minuto (con la pestaña visible) y al volver
+   a la vista.
 5. Sin confirmación pendiente, lee el menú activo de `opciones_menu_whatsapp`
    (o las cuatro opciones históricas si la tabla está vacía). Si el texto es un
    saludo o una tecla válida, responde según la opción (`TEXTO`, `PRECIO`,
@@ -923,7 +944,7 @@ Si no hay pendientes, responde `422`.
 | `facturacion.py` | `PrestacionFacturadaCreate`, `FacturarTurnoRequest`, `PresupuestoTurnoRequest`, `PresupuestoCobroRead`, `DetalleMovimientoCajaRead`, `MovimientoCajaRead`, `PrestacionesDisponiblesRead`, `CobrarMovimientoRequest`, `DebitarMovimientoRequest`, `ResumenCajaRead`, `PresentacionObraSocialRead`, `LiquidacionProfesionalesRead` | Cierre de visita, caja, presentaciones y liquidaciones. |
 | `finanzas.py` | `AbrirPlanCuotasRequest`, `PlanCuotasAbiertoRead`, `PlanCuotasRead`, `PlanCuotasEstadoUpdate`, `RegistrarPagoRequest`, `PagoRegistradoRead`, `TransaccionCCRead`, `CuentaCorrienteRead`, `CobroCuentaCorrienteRead`, `CobrosCuentaCorrienteRead` | Consulta del saldo, apertura de planes de cuotas, pagos con su medio y cobros del período para la caja del día; importes en `Decimal` publicados como número JSON. |
 | `egreso.py` | `ProveedorCreate/Read/DetalleRead`, `GastoFacturaCreate/Read`, `PagoEgresoCreate/Read`, `PagoEgresoRegistradoRead`, `DeudaPorTipoRead`, `ResumenEgresosRead` | Módulo 6: alta de proveedores, facturas recibidas (vencimiento por defecto a 30 días, `paciente_id` opcional), pagos de egresos y tablero de cuentas por pagar; importes en `Decimal` publicados como número JSON. |
-| `whatsapp.py` | `WhatsAppText`, `WhatsAppButtonReply`, `WhatsAppContext`, `WhatsAppInteractive`, `WhatsAppInboundMessage`, `WhatsAppWebhookPayload`, `WebhookProcesadoResponse`, `RespuestaBot`, `RecordatorioEnviado`, `RecordatorioResultado`, `RecordatorioPendiente` | Parseo del webhook y respuestas. |
+| `whatsapp.py` | `WhatsAppText`, `WhatsAppButtonReply`, `WhatsAppContext`, `WhatsAppInteractive`, `WhatsAppInboundMessage`, `WhatsAppWebhookPayload`, `WebhookProcesadoResponse`, `RespuestaBot`, `RecordatorioEnviado`, `RecordatorioResultado`, `RecordatorioPendiente`, `RecordatorioMarcado` | Parseo del webhook y respuestas. |
 | `opcion_menu_whatsapp.py` | `OpcionMenuBase`, `OpcionMenuCreate`, `OpcionMenuUpdate`, `OpcionMenuRead`, `MenuWhatsAppVistaPrevia` | CRUD y vista previa del menú. |
 
 ### 5.3. Servicios (`app/services/`)
@@ -948,7 +969,7 @@ Si no hay pendientes, responde `422`.
 | `reporte_pdf_service.py` | `pdf_presentacion_obra_social`, `pdf_liquidacion_profesionales`, `nombre_archivo_presentacion`, `nombre_archivo_liquidacion` | Render PDF de los dos reportes de facturación. |
 | `whatsapp_menu_service.py` | `opciones_por_defecto`, `contar_opciones`, `listar_opciones`, `obtener_menu_vigente`, `obtener_opcion`, `crear_opcion`, `actualizar_opcion`, `desactivar_opcion`, `sembrar_menu_por_defecto`, `restaurar_menu_por_defecto` | Menú configurable, unicidad de tecla y seed inicial. |
 | `whatsapp_bot_service.py` | `normalizar_texto`, `detectar_opcion`, `es_saludo_inicial`, `normalizar_destinatario`, `formatear_importe`, `obtener_prestacion_consulta`, `listar_obras_sociales_activas`, `mensaje_menu`, `mensaje_precio_consulta`, `mensaje_obras_sociales`, `mensaje_ubicacion`, `responder_mensaje` | Árbol de decisión del FAQ Bot y redacción de respuestas. |
-| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `enviar_recordatorios`, `es_evento_de_mensaje`, `telefono_de_chat`, `numero_real_de_mensaje`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA, recordatorios, webhook (incluye remitentes `@lid`) y enlaces `wa.me`. |
+| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `enviar_recordatorios`, `enviar_recordatorio_pendiente`, `marcar_recordatorio_enviado`, `es_evento_de_mensaje`, `telefono_de_chat`, `numero_real_de_mensaje`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA, recordatorios (tarea programada y envío desde el panel), webhook (incluye remitentes `@lid`) y enlaces `wa.me`. |
 | `whatsapp_conversacion_service.py` | `obtener_conversacion`, `marcar_confirmacion_pendiente`, `marcar_menu`, `cerrar_confirmacion`, `obtener_confirmacion_pendiente` | Estado de conversación por teléfono (menú / confirmación pendiente). |
 
 **Orden de dependencia entre servicios (resumen):**
@@ -1098,6 +1119,8 @@ fallo de WhatsApp.
 | `GET` / `POST` | `/api/v1/tareas/enviar-recordatorios?dias=` | Dispara recordatorios del día `hoy + N`; requiere `Bearer CRON_SECRET`. |
 | `POST` | `/api/v1/whatsapp/webhook` | Procesa eventos de WAHA: confirmación por texto y menú del bot. |
 | `GET` | `/api/v1/whatsapp/recordatorios-pendientes?dias=` | Lista con enlace `wa.me` y mensaje redactado. |
+| `POST` | `/api/v1/whatsapp/recordatorios-pendientes/{turno_id}/enviar` | Envía el recordatorio por WAHA (`404`/`409`/`422`); deja el turno `ENVIADO` y la confirmación pendiente. |
+| `POST` | `/api/v1/whatsapp/recordatorios-pendientes/{turno_id}/enviado` | Marca `ENVIADO` el aviso mandado por Click-to-Chat y registra la confirmación pendiente. |
 | `GET` | `/api/v1/whatsapp/menu?activas=` | Lista opciones del FAQ Bot. |
 | `POST` | `/api/v1/whatsapp/menu` | Crea opción; número de un dígito único. |
 | `GET` | `/api/v1/whatsapp/menu/vista-previa` | Texto del menú activo. |
@@ -1344,6 +1367,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_pacientes.py` | DNI, cobertura, búsqueda y normalización. |
 | `test_publicar.py` | Ejecutor de comandos, git/Vercel simulados y verificación. |
 | `test_recordatorios_click_to_chat.py` | Enlaces `wa.me`, ventana de días y marcado `ENVIADO`. |
+| `test_recordatorios_automaticos.py` | Envío por WAHA desde el panel (real y simulado), `422`/`409`/`404` y el circuito `1`/`si` → confirmado y `2`/`no` → cancelado. |
 | `test_replicar_datos_api.py` | Replicación por API con servidor HTTP falso. |
 | `test_reportes_pdf.py` | Estructura PDF, paginado y datos de los reportes. |
 | `test_seed_nomenclador_cba.py` | Seed idempotente, `--actualizar` y `--dry-run`. |
@@ -2310,7 +2334,11 @@ servicios.
 | `RESPONDIDO` | El paciente respondió con un botón. |
 
 El enlace Click-to-Chat no envía por API: cuando la secretaría lo abre, el panel
-hace `PATCH` y pasa a `ENVIADO`.
+llama a `POST /whatsapp/recordatorios-pendientes/{turno_id}/enviado`, que pasa el
+turno a `ENVIADO` **y** registra la confirmación pendiente. El envío automático
+del panel (`POST …/{turno_id}/enviar`) hace lo mismo con `POST /api/sendText` de
+WAHA. En los dos casos la respuesta `1`/`si` deja el turno `CONFIRMADO` y
+`2`/`no` lo deja `CANCELADO` con `estado_whatsapp = RESPONDIDO`.
 
 #### Cobro (`movimientos_caja.estado_pago`)
 

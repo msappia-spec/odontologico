@@ -1066,12 +1066,21 @@
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
                 Actualizar
               </button>
+              <button id="rec-enviar-todos" class="btn btn-primary btn-sm" title="Enviar el recordatorio a todos los turnos de la lista con la API de WhatsApp, sin abrir el celular">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
+                Enviar todos
+              </button>
             </div>
             <p class="text-[11px] text-slate-400 mt-3">
-              Cada fila tiene el bot&oacute;n verde de WhatsApp con el mensaje ya redactado (se abre en una
-              pesta&ntilde;a nueva, desde el WhatsApp del consultorio). Al abrirlo, el turno se marca
-              autom&aacute;ticamente como <span class="font-semibold text-slate-500">enviado</span> y desaparece
-              de esta lista.
+              <span class="font-semibold text-slate-500">Enviar autom&aacute;ticamente</span> manda el mensaje solo con
+              la API de WhatsApp (WAHA), desde el n&uacute;mero del consultorio, y no requiere abrir el celular.
+              El bot&oacute;n verde de cada fila abre el mensaje ya redactado en WhatsApp para mandarlo a mano;
+              en los dos casos el turno queda <span class="font-semibold text-slate-500">enviado</span> y la
+              respuesta del paciente se procesa sola:
+              <span class="font-semibold text-emerald-600">1 / SI</span> deja el turno
+              <span class="font-semibold text-emerald-600">confirmado</span> y
+              <span class="font-semibold text-rose-600">2 / NO</span> lo
+              <span class="font-semibold text-rose-600">cancela</span>, actualizado en la agenda y en esta lista.
             </p>
           </div>
 
