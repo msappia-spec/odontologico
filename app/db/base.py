@@ -8,6 +8,7 @@ from app.db.base_class import Base
 from app.models.antecedentes_salud import AntecedentesSalud
 from app.models.arancel_obra_social import ArancelObraSocial
 from app.models.archivo_adjunto import ArchivoAdjunto
+from app.models.categoria_paciente import CategoriaPaciente
 from app.models.conversacion_whatsapp import ConversacionWhatsApp
 from app.models.cuenta_corriente import CuentaCorriente, PlanCuotas, TransaccionCC
 from app.models.disponibilidad import DisponibilidadDoctor
@@ -31,6 +32,7 @@ __all__ = [
     "AntecedentesSalud",
     "ArancelObraSocial",
     "ArchivoAdjunto",
+    "CategoriaPaciente",
     "ConversacionWhatsApp",
     "CuentaCorriente",
     "DetalleMovimientoCaja",

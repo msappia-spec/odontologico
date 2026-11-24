@@ -718,10 +718,10 @@ Si no hay pendientes, responde `422`.
 - **Panel (`/`)**: `index.html` carga `app.js` y `calendar.js`.
   `app.js` expone `window.OdontoApp`; `calendar.js` consume ese puente en lugar
   de duplicar el estado. La carga inicial hace `GET /doctores`, `/pacientes`,
-  `/turnos?limit=500` y `/obras-sociales`, y luego pide en paralelo
-  recordatorios, fichas de salud, disponibilidad, menú del bot y el tablero de
-  cuentas por pagar del Módulo 6 (alimenta la insignia del menú; las tablas de
-  proveedores y facturas se piden al entrar a la pestaña).
+  `/turnos?limit=500`, `/obras-sociales` y `/categorias-paciente`, y luego pide
+  en paralelo recordatorios, fichas de salud, disponibilidad, menú del bot y el
+  tablero de cuentas por pagar del Módulo 6 (alimenta la insignia del menú; las
+  tablas de proveedores y facturas se piden al entrar a la pestaña).
 - **Vista móvil (`/medico`)**: `medico.js` es autónomo, no carga `app.js`.
   Recuerda el profesional en `localStorage`, consulta turnos por rango de fechas,
   agenda con `POST /turnos` y edita/cancela con `PATCH /turnos/{id}`. Se refresca
@@ -1038,10 +1038,16 @@ fallo de WhatsApp.
 | `PUT` | `/api/v1/obras-sociales/{id}` | Reemplazo total. |
 | `PATCH` | `/api/v1/obras-sociales/{id}` | Edición parcial/reactivación. |
 | `DELETE` | `/api/v1/obras-sociales/{id}` | Baja lógica (`activa=false`). |
-| `POST` | `/api/v1/pacientes` | Crea paciente; DNI único, cobertura resuelta y datos filiatorios opcionales. |
+| `POST` | `/api/v1/pacientes` | Crea paciente; DNI único, cobertura resuelta, categoría del catálogo y datos filiatorios opcionales. |
 | `GET` | `/api/v1/pacientes?telefono=&dni=&buscar=` | Filtros exactos o búsqueda por nombre/DNI. |
-| `GET` | `/api/v1/pacientes/{id}` | Detalle. |
+| `GET` | `/api/v1/pacientes/{id}` | Detalle (incluye `categoria_nombre` y `categoria_alerta`). |
 | `PATCH` | `/api/v1/pacientes/{id}` | Edición parcial; `null` limpia campos. |
+| `GET` | `/api/v1/categorias-paciente?activas=` | Catálogo de categorías (todas o sólo activas). |
+| `POST` | `/api/v1/categorias-paciente` | Crea categoría; el código es único (`409`). |
+| `GET` | `/api/v1/categorias-paciente/{id}` | Detalle de la categoría. |
+| `PUT` | `/api/v1/categorias-paciente/{id}` | Reemplazo total. |
+| `PATCH` | `/api/v1/categorias-paciente/{id}` | Edición parcial/reactivación; si cambia el código, actualiza los pacientes. |
+| `DELETE` | `/api/v1/categorias-paciente/{id}` | Baja lógica (`activa=false`); la categoría por defecto responde `422`. |
 | `POST` | `/api/v1/turnos` | Crea turno; valida solapes de doctor y paciente. |
 | `GET` | `/api/v1/turnos?skip=&limit=&doctor_id=&paciente_id=&fecha_desde=&fecha_hasta=` | Lista paginada (máx. 500) por rango. |
 | `GET` | `/api/v1/turnos/{id}` | Detalle. |
@@ -1204,7 +1210,7 @@ fallo de WhatsApp.
 > `SELECT … FOR UPDATE` en PostgreSQL y se relee con `populate_existing` (la resta
 > parte siempre del saldo confirmado, nunca de una copia vieja en memoria); los
 > importes se calculan en `Decimal` sobre `Numeric(10, 2)`. El detalle está en
-> §6.4.21-6.4.23.
+> §6.4.22-6.4.24.
 >
 > **Panel.** La pestaña **Proveedores y egresos** (`data-view="egresos"`, grupo
 > *Operación*) opera el módulo completo: tablero de deuda total, vencida y por
@@ -1642,6 +1648,8 @@ General y los comparte la ficha médica (Módulo 4).
 | `titular` | `VARCHAR(120) / VARCHAR(120)` | Sí | `NULL` | — | Filiatorio: titular de la obra social. |
 | `lugar_trabajo` | `VARCHAR(120) / VARCHAR(120)` | Sí | `NULL` | — | Filiatorio: lugar de trabajo. |
 | `jerarquia` | `VARCHAR(60) / VARCHAR(60)` | Sí | `NULL` | — | Filiatorio: jerarquía o categoría laboral. |
+| `categoria` | `VARCHAR(30) / VARCHAR(30)` | No | `'SIN_CATEGORIZAR'` | Código del catálogo `categorias_paciente` (validado por el servicio) | Categoría administrativa del paciente; `SIN_CATEGORIZAR` es el valor por defecto. |
+| `categoria_observaciones` | `TEXT / TEXT` | Sí | `NULL` | — | Motivo de la categoría (máx. 1000 caracteres); sólo se admite si la categoría tiene `alerta`. |
 
 **Restricciones y notas:**
 
@@ -1660,8 +1668,51 @@ General y los comparte la ficha médica (Módulo 4).
   `null`, que sí distingue «no enviado» de «vaciar». La ficha expone los valores
   vigentes en `datos_filiatorios` (respuesta pública y panel) y también dentro de
   `antecedentes_salud` cuando ya está completada.
+- La **categoría administrativa** (`categoria`) guarda el **código** de una fila
+  del catálogo `categorias_paciente` (ver §6.4.6), no una clave foránea: la
+  secretaría puede crear categorías desde el panel sin recrear la tabla. El
+  servicio valida que exista y esté activa (`422` si no) y sólo admite
+  `categoria_observaciones` cuando la categoría tiene `alerta = true` (el
+  comportamiento histórico de `MALO`). `PacienteRead` devuelve además
+  `categoria_nombre` y `categoria_alerta` para que el panel y la agenda móvil no
+  dependan del código.
 
-#### 6.4.6. `turnos`
+#### 6.4.6. `categorias_paciente`
+
+Catálogo **administrable** de categorías con las que la secretaría califica al
+paciente. Se edita desde el modal *Categorías de pacientes* (enlace **Agregar o
+editar categorías** debajo del campo del formulario de pacientes). Reemplaza al
+enum fijo anterior: `pacientes.categoria` guarda el **código** de la fila elegida.
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `INTEGER / INTEGER` | No | autoincremental | **PK** | Identificador interno. |
+| `codigo` | `VARCHAR(30) / VARCHAR(30)` | No | — | **UQ** `uq_categoria_paciente_codigo` | Identificador interno en mayúsculas (letras, números y `_`, empieza con letra). |
+| `nombre` | `VARCHAR(60) / VARCHAR(60)` | No | — | — | Nombre visible en el desplegable y en las insignias. |
+| `alerta` | `BOOLEAN / BOOLEAN` | No | `false` | — | Pide observaciones y avisa antes de asignar un turno. |
+| `activa` | `BOOLEAN / BOOLEAN` | No | `true` | — | Baja lógica: deja de ofrecerse, pero los pacientes conservan el código. |
+| `orden` | `INTEGER / INTEGER` | No | `0` | — | Orden del desplegable (empate: por nombre). |
+
+**Restricciones y notas:**
+
+- `init_db` siembra el catálogo histórico **sólo si la tabla está vacía**:
+  `SIN_CATEGORIZAR` (*Sin categorizar*), `EXCELENTE` (*Excelente*) y `MALO`
+  (*Malo*, con `alerta = true`). El primero es el valor por defecto del esquema:
+  no se puede desactivar ni cambiarle el código (`422`).
+- El código es único sin distinguir mayúsculas ni espacios: `" vip "` se guarda
+  como `VIP` y un segundo alta con el mismo código responde `409`.
+- Al **cambiar el código**, el servicio actualiza en bloque
+  `pacientes.categoria` para no dejar códigos huérfanos.
+- Dar de baja una categoría **no** borra la fila ni reescribe las fichas: el
+  paciente conserva su código y el panel sigue mostrando el nombre (con el
+  rótulo *dada de baja* en el desplegable si se edita esa ficha).
+- En PostgreSQL, `init_db` quita el `CHECK` si una base vieja lo tuviera
+  (`categoria_paciente`) y ensancha `pacientes.categoria` a `VARCHAR(30)`. En
+  SQLite, si una base vieja conserva ese `CHECK` (no lo crean las versiones
+  actuales de SQLAlchemy), el arranque deja un aviso en el log y las categorías
+  nuevas fallan con `422` hasta recrear el esquema.
+
+#### 6.4.7. `turnos`
 
 Cita de un paciente con un profesional, con estado clínico y estado de
 notificación por WhatsApp.
@@ -1694,7 +1745,7 @@ notificación por WhatsApp.
 - `estado_turno` y `estado_whatsapp` no tienen `CHECK`; una escritura SQL
   directa podría guardar un valor no previsto.
 
-#### 6.4.7. `disponibilidad_doctores`
+#### 6.4.8. `disponibilidad_doctores`
 
 Agenda **semanal** habitual del profesional: varios tramos por día de la semana.
 
@@ -1718,7 +1769,7 @@ Agenda **semanal** habitual del profesional: varios tramos por día de la semana
   de reemplazo rechazan solapes del mismo día. Los rangos contiguos se aceptan.
 - `dia_semana` sigue la convención de JavaScript `Date.getDay()`.
 
-#### 6.4.8. `disponibilidad_especifica`
+#### 6.4.9. `disponibilidad_especifica`
 
 Excepciones de agenda para **una fecha concreta**.
 
@@ -1744,7 +1795,7 @@ Excepciones de agenda para **una fecha concreta**.
 - Regla de precedencia: si existe **cualquier** excepción para la fecha, la
   agenda semanal se ignora y el día se calcula con `HABILITADO` − `BLOQUEADO`.
 
-#### 6.4.9. `historias_clinicas`
+#### 6.4.10. `historias_clinicas`
 
 Cabecera de la ficha clínica de un paciente.
 
@@ -1764,7 +1815,7 @@ Cabecera de la ficha clínica de un paciente.
   desde un `GET` de sólo lectura.
 - No hay endpoint de borrado de historia.
 
-#### 6.4.10. `antecedentes_salud`
+#### 6.4.11. `antecedentes_salud`
 
 Ficha médica que el paciente completa antes de la consulta y que el profesional
 termina de cargar desde el panel. Cuelga de la historia clínica, no directamente
@@ -1809,7 +1860,7 @@ NULL`:
   MAYÚSCULAS.
 - No hay historial de versiones de la ficha: el reenvío actualiza la misma fila.
 
-#### 6.4.11. `evoluciones_medicas`
+#### 6.4.12. `evoluciones_medicas`
 
 Cada atención registrada en la historia clínica. Es un registro clínico con
 valor legal y, por diseño, **inmutable**.
@@ -1838,7 +1889,7 @@ valor legal y, por diseño, **inmutable**.
 - `historia_clinica_id` usa `CASCADE`; en la práctica no se borra una historia.
 - Los textos clínicos tienen un máximo de 4000 caracteres en el schema.
 
-#### 6.4.12. `archivos_adjuntos`
+#### 6.4.13. `archivos_adjuntos`
 
 Referencias a radiografías, fotos o estudios asociados a una evolución.
 
@@ -1856,7 +1907,7 @@ Referencias a radiografías, fotos o estudios asociados a una evolución.
 - `ix_adjunto_evolucion` y `ix_archivos_adjuntos_evolucion_id` indexan la FK.
 - No hay endpoint independiente de adjuntos: se crean junto con la evolución.
 
-#### 6.4.13. `aranceles_obra_social`
+#### 6.4.14. `aranceles_obra_social`
 
 Acuerdo económico entre una obra social y una práctica: cuánto cubre la
 cobertura y cuánto paga el paciente como coseguro.
@@ -1881,7 +1932,7 @@ cobertura y cuánto paga el paciente como coseguro.
 - La relación conceptual es **N:M** entre `obras_sociales` y `prestaciones`,
   resuelta con esta tabla de asociación con atributos.
 
-#### 6.4.14. `movimientos_caja`
+#### 6.4.15. `movimientos_caja`
 
 Cierre económico de una visita. Resume lo cobrado en efectivo y lo pendiente de
 la obra social.
@@ -1915,7 +1966,7 @@ la obra social.
 - En un paciente particular, `monto_cobrado_os` se guarda `0` y el movimiento
   nace `COBRADO`.
 
-#### 6.4.15. `detalles_movimiento_caja`
+#### 6.4.16. `detalles_movimiento_caja`
 
 Prácticas realizadas en una visita, con los importes **congelados** al momento
 de facturar.
@@ -1944,7 +1995,7 @@ de facturar.
 - Los campos congelados permiten que una factura histórica no cambie si luego se
   modifica el catálogo de prestaciones.
 
-#### 6.4.16. `odontogramas`
+#### 6.4.17. `odontogramas`
 
 Cabecera del odontograma que completa el profesional **después** de revisar al
 paciente. Un odontograma por historia clínica.
@@ -1961,7 +2012,7 @@ paciente. Un odontograma por historia clínica.
 | `observaciones` | `TEXT / TEXT` | Sí | `NULL` | — | Observaciones del gráfico. |
 | `actualizado_en` | `DATETIME / TIMESTAMP WITH TIME ZONE` | No | `now()` | — | Último guardado (UTC naive en Python). |
 
-#### 6.4.17. `odontograma_dientes`
+#### 6.4.18. `odontograma_dientes`
 
 Estado pintado de cada diente. Sólo se guardan los dientes con estado: el `PUT`
 reemplaza el conjunto completo en cada guardado.
@@ -1983,7 +2034,7 @@ reemplaza el conjunto completo en cada guardado.
 - `GET /pacientes/{id}/odontograma` **no** crea la historia clínica; el `PUT` sí
   la crea, igual que la ficha de salud.
 
-#### 6.4.18. `cuentas_corrientes`
+#### 6.4.19. `cuentas_corrientes`
 
 Una fila por paciente: es la «foto» del saldo. El detalle no se guarda acá sino
 en `transacciones_cc`, de modo que el saldo siempre se puede reconstruir.
@@ -2003,7 +2054,7 @@ en `transacciones_cc`, de modo que el saldo siempre se puede reconstruir.
   se puede borrar (la cuenta tiene valor de comprobante).
 - El `GET` de la API **no** crea la cuenta: informa `existe_cuenta = false`.
 
-#### 6.4.19. `transacciones_cc`
+#### 6.4.20. `transacciones_cc`
 
 Libro mayor de la cuenta. Es *append-only*: un error se corrige con otro
 movimiento, nunca editando ni borrando el anterior.
@@ -2031,7 +2082,7 @@ movimiento, nunca editando ni borrando el anterior.
   no altera tablas existentes.
 - `ON DELETE CASCADE`: sin cuenta, los movimientos no significan nada.
 
-#### 6.4.20. `planes_cuotas`
+#### 6.4.21. `planes_cuotas`
 
 Cabecera del tratamiento financiado: total, entrega inicial, cuotas y estado. La
 deuda se registra en `transacciones_cc` (un `DEBITO` por el total y un `CREDITO`
@@ -2059,7 +2110,7 @@ por la entrega si se cobró en el acto).
   `FINALIZADO` y `RECOBRABLE`, los valores del enum), por el mismo motivo que
   `tipo_movimiento`: `native_enum=False` + `create_constraint=True`.
 
-#### 6.4.21. `proveedores` (Módulo 6)
+#### 6.4.22. `proveedores` (Módulo 6)
 
 Acreedores del consultorio. `saldo_pendiente` es la deuda **viva** con el
 proveedor: sube con cada factura y baja con cada pago, siempre desde
@@ -2083,7 +2134,7 @@ proveedor: sube con cada factura y baja con cada pago, siempre desde
 - Es un saldo **verificable**: `egreso_service.recalcular_saldo_proveedor` lo
   reconstruye sumando las facturas abiertas.
 
-#### 6.4.22. `gastos_facturas` (Módulo 6)
+#### 6.4.23. `gastos_facturas` (Módulo 6)
 
 Factura recibida. `monto_pagado` es el acumulado de sus `pagos_egresos` y se
 actualiza en la misma transacción que inserta el pago.
@@ -2110,7 +2161,7 @@ actualiza en la misma transacción que inserta el pago.
   `SET NULL` hacia el paciente (borrar un paciente no debe borrar la deuda con el
   laboratorio).
 
-#### 6.4.23. `pagos_egresos` (Módulo 6)
+#### 6.4.24. `pagos_egresos` (Módulo 6)
 
 *Append-only*: cada fila es un pago aplicado a una factura. No se edita ni se
 borra; si hay que corregir, se registra otro pago.
@@ -2129,7 +2180,7 @@ borra; si hay que corregir, se registra otro pago.
   tocar los cobros del paciente (donde ese valor sería un ingreso imposible).
 - `ON DELETE CASCADE` desde la factura: sin factura, un pago no significa nada.
 
-#### 6.4.24. `fichas_medicas` (Módulo 4)
+#### 6.4.25. `fichas_medicas` (Módulo 4)
 
 Cabecera de la hoja de papel que el consultorio archiva junto al odontograma.
 Una ficha por historia clínica. Los datos filiatorios **no** se duplican acá:
@@ -2154,7 +2205,7 @@ viven en `pacientes` y la API los adjunta al leer.
 - El estado bucal admite `NULL` porque el papel puede quedar sin marcar; la API
   lo expone tal cual.
 
-#### 6.4.25. `ficha_medica_trabajos` (Módulo 4)
+#### 6.4.26. `ficha_medica_trabajos` (Módulo 4)
 
 Renglones del libro **«Trabajo realizado»**. El `PUT` reemplaza el conjunto
 completo y descarta los renglones en blanco.

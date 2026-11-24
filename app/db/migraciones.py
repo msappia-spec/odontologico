@@ -30,6 +30,12 @@ from sqlalchemy.exc import OperationalError
 
 logger = logging.getLogger("app.db")
 
+#: Nombre con el que SQLAlchemy podía crear el ``CHECK`` del enum
+#: ``CategoriaPaciente`` (``SAEnum(name="categoria_paciente", native_enum=False)``
+#: con ``create_constraint=True``). La migración lo quita en PostgreSQL, si
+#: existe, para permitir categorías nuevas.
+CONSTRAINT_CATEGORIA_PACIENTE = "categoria_paciente"
+
 
 class ColumnaNueva(NamedTuple):
     """Columna que debe existir y su DDL según el motor de base de datos."""
@@ -198,13 +204,15 @@ COLUMNAS_NUEVAS: tuple[ColumnaNueva, ...] = (
     ColumnaNueva("pacientes", "dni", "VARCHAR(20)", "VARCHAR(20)"),
     ColumnaNueva("pacientes", "obra_social_id", "INTEGER", "INTEGER"),
     ColumnaNueva("pacientes", "numero_afiliado", "VARCHAR(60)", "VARCHAR(60)"),
-    # Categoría administrativa del paciente y el motivo cuando es MALO. Las
-    # fichas históricas quedan SIN_CATEGORIZAR y sin observaciones.
+    # Categoría administrativa del paciente y el motivo cuando la categoría
+    # avisa antes del turno. Las fichas históricas quedan SIN_CATEGORIZAR y sin
+    # observaciones. El largo (30) coincide con el catálogo administrable: un
+    # código nuevo puede superar los 20 caracteres del enum anterior.
     ColumnaNueva(
         "pacientes",
         "categoria",
-        "VARCHAR(20) NOT NULL DEFAULT 'SIN_CATEGORIZAR'",
-        "VARCHAR(20) NOT NULL DEFAULT 'SIN_CATEGORIZAR'",
+        "VARCHAR(30) NOT NULL DEFAULT 'SIN_CATEGORIZAR'",
+        "VARCHAR(30) NOT NULL DEFAULT 'SIN_CATEGORIZAR'",
     ),
     ColumnaNueva("pacientes", "categoria_observaciones", "TEXT", "TEXT"),
     # Presupuestos: código de nomenclador de cada trabajo. Es una copia del
@@ -289,6 +297,83 @@ def _sentencia_alter(columna: ColumnaNueva, dialecto: str) -> str:
         f'ADD COLUMN "{columna.columna}" '
         f"{_ddl_para(columna, dialecto)}"
     )
+
+
+def _tabla_tiene_check_de_categoria(engine: Engine) -> bool:
+    """Detecta si SQLite conserva un ``CHECK`` sobre ``categoria``.
+
+    El enum ``CategoriaPaciente`` se guardaba en un ``VARCHAR``. Con
+    ``native_enum=False`` SQLAlchemy **no** crea un ``CHECK`` por defecto (desde
+    1.4), pero una base creada con ``create_constraint=True`` o con una versión
+    anterior sí puede tenerlo. SQLite no permite quitarlo con ``ALTER TABLE``,
+    así que la migración sólo puede avisar. Las bases nuevas no lo tienen.
+    """
+    if engine.dialect.name != "sqlite":
+        return False
+    with engine.connect() as conexion:
+        sql = conexion.exec_driver_sql(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'pacientes'"
+        ).scalar()
+    if not sql:
+        return False
+    texto = str(sql).lower()
+    return "check" in texto and "categoria" in texto
+
+
+def ajustar_categoria_paciente(engine: Engine) -> list[str]:
+    """Abre ``pacientes.categoria`` a las categorías nuevas del catálogo.
+
+    * **PostgreSQL**: quita el ``CHECK`` si una base vieja lo tuviera y, si hace
+      falta, ensancha la columna a ``VARCHAR(30)`` (un código nuevo puede
+      superar los 20 caracteres del enum anterior). Ambas sentencias son
+      idempotentes (``IF EXISTS`` / sólo se ejecuta si el largo es menor).
+    * **SQLite**: no permite quitar un ``CHECK`` con ``ALTER TABLE``. Si la
+      tabla lo conserva se deja un aviso en el log: las categorías nuevas fallan
+      al guardarse hasta recrear el esquema o migrar a PostgreSQL. Las bases
+      creadas con el modelo actual no lo tienen.
+    * **SQLite**: el largo declarado de ``VARCHAR`` no se valida al insertar, así
+      que no hace falta ensanchar la columna.
+
+    Devuelve las sentencias aplicadas (vacío si no había nada que ajustar).
+    """
+    inspector = inspect(engine)
+    if "pacientes" not in set(inspector.get_table_names()):
+        return []
+
+    dialecto = engine.dialect.name
+    if dialecto != "postgresql":
+        if _tabla_tiene_check_de_categoria(engine):
+            logger.warning(
+                "La tabla pacientes conserva el CHECK del catálogo anterior de "
+                "categorías (SQLite no permite quitarlo con ALTER TABLE). Las "
+                "categorías nuevas no se podrán guardar hasta recrear la base "
+                "o migrarla a PostgreSQL."
+            )
+        return []
+
+    sentencias = [
+        'ALTER TABLE "pacientes" '
+        f'DROP CONSTRAINT IF EXISTS "{CONSTRAINT_CATEGORIA_PACIENTE}"'
+    ]
+    columnas = {
+        columna["name"]: columna for columna in inspector.get_columns("pacientes")
+    }
+    tipo = columnas.get("categoria", {}).get("type")
+    largo = getattr(tipo, "length", None)
+    if largo is not None and largo < 30:
+        sentencias.append(
+            'ALTER TABLE "pacientes" ALTER COLUMN "categoria" TYPE VARCHAR(30)'
+        )
+
+    with engine.begin() as conexion:
+        for sentencia in sentencias:
+            conexion.exec_driver_sql(sentencia)
+    logger.info(
+        "Categoría del paciente ajustada en postgresql: catálogo administrable "
+        "habilitado."
+    )
+    return sentencias
 
 
 def aplicar_columnas_faltantes(engine: Engine) -> list[str]:

@@ -857,18 +857,25 @@ def test_los_controles_del_modulo_de_borrado_que_usa_el_js_existen_en_el_html(
 
 
 def test_la_categoria_del_paciente_avisa_antes_de_asignar_un_turno(client):
-    """La ficha se categoriza y el modal del turno muestra el aviso de MALO."""
+    """La ficha se categoriza y el modal del turno muestra el aviso."""
     html = client.get("/").text
     js = client.get("/static/app.js").text
 
-    # Formulario de pacientes: las tres categorías y las observaciones.
+    # Formulario de pacientes: el desplegable sale del catálogo, con el enlace
+    # para agregar o editar categorías y el campo de observaciones.
     assert 'id="pac-categoria"' in html
-    assert '<option value="SIN_CATEGORIZAR" selected>Sin categorizar</option>' in html
-    assert '<option value="EXCELENTE">Excelente</option>' in html
-    assert '<option value="MALO">Malo</option>' in html
+    assert 'id="pac-categoria-admin"' in html
+    assert "Agregar o editar categorías" in html
     assert 'id="pac-categoria-observaciones"' in html
     assert 'id="pac-categoria-observaciones-bloque"' in html
     assert "<th>Categoría</th>" in html
+
+    # Modal del catálogo: alta/edición en el mismo formulario y tabla de lista.
+    assert 'id="modal-categorias-paciente"' in html
+    assert 'id="form-categoria-paciente"' in html
+    assert 'id="cat-codigo"' in html
+    assert 'id="cat-alerta"' in html
+    assert 'id="lista-categorias-paciente"' in html
 
     # Aviso dentro del formulario de turno y confirmación con las observaciones.
     assert 'id="turno-alerta-paciente"' in html
@@ -882,7 +889,18 @@ def test_la_categoria_del_paciente_avisa_antes_de_asignar_un_turno(client):
     assert "function mostrarAlertaPacienteMalo(" in js
     assert "function confirmarAlertaPacienteMalo(" in js
     assert "function guardarTurnoValidado(" in js
-    assert 'paciente.categoria === "MALO"' in js
+    # La categoría no se hardcodea: el aviso depende del catálogo administrable.
+    assert "function categoriaAvisa(" in js
+    assert "categoriaAvisa(paciente.categoria)" in js
+    assert "function cargarCategoriasPaciente(" in js
+    assert "function guardarCategoriaPaciente(" in js
+    assert 'getElementById("pac-categoria-admin")' in js
+    assert (
+        'formCategoriaPaciente.addEventListener("submit", guardarCategoriaPaciente)'
+        in js
+    )
+    assert "data-editar-categoria" in js
+    assert "data-baja-categoria" in js
     assert "categoria_observaciones" in js
     # El aviso no guarda el turno: deja el formulario abierto hasta confirmar.
     assert "const payload = state.turnoAlertaPendiente;" in js

@@ -196,10 +196,13 @@ def test_la_agenda_movil_avisa_si_el_paciente_esta_categorizado_como_malo(client
 
     assert 'id="paciente-alerta-categoria"' in html
     assert 'id="paciente-alerta-categoria-obs"' in html
+    assert 'id="paciente-alerta-categoria-nombre"' in html
     assert "function actualizarAlertaCategoriaPaciente(" in js
     assert "function ocultarAlertaCategoriaPaciente(" in js
-    assert 'paciente.categoria === "MALO"' in js
+    # El aviso depende de la categoría del catálogo (``categoria_alerta``), no
+    # del código MALO hardcodeado: la secretaría puede crear otras categorías.
+    assert "paciente.categoria_alerta" in js
     assert "window.confirm(" in js
-    assert "categorizado como MALO" in js
+    assert "categoría de aviso" in js
     assert ".m-alerta-categoria" in css
     assert ".m-alerta-categoria-obs" in css

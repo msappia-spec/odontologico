@@ -14,7 +14,7 @@ from pydantic import (
     field_validator,
 )
 
-from app.models.enums import CategoriaPaciente
+from app.schemas.categoria_paciente import normalizar_codigo_categoria
 
 # Documento del paciente (DNI, CUIT o pasaporte): entre 5 y 20 caracteres
 # alfanuméricos, ya sin los separadores habituales (puntos, guiones, espacios).
@@ -165,22 +165,36 @@ class PacienteDatosAdministrativos(PacienteDatosFiliatorios):
         max_length=60,
         description="Número de afiliado dentro de la obra social.",
     )
-    categoria: CategoriaPaciente = Field(
-        CategoriaPaciente.SIN_CATEGORIZAR,
+    categoria: str = Field(
+        "SIN_CATEGORIZAR",
+        max_length=30,
         description=(
-            "Categoría administrativa del paciente: SIN_CATEGORIZAR (por "
-            "defecto), EXCELENTE o MALO. Un paciente MALO muestra una alerta "
-            "con sus observaciones antes de asignarle un turno."
+            "Código de la categoría administrativa del paciente en el catálogo "
+            "``/categorias-paciente`` (por defecto SIN_CATEGORIZAR). Las "
+            "categorías con «alerta» muestran un aviso con las observaciones "
+            "antes de asignarle un turno."
         ),
     )
     categoria_observaciones: Optional[str] = Field(
         None,
         max_length=MAX_OBSERVACIONES_CATEGORIA,
         description=(
-            "Motivo por el que el paciente está categorizado como MALO. Sólo "
-            "se admite cuando la categoría es MALO."
+            "Motivo por el que el paciente está categorizado. Sólo se admite "
+            "cuando la categoría tiene activado el aviso previo al turno."
         ),
     )
+
+    @field_validator("categoria", mode="before")
+    @classmethod
+    def _normalizar_categoria(cls, valor):
+        """Normaliza el código de la categoría (mayúsculas y ``_``).
+
+        La existencia y el estado de la categoría se validan en el servicio,
+        que es el que conoce el catálogo administrable.
+        """
+        if valor is None:
+            return valor
+        return normalizar_codigo_categoria(valor)
 
     @field_validator("dni", "obra_social", "numero_afiliado", mode="before")
     @classmethod
@@ -249,7 +263,7 @@ class PacienteUpdate(PacienteDatosAdministrativos):
     email: Optional[EmailStr] = None
     # En un PATCH la categoría es opcional: si no se envía se conserva la
     # actual. ``null`` se interpreta como «volver a SIN_CATEGORIZAR».
-    categoria: Optional[CategoriaPaciente] = None
+    categoria: Optional[str] = Field(None, max_length=30)
 
 
 class PacienteRead(PacienteBase):
@@ -261,11 +275,26 @@ class PacienteRead(PacienteBase):
 
     ``edad`` es un campo **calculado** a partir de ``fecha_nacimiento``: no se
     guarda en la base para que no quede desactualizado con los cumpleaños.
+
+    ``categoria_nombre`` y ``categoria_alerta`` los completa el endpoint con el
+    catálogo administrable: así el panel y la agenda móvil muestran el nombre
+    de la categoría y saben si corresponde avisar antes de asignar un turno sin
+    tener que conocer el código ``MALO``.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    categoria_nombre: Optional[str] = Field(
+        None, description="Nombre visible de la categoría (catálogo)."
+    )
+    categoria_alerta: bool = Field(
+        False,
+        description=(
+            "True si la categoría avisa antes de asignar un turno (pide "
+            "observaciones)."
+        ),
+    )
 
     @field_validator("obra_social", mode="before")
     @classmethod

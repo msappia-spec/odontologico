@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.doctor import Doctor
 from app.models.paciente import Paciente
+from app.services.categoria_paciente_service import sembrar_categorias_por_defecto
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +61,12 @@ def engine():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=test_engine)
+    # El catálogo de categorías es la fuente de verdad de ``pacientes.categoria``
+    # (el endpoint de pacientes valida contra él). En producción lo siembra
+    # ``init_db``; las pruebas crean el esquema directamente, así que se siembra
+    # acá las tres categorías históricas.
+    with sessionmaker(bind=test_engine)() as db:
+        sembrar_categorias_por_defecto(db)
     try:
         yield test_engine
     finally:

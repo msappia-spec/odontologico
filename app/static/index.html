@@ -695,19 +695,20 @@
                   <p class="text-[11px] text-slate-400 mt-1">Número que figura en la credencial de la obra social.</p>
                 </div>
 
-                <!-- Categoría administrativa: un paciente «Malo» muestra una
-                     alerta con estas observaciones al asignarle un turno. -->
+                <!-- Categoría administrativa: la lista sale del catálogo que
+                     administra la secretaría. Las categorías con «aviso»
+                     muestran una alerta con las observaciones al asignar un
+                     turno. -->
                 <div>
                   <label class="field-label" for="pac-categoria">Categoría del paciente</label>
-                  <select id="pac-categoria" name="categoria" class="field">
-                    <option value="SIN_CATEGORIZAR" selected>Sin categorizar</option>
-                    <option value="EXCELENTE">Excelente</option>
-                    <option value="MALO">Malo</option>
-                  </select>
-                  <p class="text-[11px] text-slate-400 mt-1">Si elegís «Malo», el sistema avisa antes de darle un turno.</p>
+                  <select id="pac-categoria" name="categoria" class="field"></select>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    Lista tomada del catálogo.
+                    <button type="button" id="pac-categoria-admin" class="font-semibold text-brand-700 hover:underline">Agregar o editar categorías</button>
+                  </p>
                 </div>
                 <div id="pac-categoria-observaciones-bloque" class="hide">
-                  <label class="field-label" for="pac-categoria-observaciones">Observaciones <span class="text-slate-400 normal-case">(sólo para «Malo»)</span></label>
+                  <label class="field-label" for="pac-categoria-observaciones">Observaciones <span class="text-slate-400 normal-case">(sólo si la categoría avisa)</span></label>
                   <textarea id="pac-categoria-observaciones" name="categoria_observaciones" class="field" rows="3" maxlength="1000" placeholder="Ej.: faltó a tres turnos sin avisar; adeuda la seña…"></textarea>
                   <p class="text-[11px] text-slate-400 mt-1">Este texto se muestra en la alerta al asignar el turno.</p>
                 </div>
@@ -2152,9 +2153,10 @@
     </div>
   </div>
 
-  <!-- ======== MODAL: ALERTA DE PACIENTE CATEGORIZADO COMO MALO ======== -->
-  <!-- Se muestra al guardar un turno nuevo para un paciente MALO. La
-       secretaría ve las observaciones y decide si igual le da el turno. -->
+  <!-- ======== MODAL: ALERTA DE PACIENTE CON CATEGORÍA DE AVISO ======== -->
+  <!-- Se muestra al guardar un turno nuevo para un paciente cuya categoría
+       avisa antes del turno (MALO en el catálogo inicial). La secretaría ve
+       las observaciones y decide si igual le da el turno. -->
   <div id="modal-alerta-paciente" class="modal-backdrop hide">
     <div class="card anim-pop w-full max-w-md p-6" role="alertdialog" aria-modal="true" aria-labelledby="modal-alerta-paciente-titulo">
       <div class="flex items-start gap-3">
@@ -2162,7 +2164,7 @@
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
         </span>
         <div class="min-w-0 flex-1">
-          <h3 id="modal-alerta-paciente-titulo" class="text-lg font-extrabold text-slate-900">Paciente categorizado como MALO</h3>
+          <h3 id="modal-alerta-paciente-titulo" class="text-lg font-extrabold text-slate-900">Paciente con categoría de aviso: <span id="modal-alerta-paciente-categoria">—</span></h3>
           <p class="text-xs text-slate-500 mt-1">Revisá las observaciones antes de asignar el turno.</p>
         </div>
         <button type="button" id="modal-alerta-paciente-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
@@ -2292,6 +2294,67 @@
           <button type="submit" id="modal-os-save" class="btn btn-primary flex-1">Guardar obra social</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: CATÁLOGO DE CATEGORÍAS DE PACIENTES ============ -->
+  <!-- Se abre desde el enlace debajo del campo «Categoría del paciente». El
+       formulario de arriba sirve para el alta y la edición; la tabla lista
+       todas las categorías (también las dadas de baja) con sus acciones. -->
+  <div id="modal-categorias-paciente" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h3 class="text-lg font-extrabold text-slate-900">Categorías de pacientes</h3>
+          <p class="text-xs text-slate-500">Agregá, editá o dá de baja las categorías del formulario. Las categorías con «aviso» piden observaciones y muestran una alerta antes de asignar un turno.</p>
+        </div>
+        <button type="button" id="modal-cat-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <form id="form-categoria-paciente" class="space-y-4" autocomplete="off">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="field-label" for="cat-codigo">Código</label>
+            <input id="cat-codigo" name="codigo" class="field font-mono uppercase" placeholder="Ej.: VIP" required maxlength="30" pattern="[A-Za-z][A-Za-z0-9_]*" />
+            <p class="text-[11px] text-slate-400 mt-1">Letras, números y «_». Se guarda en mayúsculas y no se repite.</p>
+          </div>
+          <div>
+            <label class="field-label" for="cat-nombre">Nombre visible</label>
+            <input id="cat-nombre" name="nombre" class="field" placeholder="Ej.: Paciente VIP" required maxlength="60" />
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label class="flex items-center gap-2.5 cursor-pointer select-none">
+            <input id="cat-alerta" name="alerta" type="checkbox"
+                   class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            <span class="text-sm text-slate-600">Avisar antes de asignar un turno</span>
+          </label>
+          <label class="flex items-center gap-2.5 cursor-pointer select-none">
+            <input id="cat-activa" name="activa" type="checkbox" checked
+                   class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            <span class="text-sm text-slate-600">Activa (se ofrece al registrar pacientes)</span>
+          </label>
+        </div>
+        <div id="cat-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3">
+          <button type="button" id="modal-cat-cancel" class="btn btn-ghost flex-1">Cancelar edición</button>
+          <button type="submit" id="modal-cat-save" class="btn btn-primary flex-1">Agregar categoría</button>
+        </div>
+      </form>
+
+      <div class="mt-6">
+        <p id="cat-lista-sub" class="text-xs text-slate-500 mb-2">Categorías cargadas.</p>
+        <div class="overflow-x-auto">
+          <table class="data-table">
+            <thead>
+              <tr><th>Categoría</th><th>Código</th><th>Aviso</th><th>Estado</th><th>Pacientes</th><th class="text-right">Acciones</th></tr>
+            </thead>
+            <tbody id="lista-categorias-paciente"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 

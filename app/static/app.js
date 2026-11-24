@@ -21,6 +21,12 @@
   function rutaOpcionMenu(id) {
     return id ? `${MENU_WHATSAPP}/${id}` : MENU_WHATSAPP;
   }
+
+  /* Catálogo administrable de categorías de pacientes (formulario de pacientes). */
+  const CATEGORIAS_PACIENTE = "/categorias-paciente";
+  function rutaCategoriaPaciente(id) {
+    return id ? `${CATEGORIAS_PACIENTE}/${id}` : CATEGORIAS_PACIENTE;
+  }
   // Etiquetas del tipo de respuesta y el detalle que se muestra en la tabla
   // para los tipos que arma el bot con datos del sistema.
   const TIPOS_MENU_WA = {
@@ -47,6 +53,12 @@
     obrasSociales: [],
     osMostrarInactivas: false,
     obraSocialEditId: null,
+    // Catálogo administrable de categorías de pacientes (GET
+    // /categorias-paciente): alimenta el desplegable del formulario, las
+    // insignias de la tabla y el modal de alta/edición. ``categoriaEditId``
+    // guarda la categoría en edición dentro del modal (``null`` = nueva).
+    categoriasPaciente: [],
+    categoriaEditId: null,
     // Menú configurable del FAQ Bot (GET /whatsapp/menu): alimenta la vista
     // «Bot WhatsApp». ``menuMostrarInactivas`` filtra localmente la tabla.
     menuWhatsApp: [],
@@ -316,16 +328,62 @@
     CANCELADO: { texto: "Cancelado", clase: "badge-red", icono: ICON.x },
   };
 
-  /* Categoría administrativa del paciente. «Malo» dispara el aviso previo al
-     alta de un turno y muestra las observaciones cargadas en la ficha. */
-  const CATEGORIA_PACIENTE = {
-    SIN_CATEGORIZAR: { texto: "Sin categorizar", clase: "badge-slate", icono: "" },
-    EXCELENTE: { texto: "Excelente", clase: "badge-green", icono: ICON.check },
-    MALO: { texto: "Malo", clase: "badge-red", icono: ICON.alerta },
+  /* Categorías administrativas del paciente. La lista vive en el catálogo
+     administrable (GET /categorias-paciente) y la secretaría la edita desde el
+     formulario de pacientes. Las categorías con `alerta` disparan el aviso
+     previo al alta de un turno y muestran las observaciones de la ficha. Los
+     códigos históricos quedan como respaldo mientras el catálogo carga, para
+     que la tabla nunca quede sin insignias. */
+  const CATEGORIA_PACIENTE_RESPALDO = {
+    SIN_CATEGORIZAR: { texto: "Sin categorizar", alerta: false },
+    EXCELENTE: { texto: "Excelente", alerta: false },
+    MALO: { texto: "Malo", alerta: true },
   };
 
+  function categoriaPacientePorCodigo(codigo) {
+    const buscado = String(codigo || "").trim().toUpperCase();
+    return (
+      state.categoriasPaciente.find(
+        (c) => String(c.codigo).toUpperCase() === buscado
+      ) || null
+    );
+  }
+
   function categoriaPaciente(categoria) {
-    return CATEGORIA_PACIENTE[categoria] || CATEGORIA_PACIENTE.SIN_CATEGORIZAR;
+    const codigo = String(categoria || "").trim().toUpperCase();
+    const encontrada = categoriaPacientePorCodigo(codigo);
+    const respaldo = CATEGORIA_PACIENTE_RESPALDO[codigo] || null;
+    const alerta = Boolean(
+      encontrada ? encontrada.alerta : respaldo && respaldo.alerta
+    );
+    let clase = "badge-slate";
+    let icono = "";
+    if (alerta) {
+      clase = "badge-red";
+      icono = ICON.alerta;
+    } else if (codigo === "EXCELENTE") {
+      clase = "badge-green";
+      icono = ICON.check;
+    } else if (codigo && codigo !== "SIN_CATEGORIZAR") {
+      clase = "badge-brand";
+    }
+    return {
+      codigo: codigo || "SIN_CATEGORIZAR",
+      texto:
+        (encontrada && encontrada.nombre) ||
+        (respaldo && respaldo.texto) ||
+        codigo ||
+        "Sin categorizar",
+      alerta,
+      activa: encontrada ? Boolean(encontrada.activa) : true,
+      clase,
+      icono,
+    };
+  }
+
+  /* ¿La categoría pide observaciones y avisa antes de asignar un turno? */
+  function categoriaAvisa(codigo) {
+    return categoriaPaciente(codigo).alerta;
   }
 
   function badgeCategoria(categoria, observaciones) {
@@ -1414,6 +1472,9 @@
     // Desplegable de coberturas del formulario de pacientes.
     cargarObrasSocialesSelect();
 
+    // Desplegable de categorías administrativas del mismo formulario.
+    cargarCategoriasSelect();
+
     // Desplegable de pacientes de la cuenta corriente (Módulo 5): se refresca
     // cada vez que cambia el listado (por ejemplo, al registrar un paciente).
     renderSelectPacientesCC();
@@ -1455,6 +1516,7 @@
     renderDoctores();
     renderPacientes();
     renderObrasSociales();
+    renderCategoriasPacienteModal();
     renderDisponibilidad();
     // Notifica a los módulos externos (calendar.js) que llegaron datos nuevos.
     document.dispatchEvent(new CustomEvent("odonto:datos"));
@@ -1470,11 +1532,15 @@
         // El catálogo completo (activas y dadas de baja): la vista de gestión
         // filtra localmente y el desplegable sólo ofrece las activas.
         api(OBRAS_SOCIALES),
+        // Categorías administrativas de pacientes (mismo criterio: todas, para
+        // poder mostrarlas en el modal y en las insignias de la tabla).
+        api(CATEGORIAS_PACIENTE),
       ]);
       state.doctores = datos[0] || [];
       state.pacientes = datos[1] || [];
       state.turnos = datos[2] || [];
       state.obrasSociales = datos[3] || [];
+      state.categoriasPaciente = datos[4] || [];
       renderTodo();
       estadoApi(true);
       // Los recordatorios pendientes se piden aparte para no demorar el panel.
@@ -6705,6 +6771,238 @@
     }
   }
 
+  /* ------- Catálogo de categorías de pacientes (modal alta/edición) ------- */
+
+  function categoriasPacienteActivas() {
+    return state.categoriasPaciente.filter((c) => c.activa);
+  }
+
+  function categoriaPacientePorId(id) {
+    return (
+      state.categoriasPaciente.find((c) => String(c.id) === String(id)) || null
+    );
+  }
+
+  /* Desplegable del formulario de pacientes: sólo categorías activas. Si la
+     ficha en edición tiene una categoría dada de baja, se agrega su opción para
+     no cambiarla sin querer al guardar otros datos. */
+  function cargarCategoriasSelect() {
+    const sel = document.getElementById("pac-categoria");
+    if (!sel) return;
+    const actual = sel.value;
+    sel.innerHTML = categoriasPacienteActivas()
+      .map((c) => `<option value="${esc(c.codigo)}">${esc(c.nombre)}</option>`)
+      .join("");
+    if (!actual) return;
+    const existe = Array.prototype.some.call(
+      sel.options,
+      (o) => o.value === actual
+    );
+    if (!existe) {
+      const meta = categoriaPaciente(actual);
+      const opt = document.createElement("option");
+      opt.value = actual;
+      opt.textContent = `${meta.texto} (dada de baja)`;
+      sel.appendChild(opt);
+    }
+    sel.value = actual;
+  }
+
+  /* Tabla del modal: todas las categorías (también las dadas de baja) con la
+     cantidad de pacientes que la tienen y las acciones de edición/baja. */
+  function renderCategoriasPacienteModal() {
+    const tbody = document.getElementById("lista-categorias-paciente");
+    if (!tbody) return;
+    const sub = document.getElementById("cat-lista-sub");
+    if (sub) {
+      const activas = categoriasPacienteActivas().length;
+      const total = state.categoriasPaciente.length;
+      sub.textContent =
+        `${activas} de ${total} categoría${total === 1 ? "" : "s"} disponibles ` +
+        "en el formulario de pacientes.";
+    }
+    if (!state.categoriasPaciente.length) {
+      tbody.innerHTML = `<tr><td colspan="6">${vacio(
+        "Aún no hay categorías",
+        "Usá el formulario de arriba para agregar la primera."
+      )}</td></tr>`;
+      return;
+    }
+    const guion = '<span class="text-slate-400">—</span>';
+    tbody.innerHTML = state.categoriasPaciente
+      .map((c) => {
+        const n = state.pacientes.filter(
+          (p) => String(p.categoria) === String(c.codigo)
+        ).length;
+        const aviso = c.alerta
+          ? `<span class="badge badge-red">${ICON.alerta}Avisa</span>`
+          : guion;
+        const estado = c.activa
+          ? `<span class="badge badge-green">${ICON.check}Activa</span>`
+          : `<span class="badge badge-slate">Dada de baja</span>`;
+        const baja =
+          c.codigo === "SIN_CATEGORIZAR"
+            ? `<button type="button" class="btn btn-ghost btn-sm" disabled ` +
+              `title="La categoría por defecto no puede darse de baja">Por defecto</button>`
+            : c.activa
+              ? `<button type="button" class="btn btn-danger-soft btn-sm" ` +
+                `data-baja-categoria="${c.id}" title="Dejar de ofrecer ${esc(
+                  c.nombre
+                )}">Desactivar</button>`
+              : `<button type="button" class="btn btn-soft btn-sm" ` +
+                `data-reactivar-categoria="${c.id}" title="Volver a ofrecer ${esc(
+                  c.nombre
+                )}">Reactivar</button>`;
+        return (
+          `<tr${c.activa ? "" : ' class="opacity-70"'}>` +
+          `<td><span class="font-semibold text-slate-800">${esc(c.nombre)}</span></td>` +
+          `<td class="font-mono text-xs">${esc(c.codigo)}</td>` +
+          `<td>${aviso}</td>` +
+          `<td>${estado}</td>` +
+          `<td><span class="badge badge-brand">${n}</span></td>` +
+          `<td><div class="flex items-center justify-end gap-2">` +
+          `<button type="button" class="btn btn-ghost btn-sm" ` +
+          `data-editar-categoria="${c.id}" title="Editar ${esc(
+            c.nombre
+          )}">Editar</button>` +
+          `${baja}</div></td></tr>`
+        );
+      })
+      .join("");
+  }
+
+  /* Vuelve a pedir el catálogo y refresca el desplegable, la tabla del modal y
+     las insignias de la tabla de pacientes (por si cambió un nombre). */
+  async function cargarCategoriasPaciente() {
+    state.categoriasPaciente = (await api(CATEGORIAS_PACIENTE)) || [];
+    cargarCategoriasSelect();
+    renderCategoriasPacienteModal();
+    renderPacientes();
+  }
+
+
+  async function abrirModalCategoriasPaciente() {
+    limpiarFormCategoriaPaciente();
+    mostrarModal("modal-categorias-paciente");
+    try {
+      await cargarCategoriasPaciente();
+    } catch (err) {
+      mostrarAviso("cat-error", err.message);
+    }
+  }
+
+  function cerrarModalCategoriasPaciente() {
+    limpiarFormCategoriaPaciente();
+    ocultarModal("modal-categorias-paciente");
+  }
+
+  /* Deja el formulario del modal en modo «alta»: campos vacíos, categoría
+     activa por defecto y el botón principal como «Agregar categoría». */
+  function limpiarFormCategoriaPaciente() {
+    state.categoriaEditId = null;
+    const form = document.getElementById("form-categoria-paciente");
+    if (form) form.reset();
+    const codigo = document.getElementById("cat-codigo");
+    if (codigo) codigo.disabled = false;
+    const activa = document.getElementById("cat-activa");
+    if (activa) {
+      activa.checked = true;
+      activa.disabled = false;
+    }
+    const alerta = document.getElementById("cat-alerta");
+    if (alerta) alerta.checked = false;
+    const guardar = document.getElementById("modal-cat-save");
+    if (guardar) guardar.textContent = "Agregar categoría";
+    const cancelar = document.getElementById("modal-cat-cancel");
+    if (cancelar) cancelar.textContent = "Limpiar formulario";
+    ocultarAviso("cat-error");
+  }
+
+  function editarCategoriaPaciente(id) {
+    const categoria = categoriaPacientePorId(id);
+    if (!categoria) return;
+    state.categoriaEditId = categoria.id;
+    const codigo = document.getElementById("cat-codigo");
+    codigo.value = categoria.codigo;
+    // El código de la categoría por defecto no se puede cambiar (el backend
+    // responde 422) y tampoco se puede dar de baja.
+    codigo.disabled = categoria.codigo === "SIN_CATEGORIZAR";
+    document.getElementById("cat-nombre").value = categoria.nombre;
+    document.getElementById("cat-alerta").checked = Boolean(categoria.alerta);
+    const activa = document.getElementById("cat-activa");
+    activa.checked = Boolean(categoria.activa);
+    activa.disabled = categoria.codigo === "SIN_CATEGORIZAR";
+    const guardar = document.getElementById("modal-cat-save");
+    if (guardar) guardar.textContent = "Guardar cambios";
+    const cancelar = document.getElementById("modal-cat-cancel");
+    if (cancelar) cancelar.textContent = "Cancelar edición";
+    ocultarAviso("cat-error");
+    const nombre = document.getElementById("cat-nombre");
+    if (nombre && nombre.focus) nombre.focus();
+  }
+
+  /* POST /categorias-paciente (alta) o PATCH /{id} (edición). Un código repetido
+     responde 409 y el mensaje se muestra dentro del modal. */
+  async function guardarCategoriaPaciente(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById("modal-cat-save");
+    const editando = Boolean(state.categoriaEditId);
+    const payload = {
+      nombre: document.getElementById("cat-nombre").value.trim(),
+      alerta: document.getElementById("cat-alerta").checked,
+      activa: document.getElementById("cat-activa").checked,
+    };
+    const campoCodigo = document.getElementById("cat-codigo");
+    if (!campoCodigo.disabled) payload.codigo = campoCodigo.value.trim();
+    try {
+      bloquear(btn, true);
+      const categoria = await api(rutaCategoriaPaciente(state.categoriaEditId), {
+        method: editando ? "PATCH" : "POST",
+        body: JSON.stringify(payload),
+      });
+      toast(
+        "exito",
+        editando ? "Categoría actualizada" : "Categoría creada",
+        categoria.nombre
+      );
+      limpiarFormCategoriaPaciente();
+      await cargarCategoriasPaciente();
+    } catch (err) {
+      mostrarAviso("cat-error", err.message);
+    } finally {
+      bloquear(btn, false);
+    }
+  }
+
+  /* DELETE da de baja la categoría (no borra la fila) y PATCH la reactiva. Los
+     pacientes que la tenían conservan su código. */
+  async function cambiarEstadoCategoriaPaciente(id, activa) {
+    const categoria = categoriaPacientePorId(id);
+    if (!categoria) return;
+    try {
+      if (activa) {
+        await api(rutaCategoriaPaciente(categoria.id), {
+          method: "PATCH",
+          body: JSON.stringify({ activa: true }),
+        });
+      } else {
+        await api(rutaCategoriaPaciente(categoria.id), { method: "DELETE" });
+      }
+      toast(
+        "exito",
+        `Categoría ${activa ? "reactivada" : "desactivada"}`,
+        categoria.nombre
+      );
+      await cargarCategoriasPaciente();
+    } catch (err) {
+      toast(
+        "error",
+        `No se pudo ${activa ? "reactivar" : "desactivar"} la categoría`,
+        err.message
+      );
+    }
+  }
+
   /* ------------------- Formulario de pacientes (alta/edición) ------------- */
 
   /* Un único formulario cumple las dos funciones: `state.pacienteEditId` guarda
@@ -6732,7 +7030,27 @@
     const sel = document.getElementById("pac-categoria");
     const bloque = document.getElementById("pac-categoria-observaciones-bloque");
     if (!sel || !bloque) return;
-    bloque.classList.toggle("hide", sel.value !== "MALO");
+    // Las categorías con «aviso» son las que admiten observaciones (el backend
+    // rechaza el texto con las demás).
+    bloque.classList.toggle("hide", !categoriaAvisa(sel.value));
+  }
+
+  /* Selecciona una categoría en el desplegable del formulario, agregando la
+     opción si está dada de baja o ya no existe (una ficha vieja puede tener un
+     código que la secretaría renombró). */
+  function fijarCategoriaSelect(codigo) {
+    const sel = document.getElementById("pac-categoria");
+    if (!sel) return;
+    const valor = String(codigo || "SIN_CATEGORIZAR");
+    const existe = Array.prototype.some.call(sel.options, (o) => o.value === valor);
+    if (!existe) {
+      const meta = categoriaPaciente(valor);
+      const opt = document.createElement("option");
+      opt.value = valor;
+      opt.textContent = meta.texto;
+      sel.appendChild(opt);
+    }
+    sel.value = valor;
   }
 
   function modoEdicionPaciente(paciente) {
@@ -6762,7 +7080,7 @@
         ? String(paciente.obra_social_id)
         : "";
       document.getElementById("pac-numero-afiliado").value = paciente.numero_afiliado || "";
-      if (categoria) categoria.value = paciente.categoria || "SIN_CATEGORIZAR";
+      if (categoria) fijarCategoriaSelect(paciente.categoria || "SIN_CATEGORIZAR");
       if (observaciones) observaciones.value = paciente.categoria_observaciones || "";
       sincronizarCategoriaPaciente();
       state.pacienteEditId = paciente.id;
@@ -6772,7 +7090,7 @@
       if (cancelar) cancelar.classList.remove("hide");
     } else {
       state.pacienteEditId = null;
-      if (categoria) categoria.value = "SIN_CATEGORIZAR";
+      if (categoria) fijarCategoriaSelect("SIN_CATEGORIZAR");
       if (observaciones) observaciones.value = "";
       sincronizarCategoriaPaciente();
       if (titulo) titulo.textContent = "Registrar paciente";
@@ -6826,12 +7144,13 @@
         document.getElementById("pac-lugar-trabajo").value.trim() || null,
       jerarquia: document.getElementById("pac-jerarquia").value.trim() || null,
       // Categoría administrativa y su motivo. El backend sólo acepta
-      // observaciones cuando la categoría es MALO.
+      // observaciones cuando la categoría avisa antes de asignar un turno.
       categoria: document.getElementById("pac-categoria").value || "SIN_CATEGORIZAR",
-      categoria_observaciones:
-        document.getElementById("pac-categoria").value === "MALO"
-          ? document.getElementById("pac-categoria-observaciones").value.trim() || null
-          : null,
+      categoria_observaciones: categoriaAvisa(
+        document.getElementById("pac-categoria").value
+      )
+        ? document.getElementById("pac-categoria-observaciones").value.trim() || null
+        : null,
     };
 
     const editando = Boolean(state.pacienteEditId);
@@ -6917,9 +7236,10 @@
   }
 
   /* Muestra en el propio modal del turno el aviso con las observaciones cuando
-     el paciente seleccionado está categorizado como MALO. Se actualiza al
-     cambiar de paciente y también cuando calendar.js precarga uno al editar o
-     agendar desde un bloque. */
+     el paciente seleccionado tiene una categoría que avisa antes del turno
+     (MALO en el catálogo inicial). Se actualiza al cambiar de paciente y
+     también cuando calendar.js precarga uno al editar o agendar desde un
+     bloque. */
   function actualizarAlertaPacienteTurno() {
     const sel = document.getElementById("turno-paciente");
     const box = document.getElementById("turno-alerta-paciente");
@@ -6928,9 +7248,9 @@
     if (!sel || !box) return;
 
     const paciente = porId(state.pacientes, Number(sel.value));
-    const esMalo = Boolean(paciente && paciente.categoria === "MALO");
-    box.classList.toggle("hide", !esMalo);
-    if (!esMalo) return;
+    const avisa = Boolean(paciente && categoriaAvisa(paciente.categoria));
+    box.classList.toggle("hide", !avisa);
+    if (!avisa) return;
     if (nombre) nombre.textContent = paciente.nombre || "";
     if (obs) {
       obs.textContent =
@@ -6938,14 +7258,18 @@
     }
   }
 
-  /* Aviso previo al alta de un turno para un paciente MALO. Guarda el payload
-     validado para que el botón «Asignar turno igual» pueda reintentar el mismo
-     guardado sin volver a pedir confirmación. */
+  /* Aviso previo al alta de un turno para un paciente con categoría de aviso.
+     Guarda el payload validado para que el botón «Asignar turno igual» pueda
+     reintentar el mismo guardado sin volver a pedir confirmación. */
   function mostrarAlertaPacienteMalo(paciente, payload) {
     state.turnoAlertaPendiente = payload;
     const nombre = document.getElementById("modal-alerta-paciente-nombre");
     const obs = document.getElementById("modal-alerta-paciente-observaciones");
+    const categoria = document.getElementById("modal-alerta-paciente-categoria");
     if (nombre) nombre.textContent = paciente.nombre || "";
+    if (categoria) {
+      categoria.textContent = categoriaPaciente(paciente.categoria).texto;
+    }
     if (obs) {
       obs.textContent =
         paciente.categoria_observaciones || "Sin observaciones cargadas.";
@@ -7106,11 +7430,11 @@
       fecha_hora_fin: isoLocal(fin),
     };
 
-    /* Un turno NUEVO para un paciente MALO no se guarda directo: primero se
-       muestra la alerta con las observaciones para que la secretaría decida.
-       Al editar un turno existente no se vuelve a preguntar. */
+    /* Un turno NUEVO para un paciente con categoría de aviso no se guarda
+       directo: primero se muestra la alerta con las observaciones para que la
+       secretaría decida. Al editar un turno existente no se vuelve a preguntar. */
     const paciente = porId(state.pacientes, pacienteId);
-    if (!state.turnoEditId && paciente && paciente.categoria === "MALO") {
+    if (!state.turnoEditId && paciente && categoriaAvisa(paciente.categoria)) {
       mostrarAlertaPacienteMalo(paciente, payload);
       return;
     }
@@ -8135,7 +8459,53 @@
       }
       const reactivar = e.target.closest("[data-reactivar-menu]");
       if (reactivar) cambiarEstadoOpcionMenu(reactivar.dataset.reactivarMenu, true);
+      const editarCategoria = e.target.closest("[data-editar-categoria]");
+      if (editarCategoria) {
+        editarCategoriaPaciente(editarCategoria.dataset.editarCategoria);
+        return;
+      }
+      const bajaCategoria = e.target.closest("[data-baja-categoria]");
+      if (bajaCategoria) {
+        cambiarEstadoCategoriaPaciente(bajaCategoria.dataset.bajaCategoria, false);
+        return;
+      }
+      const reactivarCategoria = e.target.closest("[data-reactivar-categoria]");
+      if (reactivarCategoria) {
+        cambiarEstadoCategoriaPaciente(
+          reactivarCategoria.dataset.reactivarCategoria,
+          true
+        );
+      }
     });
+
+    // Catálogo de categorías de pacientes: el enlace debajo del campo abre el
+    // modal; el formulario de arriba sirve para el alta y la edición.
+    const btnCategoriasPaciente = document.getElementById("pac-categoria-admin");
+    if (btnCategoriasPaciente) {
+      btnCategoriasPaciente.addEventListener("click", abrirModalCategoriasPaciente);
+    }
+    const formCategoriaPaciente = document.getElementById(
+      "form-categoria-paciente"
+    );
+    if (formCategoriaPaciente) {
+      formCategoriaPaciente.addEventListener("submit", guardarCategoriaPaciente);
+    }
+    const cerrarCategorias = document.getElementById("modal-cat-close");
+    if (cerrarCategorias) {
+      cerrarCategorias.addEventListener("click", cerrarModalCategoriasPaciente);
+    }
+    const cancelarCategoria = document.getElementById("modal-cat-cancel");
+    if (cancelarCategoria) {
+      cancelarCategoria.addEventListener("click", limpiarFormCategoriaPaciente);
+    }
+    const modalCategorias = document.getElementById("modal-categorias-paciente");
+    if (modalCategorias) {
+      modalCategorias.addEventListener("click", function (e) {
+        if (e.target.id === "modal-categorias-paciente") {
+          cerrarModalCategoriasPaciente();
+        }
+      });
+    }
 
     document.getElementById("form-paciente").addEventListener("submit", crearPaciente);
     document.getElementById("pac-cancelar-edicion").addEventListener("click", cancelarEdicionPaciente);
@@ -9100,6 +9470,11 @@
     nombreObraSocial,
     renderObrasSociales,
     cargarObrasSocialesSelect,
+    // Categorías de pacientes (catálogo administrable desde el formulario)
+    categoriaPaciente,
+    categoriaAvisa,
+    cargarCategoriasPaciente,
+    abrirModalCategoriasPaciente,
     // Bot WhatsApp (menú configurable del FAQ Bot)
     renderMenuWhatsApp,
     cargarMenuWhatsApp,

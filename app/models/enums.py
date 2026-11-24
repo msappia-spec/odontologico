@@ -11,20 +11,11 @@ class EstadoTurno(str, enum.Enum):
     CANCELADO = "CANCELADO"
 
 
-class CategoriaPaciente(str, enum.Enum):
-    """Categoría administrativa con la que la secretaría califica al paciente.
-
-    * ``SIN_CATEGORIZAR``: valor por defecto y el que conservan las fichas
-      históricas al migrar el esquema.
-    * ``EXCELENTE``: paciente sin antecedentes de incumplimiento.
-    * ``MALO``: paciente con antecedentes que la secretaría debe revisar antes
-      de asignarle un turno. Las observaciones explican el motivo y se muestran
-      en el aviso previo al alta del turno.
-    """
-
-    SIN_CATEGORIZAR = "SIN_CATEGORIZAR"
-    EXCELENTE = "EXCELENTE"
-    MALO = "MALO"
+#: La categoría administrativa del paciente **ya no es un enum**: la secretaría
+#: administra el catálogo ``categorias_paciente`` desde el panel (ver
+#: ``app.models.categoria_paciente`` y ``app.services.categoria_paciente_service``)
+#: y ``pacientes.categoria`` guarda el código elegido. Los códigos históricos
+#: (``SIN_CATEGORIZAR``, ``EXCELENTE`` y ``MALO``) se siembran al crear la base.
 
 
 class EstadoWhatsApp(str, enum.Enum):

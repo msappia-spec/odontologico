@@ -489,6 +489,7 @@ Odontologico/
 │   │   ├── enums.py                # EstadoTurno, EstadoWhatsApp
 │   │   ├── doctor.py               # Modelo Doctor
 │   │   ├── paciente.py             # Modelo Paciente (obra_social_id → catálogo)
+│   │   ├── categoria_paciente.py   # Catálogo administrable de categorías del paciente
 │   │   ├── obra_social.py          # Modelo ObraSocial (catálogo de coberturas)
 │   │   ├── disponibilidad.py       # Modelo DisponibilidadDoctor (agenda semanal)
 │   │   ├── turno.py                # Modelo Turno (+ constraints)
@@ -520,6 +521,7 @@ Odontologico/
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
 │   │   ├── doctor_service.py       # Alta, edición (PUT/PATCH), baja lógica y pago
 │   │   ├── paciente_service.py     # Alta/edición, búsqueda y resolución de la cobertura
+│   │   ├── categoria_paciente_service.py # Catálogo de categorías (CRUD y aviso previo)
 │   │   ├── obra_social_service.py  # CRUD del catálogo (nombre único, baja lógica)
 │   │   ├── disponibilidad_service.py # CRUD de la agenda semanal por odontólogo
 │   │   ├── historia_clinica_service.py # Módulo 2: ficha + alta/consulta de evoluciones
@@ -542,6 +544,7 @@ Odontologico/
 │       └── endpoints/
 │           ├── doctores.py         # Doctor: CRUD + baja lógica (DELETE)
 │           ├── pacientes.py, turnos.py
+│           ├── categorias_paciente.py # Catálogo de categorías: CRUD + baja lógica
 │           ├── historias_clinicas.py # Módulo 2: historia clínica (sólo GET y POST)
 │           ├── anamnesis.py        # Módulo 4: ficha pública y panel de salud
 │           ├── odontogramas.py     # Módulo 4: GET/PUT del odontograma por paciente
@@ -597,6 +600,7 @@ Odontologico/
 │   ├── test_reportes_pdf.py        # Módulo 3: reportes en PDF (estructura y datos)
 │   ├── test_obras_sociales.py      # Catálogo de coberturas y su vínculo con pacientes
 │   ├── test_pacientes.py
+│   ├── test_categorias_paciente.py
 │   ├── test_recordatorios_click_to_chat.py # Enlaces wa.me y recordatorios pendientes
 │   ├── test_recordatorios_automaticos.py # Envío por WAHA desde el panel y respuesta 1/2
 │   ├── test_seed_nomenclador_cba.py # Seed del nomenclador de Córdoba (idempotente)
@@ -925,7 +929,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
 | **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos y un botón para eliminar cada uno. Cada día ofrece **dos tramos fijos de un clic**: **Mañana 08:00-13:00** y **Tarde 15:30-18:00** (se pueden tener los dos el mismo día) y el alta manual *desde / hasta* queda plegada en «Otro horario». Incluye **Restaurar plantilla sugerida** (lun-vie con los dos tramos y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
 | **Doctores** | Formulario de alta estilizado + tabla con la **forma de pago** de cada profesional, la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT` que incluye el desplegable **Tipo de pago** —*Dueño*, *Comisión por porcentaje* o *Sueldo fijo*— y habilita el campo numérico del porcentaje o del sueldo mensual), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
-| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**—, Nº de afiliado y **datos filiatorios**: fecha de nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, lugar de trabajo y jerarquía) + tabla de pacientes con acción *Editar*, donde la fecha de nacimiento se muestra con la **edad calculada**. Los filiatorios son los mismos que carga la ficha médica: al guardar la ficha, el panel refresca la tabla de pacientes para mostrar los datos recién sincronizados. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. |
+| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**—, Nº de afiliado y **datos filiatorios**: fecha de nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, lugar de trabajo y jerarquía) + tabla de pacientes con acción *Editar*, donde la fecha de nacimiento se muestra con la **edad calculada**. Los filiatorios son los mismos que carga la ficha médica: al guardar la ficha, el panel refresca la tabla de pacientes para mostrar los datos recién sincronizados. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. La **categoría del paciente** sale de un catálogo administrable: debajo del campo hay un enlace **Agregar o editar categorías** que abre un modal para crear, renombrar, dar de baja o reactivar categorías. Las categorías marcadas con **Avisar antes de asignar un turno** piden observaciones y muestran la alerta antes de agendar (es el comportamiento histórico de *Malo*). |
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y **dos formas de enviarlo**: el botón **Enviar automático** (API de WAHA, sin abrir el celular) de cada fila o **Enviar todos** para la lista completa, y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. Cuando el paciente responde **1 / SI** el turno queda confirmado y con **2 / NO** se cancela. |
 | **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
@@ -1011,6 +1015,11 @@ mismo seguimiento de la respuesta:
 El panel principal consume los mismos endpoints del backend:
 
 - `POST /api/v1/doctores` y `POST /api/v1/pacientes` → botones **Guardar** de los formularios.
+- `GET /api/v1/categorias-paciente` → catálogo de categorías del formulario de pacientes
+  (desplegable, insignias de la tabla y modal *Categorías de pacientes*).
+- `POST`, `PATCH` y `DELETE` sobre `/api/v1/categorias-paciente…` → alta, edición,
+  baja lógica y reactivación desde ese modal. Al cambiar el código, la API actualiza
+  en bloque a los pacientes que tenían la categoría.
 - `POST /api/v1/turnos` → modal *Nuevo turno* (doctor + paciente + fecha + hora + duración).
 - `PATCH /api/v1/turnos/{id}` → acciones **Editar**, **Cancelar** y **Reactivar** de las tarjetas de turno (día y calendario).
 - `GET /api/v1/doctores/{id}/disponibilidad` → pestaña **Disponibilidad** y grilla

@@ -3,11 +3,10 @@
 from datetime import date
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Date, Enum as SAEnum, ForeignKey, Index, String, Text
+from sqlalchemy import Date, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base_class import Base
-from app.models.enums import CategoriaPaciente
 
 if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.cuenta_corriente import CuentaCorriente
@@ -42,9 +41,14 @@ class Paciente(Base):
       ficha médica (Módulo 4) los muestra, los carga y los sincroniza acá al
       guardar, de modo que la secretaría no vuelve a tipear los mismos datos.
     * ``categoria`` / ``categoria_observaciones``: calificación administrativa
-      (``SIN_CATEGORIZAR``, ``EXCELENTE`` o ``MALO``) y el motivo que la
-      justifica. Un paciente ``MALO`` dispara un aviso con sus observaciones
-      antes de asignarle un turno en el panel y en la agenda móvil.
+      del paciente. ``categoria`` guarda el **código** de una fila del catálogo
+      administrable ``categorias_paciente`` (por defecto ``SIN_CATEGORIZAR``;
+      las categorías históricas son ``EXCELENTE`` y ``MALO``) y
+      ``categoria_observaciones`` el motivo que la justifica. Una categoría con
+      ``alerta`` (``MALO`` en el catálogo inicial) dispara un aviso con sus
+      observaciones antes de asignarle un turno en el panel y en la agenda
+      móvil. El catálogo se valida en el servicio: acá se guarda el código para
+      no atar la fila a un ``id`` que la secretaría podría recrear.
     """
 
     __tablename__ = "pacientes"
@@ -78,20 +82,16 @@ class Paciente(Base):
     jerarquia: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
 
     # Categoría administrativa con la que la secretaría califica al paciente.
-    # ``MALO`` exige revisar las observaciones antes de asignar un turno; el
-    # aviso vive en el panel y en la agenda móvil. Las fichas históricas quedan
-    # en ``SIN_CATEGORIZAR`` gracias al default del modelo y de la migración.
-    categoria: Mapped[CategoriaPaciente] = mapped_column(
-        SAEnum(
-            CategoriaPaciente,
-            name="categoria_paciente",
-            native_enum=False,
-            validate_strings=True,
-            length=20,
-        ),
+    # Guarda el código del catálogo ``categorias_paciente`` (texto, no un enum
+    # fijo): la secretaría puede crear categorías nuevas desde el panel y las
+    # que tienen ``alerta`` exigen revisar las observaciones antes de asignar un
+    # turno. Las fichas históricas quedan en ``SIN_CATEGORIZAR`` gracias al
+    # default del modelo y de la migración.
+    categoria: Mapped[str] = mapped_column(
+        String(30),
         nullable=False,
-        default=CategoriaPaciente.SIN_CATEGORIZAR,
-        server_default=CategoriaPaciente.SIN_CATEGORIZAR.value,
+        default="SIN_CATEGORIZAR",
+        server_default="SIN_CATEGORIZAR",
     )
     categoria_observaciones: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

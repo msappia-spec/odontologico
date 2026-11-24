@@ -29,14 +29,13 @@ from app.core.exceptions import (
     RecursoNoEncontradoError,
     ValidacionError,
 )
-from app.models.enums import CategoriaPaciente
 from app.models.paciente import Paciente
 from app.schemas.paciente import (
     PacienteCreate,
     PacienteDatosFiliatorios,
     PacienteUpdate,
 )
-from app.services import obra_social_service
+from app.services import categoria_paciente_service, obra_social_service
 
 logger = logging.getLogger("app.services.pacientes")
 
@@ -99,40 +98,45 @@ def obtener_paciente(db: Session, paciente_id: int) -> Paciente:
 
 
 def _normalizar_categoria(
-    datos: dict[str, Any], paciente: Optional[Paciente] = None
+    db: Session, datos: dict[str, Any], paciente: Optional[Paciente] = None
 ) -> None:
     """Normaliza la categoría y sus observaciones antes de guardar.
 
     Reglas:
 
     * ``categoria`` ausente en un ``PATCH`` conserva la actual; ``null`` vuelve
-      a ``SIN_CATEGORIZAR``.
-    * Las observaciones **sólo** tienen sentido con la categoría ``MALO``. Si
-      se intenta cargar un texto con otra categoría se responde ``422``; al
-      cambiar desde ``MALO`` a otra categoría el texto se limpia para no dejar
-      un aviso viejo que ya no corresponde.
+      a la categoría por defecto (``SIN_CATEGORIZAR``).
+    * El código se valida contra el catálogo administrable
+      (:mod:`app.services.categoria_paciente_service`): una categoría
+      inexistente o dada de baja responde ``422``.
+    * Las observaciones **sólo** tienen sentido con una categoría que avisa
+      antes de asignar un turno (``MALO`` en el catálogo inicial). Si se intenta
+      cargar un texto con otra categoría se responde ``422``; al cambiar desde
+      una categoría que avisa a otra el texto se limpia para no dejar un aviso
+      viejo que ya no corresponde.
     """
     if "categoria" in datos:
-        categoria = datos["categoria"]
-        if categoria is None:
-            categoria = CategoriaPaciente.SIN_CATEGORIZAR
-        elif not isinstance(categoria, CategoriaPaciente):
-            categoria = CategoriaPaciente(str(categoria))
-        datos["categoria"] = categoria
+        codigo = datos["categoria"] or categoria_paciente_service.CODIGO_POR_DEFECTO
+        categoria = categoria_paciente_service.validar_codigo_asignable(
+            db, str(codigo)
+        )
+        datos["categoria"] = categoria.codigo
     else:
-        categoria = (
+        codigo = (
             paciente.categoria
             if paciente is not None
-            else CategoriaPaciente.SIN_CATEGORIZAR
+            else categoria_paciente_service.CODIGO_POR_DEFECTO
         )
+        categoria = categoria_paciente_service.obtener_por_codigo(db, codigo)
 
+    avisa = bool(categoria and categoria.alerta)
     observaciones = datos.get("categoria_observaciones")
-    if categoria == CategoriaPaciente.MALO:
+    if avisa:
         return
     if observaciones:
         raise ValidacionError(
-            "Sólo se pueden cargar observaciones cuando la categoría del "
-            "paciente es MALO."
+            "Sólo se pueden cargar observaciones cuando la categoría avisa "
+            "antes de asignar un turno (por ejemplo, «Malo»)."
         )
     if "categoria_observaciones" in datos or "categoria" in datos:
         datos["categoria_observaciones"] = None
@@ -169,6 +173,19 @@ def _resolver_cobertura(db: Session, cambios: dict) -> None:
 
 
 
+def _es_error_de_categoria(exc: IntegrityError) -> bool:
+    """Detecta un rechazo del ``CHECK`` que limitaba ``pacientes.categoria``.
+
+    En bases SQLite creadas con el enum anterior, el ``CHECK`` del catálogo
+    histórico sigue en la tabla (SQLite no permite quitarlo sin reconstruirla).
+    Al guardar una categoría nueva el motor responde un ``IntegrityError``; acá
+    se reconoce para devolver un ``422`` explicativo en vez de un ``409`` de DNI
+    duplicado o un ``500``.
+    """
+    texto = str(getattr(exc, "orig", exc)).lower()
+    return "categoria" in texto and ("check" in texto or "constraint" in texto)
+
+
 def _validar_dni_unico(
     db: Session, dni: Optional[str], excluir_paciente_id: Optional[int] = None
 ) -> None:
@@ -193,7 +210,7 @@ def crear_paciente(db: Session, data: PacienteCreate) -> Paciente:
     # ``obra_social`` (texto heredado) se traduce a ``obra_social_id`` antes de
     # construir el ORM: el nombre ya no es una columna del paciente.
     _resolver_cobertura(db, datos)
-    _normalizar_categoria(datos)
+    _normalizar_categoria(db, datos)
 
     paciente = Paciente(**datos)
     db.add(paciente)
@@ -203,6 +220,12 @@ def crear_paciente(db: Session, data: PacienteCreate) -> Paciente:
         # Índice único uq_paciente_dni (dos altas simultáneas con el mismo DNI).
         db.rollback()
         logger.warning("IntegrityError al crear paciente: %s", exc.orig)
+        if _es_error_de_categoria(exc):
+            raise ValidacionError(
+                "La base conserva la restricción del catálogo anterior de "
+                "categorías y no admite el código nuevo. Recreá el esquema o "
+                "migrá la base a PostgreSQL (ver DOCUMENTACION.md)."
+            ) from exc
         raise ConflictoError(f"Ya existe un paciente con el DNI {data.dni}.") from exc
     db.refresh(paciente)
     logger.info("Paciente creado id=%s", paciente.id)
@@ -260,7 +283,7 @@ def actualizar_paciente(db: Session, paciente_id: int, data: PacienteUpdate) -> 
         _validar_dni_unico(db, cambios["dni"], excluir_paciente_id=paciente.id)
 
     _resolver_cobertura(db, cambios)
-    _normalizar_categoria(cambios, paciente)
+    _normalizar_categoria(db, cambios, paciente)
 
     for campo, valor in cambios.items():
         setattr(paciente, campo, valor)
@@ -272,6 +295,12 @@ def actualizar_paciente(db: Session, paciente_id: int, data: PacienteUpdate) -> 
         logger.warning(
             "IntegrityError al actualizar paciente %s: %s", paciente_id, exc.orig
         )
+        if _es_error_de_categoria(exc):
+            raise ValidacionError(
+                "La base conserva la restricción del catálogo anterior de "
+                "categorías y no admite el código nuevo. Recreá el esquema o "
+                "migrá la base a PostgreSQL (ver DOCUMENTACION.md)."
+            ) from exc
         raise ConflictoError(
             f"Ya existe un paciente con el DNI {cambios.get('dni')}."
         ) from exc

@@ -1103,21 +1103,26 @@
       p.dni ? `DNI ${p.dni}` : "",
       p.telefono || "",
       p.obra_social || "",
-      p.categoria === "MALO" ? "MALO" : "",
+      p.categoria && p.categoria !== "SIN_CATEGORIZAR"
+        ? p.categoria_nombre || p.categoria
+        : "",
     ]
       .filter(Boolean)
       .join(" · ");
   }
 
-  /* Aviso del paciente MALO en la hoja de turno. Se muestra al elegir una ficha
-     ya registrada y permanece a la vista hasta que se elige otro paciente. */
+  /* Aviso de la categoría que avisa antes del turno (MALO en el catálogo
+     inicial). Se muestra al elegir una ficha ya registrada y permanece a la
+     vista hasta que se elige otro paciente. */
   function actualizarAlertaCategoriaPaciente(p) {
     const caja = $("paciente-alerta-categoria");
     const obs = $("paciente-alerta-categoria-obs");
+    const nombre = $("paciente-alerta-categoria-nombre");
     if (!caja) return;
-    const esMalo = Boolean(p && p.categoria === "MALO");
-    caja.classList.toggle("hide", !esMalo);
-    if (esMalo && obs) {
+    const avisa = Boolean(p && p.categoria_alerta);
+    caja.classList.toggle("hide", !avisa);
+    if (avisa && obs) {
+      if (nombre) nombre.textContent = p.categoria_nombre || p.categoria || "—";
       obs.textContent = p.categoria_observaciones || "Sin observaciones cargadas.";
     }
   }
@@ -1431,15 +1436,17 @@
       // La ficha recién creada queda disponible en el buscador al instante.
       if (paciente.nuevo) state.pacientes = state.pacientes.concat([paciente]);
 
-      /* Antes de asignar un turno nuevo a un paciente MALO se muestran sus
-         observaciones y se pide confirmación. Al editar no se interrumpe. */
-      if (!modoEdicion && paciente.categoria === "MALO") {
+      /* Antes de asignar un turno nuevo a un paciente cuya categoría avisa se
+         muestran sus observaciones y se pide confirmación. Al editar no se
+         interrumpe. */
+      if (!modoEdicion && paciente.categoria_alerta) {
         actualizarAlertaCategoriaPaciente(paciente);
         const observaciones =
           (paciente.categoria_observaciones || "").trim() ||
           "Sin observaciones cargadas.";
+        const etiqueta = paciente.categoria_nombre || "categoría de aviso";
         const confirmado = window.confirm(
-          `El paciente ${paciente.nombre} está categorizado como MALO.\n\n` +
+          `El paciente ${paciente.nombre} está en la categoría ${etiqueta}.\n\n` +
             `Observaciones:\n${observaciones}\n\n` +
             "¿Asignar el turno igual?"
         );

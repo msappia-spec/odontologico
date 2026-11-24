@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, inspect
 from app.db.migraciones import (
     COLUMNAS_NUEVAS,
     _sentencia_alter,
+    ajustar_categoria_paciente,
     aplicar_columnas_faltantes,
 )
 
@@ -155,8 +156,36 @@ def test_agrega_la_categoria_del_paciente(tmp_path):
     )
     sentencia = _sentencia_alter(columna, "postgresql")
     assert "ADD COLUMN IF NOT EXISTS" in sentencia
-    assert "VARCHAR(20) NOT NULL DEFAULT 'SIN_CATEGORIZAR'" in sentencia
+    assert "VARCHAR(30) NOT NULL DEFAULT 'SIN_CATEGORIZAR'" in sentencia
     engine.dispose()
+
+
+def test_ajustar_categoria_paciente_no_rompe_una_base_sqlite(tmp_path):
+    """En SQLite la apertura del catálogo es un no-op, con o sin CHECK viejo."""
+    from app.db.base import Base
+
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'categorias.db').as_posix()}", future=True
+    )
+    Base.metadata.create_all(bind=engine)
+    assert ajustar_categoria_paciente(engine) == []
+
+    # Una tabla creada con el CHECK del enum anterior: SQLite no permite
+    # quitarlo con ALTER TABLE, así que la migración avisa y no interrumpe.
+    legacy = create_engine(
+        f"sqlite:///{(tmp_path / 'categorias_legacy.db').as_posix()}", future=True
+    )
+    with legacy.begin() as conexion:
+        conexion.exec_driver_sql(
+            "CREATE TABLE pacientes ("
+            "id INTEGER PRIMARY KEY, "
+            "categoria VARCHAR(20) NOT NULL DEFAULT 'SIN_CATEGORIZAR' "
+            "CONSTRAINT categoria_paciente CHECK (categoria IN "
+            "('SIN_CATEGORIZAR', 'EXCELENTE', 'MALO')))"
+        )
+    assert ajustar_categoria_paciente(legacy) == []
+    engine.dispose()
+    legacy.dispose()
 
 
 def test_init_db_aplica_la_migracion_antes_de_sembrar(monkeypatch):
@@ -182,7 +211,13 @@ def test_init_db_aplica_la_migracion_antes_de_sembrar(monkeypatch):
         lambda engine: llamados.append(engine),
     )
     monkeypatch.setattr(
+        init_db_module, "ajustar_categoria_paciente", lambda engine: []
+    )
+    monkeypatch.setattr(
         init_db_module, "sembrar_menu_por_defecto", lambda db: 0
+    )
+    monkeypatch.setattr(
+        init_db_module, "sembrar_categorias_por_defecto", lambda db: 0
     )
 
     init_db_module.init_db()

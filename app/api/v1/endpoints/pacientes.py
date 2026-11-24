@@ -6,11 +6,37 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.categoria_paciente import CategoriaPaciente
 from app.models.paciente import Paciente
 from app.schemas.paciente import PacienteCreate, PacienteRead, PacienteUpdate
-from app.services import paciente_service
+from app.services import categoria_paciente_service, paciente_service
 
 router = APIRouter(prefix="/pacientes", tags=["Pacientes"])
+
+
+def _con_categoria(
+    db: Session,
+    paciente: Paciente,
+    catalogo: Optional[dict[str, CategoriaPaciente]] = None,
+) -> PacienteRead:
+    """Completa la lectura con el nombre y el aviso de la categoría.
+
+    ``pacientes.categoria`` guarda el código del catálogo administrable; el
+    panel y la agenda móvil necesitan además el nombre visible y si la categoría
+    avisa antes de asignar un turno. Se resuelve acá, con un mapa del catálogo,
+    para no repetir la consulta por cada paciente del listado.
+    """
+    if catalogo is None:
+        catalogo = categoria_paciente_service.mapa_por_codigo(db)
+    categoria = catalogo.get(paciente.categoria)
+    return PacienteRead.model_validate(paciente).model_copy(
+        update={
+            "categoria_nombre": (
+                categoria.nombre if categoria else paciente.categoria
+            ),
+            "categoria_alerta": bool(categoria and categoria.alerta),
+        }
+    )
 
 
 @router.post(
@@ -25,12 +51,16 @@ router = APIRouter(prefix="/pacientes", tags=["Pacientes"])
         "aceptan los datos filiatorios de la Historia Clínica General (fecha de "
         "nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, "
         "lugar de trabajo y jerarquía); la edad se calcula, no se envía. La "
-        "categoría del paciente (SIN_CATEGORIZAR por defecto, EXCELENTE o MALO) "
-        "admite observaciones cuando es MALO."
+        "categoría del paciente se toma del catálogo /categorias-paciente "
+        "(SIN_CATEGORIZAR por defecto) y admite observaciones cuando la "
+        "categoría avisa antes de asignar un turno."
     ),
 )
-def crear_paciente(payload: PacienteCreate, db: Session = Depends(get_db)) -> Paciente:
-    return paciente_service.crear_paciente(db, payload)
+def crear_paciente(
+    payload: PacienteCreate, db: Session = Depends(get_db)
+) -> PacienteRead:
+    paciente = paciente_service.crear_paciente(db, payload)
+    return _con_categoria(db, paciente)
 
 
 @router.get("", response_model=List[PacienteRead], summary="Listar pacientes")
@@ -47,12 +77,12 @@ def listar_pacientes(
         ),
     ),
     db: Session = Depends(get_db),
-) -> List[Paciente]:
-    return list(
-        paciente_service.listar_pacientes(
-            db, telefono=telefono, dni=dni, buscar=buscar
-        )
+) -> List[PacienteRead]:
+    pacientes = paciente_service.listar_pacientes(
+        db, telefono=telefono, dni=dni, buscar=buscar
     )
+    catalogo = categoria_paciente_service.mapa_por_codigo(db)
+    return [_con_categoria(db, paciente, catalogo) for paciente in pacientes]
 
 
 @router.get(
@@ -61,8 +91,8 @@ def listar_pacientes(
     summary="Obtener un paciente",
     description="Devuelve el detalle de un paciente existente según su identificador.",
 )
-def obtener_paciente(paciente_id: int, db: Session = Depends(get_db)) -> Paciente:
-    return paciente_service.obtener_paciente(db, paciente_id)
+def obtener_paciente(paciente_id: int, db: Session = Depends(get_db)) -> PacienteRead:
+    return _con_categoria(db, paciente_service.obtener_paciente(db, paciente_id))
 
 
 @router.patch(
@@ -80,6 +110,7 @@ def obtener_paciente(paciente_id: int, db: Session = Depends(get_db)) -> Pacient
 )
 def actualizar_paciente(
     paciente_id: int, payload: PacienteUpdate, db: Session = Depends(get_db)
-) -> Paciente:
-    return paciente_service.actualizar_paciente(db, paciente_id, payload)
+) -> PacienteRead:
+    paciente = paciente_service.actualizar_paciente(db, paciente_id, payload)
+    return _con_categoria(db, paciente)
 
