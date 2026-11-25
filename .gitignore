@@ -46,3 +46,8 @@ htmlcov/
 
 # Script de limpieza con la cadena de produccion embebida: no commitear.
 /borrar.bat
+
+# --- Datos de pacientes (exportaciones de Access / respaldos de la base) ---
+# Tienen datos personales: nunca van al repositorio.
+/access/
+/backups/

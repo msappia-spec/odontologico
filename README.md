@@ -581,6 +581,7 @@ Odontologico/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
 │   ├── seed_nomenclador_cba.py          # Nomenclador Córdoba (prestaciones + valor base)
 │   ├── importar_nomenclador_excel.py   # Nomenclador desde Excel → prestaciones (altas y precios)
+│   ├── importar_pacientes_excel.py    # Pacientes del Access (Excel) → tabla de pacientes
 │   ├── publicar.py                      # Publicar en un paso: pruebas + commit + push + deploy
 │   ├── migrar_historias_clinicas.py      # Migración Módulo 2: ficha, evoluciones y adjuntos
 │   ├── migrar_ficha_medica.py            # Migración Módulo 4: ficha médica y trabajos
@@ -605,6 +606,7 @@ Odontologico/
 │   ├── test_recordatorios_automaticos.py # Envío por WAHA desde el panel y respuesta 1/2
 │   ├── test_seed_nomenclador_cba.py # Seed del nomenclador de Córdoba (idempotente)
 │   ├── test_importar_nomenclador_excel.py # Nomenclador desde Excel (lectura, altas y bajas)
+│   ├── test_importar_pacientes_excel.py # Pacientes de Access (lectura, catálogos y carga)
 │   ├── test_ficha_medica.py        # Módulo 4: cabecera, estado bucal y libro de trabajos
 │   ├── test_turnos.py
 │   ├── test_turnos_actualizacion.py # PATCH /turnos/{id} (reprogramar, cancelar…)
@@ -646,6 +648,13 @@ python -m scripts.seed_nomenclador_cba
 #        (Capítulo, Código, Descripción y Arancel): crea las prácticas que
 #        faltan y actualiza descripción y valor base de las que ya existen.
 python -m scripts.importar_nomenclador_excel "C:\Users\Marcos\Downloads\nomenclador_odontologico.xlsx"
+
+# 4-quater) (Opcional) Traer los pacientes del sistema anterior (Access)
+#        (codigo, obra social, nombre, nro afiliado, plan obra social,
+#        domicilio, Telefono y categoria): crea las obras sociales y las
+#        categorías que falten y saltea los pacientes que ya existen.
+python -m scripts.importar_pacientes_excel access/pacientes.xlsx --dry-run
+python -m scripts.importar_pacientes_excel access/pacientes.xlsx
 
 # 5) Levantar el servidor
 uvicorn app.main:app --reload
@@ -929,7 +938,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Agenda** | Navegación por día (‹ / Hoy / › + selector de fecha), filtro por doctor y tarjetas de turno. |
 | **Disponibilidad** | Editor de la **agenda semanal por odontólogo**: un panel por día (lunes a domingo) con sus rangos y un botón para eliminar cada uno. Cada día ofrece **dos tramos fijos de un clic**: **Mañana 08:00-13:00** y **Tarde 15:30-18:00** (se pueden tener los dos el mismo día) y el alta manual *desde / hasta* queda plegada en «Otro horario». Incluye **Restaurar plantilla sugerida** (lun-vie con los dos tramos y sábado por la mañana), **Vaciar la semana** y un probador que muestra los **bloques libres** que la API ofrece para la fecha y la duración elegidas. |
 | **Doctores** | Formulario de alta estilizado + tabla con la **forma de pago** de cada profesional, la cantidad de turnos, el **estado** (activo / dado de baja) y las acciones *Editar* (modal con `PUT` que incluye el desplegable **Tipo de pago** —*Dueño*, *Comisión por porcentaje* o *Sueldo fijo*— y habilita el campo numérico del porcentaje o del sueldo mensual), *Dar de baja* (`DELETE` lógico) y *Reactivar* (`PATCH`). |
-| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**—, Nº de afiliado y **datos filiatorios**: fecha de nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, lugar de trabajo y jerarquía) + tabla de pacientes con acción *Editar*, donde la fecha de nacimiento se muestra con la **edad calculada**. Los filiatorios son los mismos que carga la ficha médica: al guardar la ficha, el panel refresca la tabla de pacientes para mostrar los datos recién sincronizados. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. La **categoría del paciente** sale de un catálogo administrable: debajo del campo hay un enlace **Agregar o editar categorías** que abre un modal para crear, renombrar, dar de baja o reactivar categorías. Las categorías marcadas con **Avisar antes de asignar un turno** piden observaciones y muestran la alerta antes de agendar (es el comportamiento histórico de *Malo*). |
+| **Pacientes** | Formulario de alta y **edición** (nombre, teléfono, email, DNI, obra social —**desplegable del catálogo**—, Nº de afiliado y **datos filiatorios**: fecha de nacimiento, estado civil, nacionalidad, domicilio, profesión, titular, lugar de trabajo y jerarquía) + tabla de pacientes con buscador propio (**nombre, DNI, teléfono o cobertura**) y acción *Editar*, donde la fecha de nacimiento se muestra con la **edad calculada**. La tabla muestra hasta 200 coincidencias y avisa al pie cuántas quedaron afuera: con los ~10.000 pacientes del sistema anterior, pintarlas todas congelaba el navegador. Los filiatorios son los mismos que carga la ficha médica: al guardar la ficha, el panel refresca la tabla de pacientes para mostrar los datos recién sincronizados. Si el paciente tenía una cobertura ya dada de baja, el formulario reincorpora la opción con el rótulo *(dada de baja)* para no perderla al guardar otros cambios. La **categoría del paciente** sale de un catálogo administrable: debajo del campo hay un enlace **Agregar o editar categorías** que abre un modal para crear, renombrar, dar de baja o reactivar categorías. Las categorías marcadas con **Avisar antes de asignar un turno** piden observaciones y muestran la alerta antes de agendar (es el comportamiento histórico de *Malo*). |
 | **Obras Sociales** | Catálogo de coberturas: nombre (único) y código interno opcional, con alta/edición en modal, baja lógica y reactivación, filtro **Mostrar las dadas de baja** y contador de activas en el menú. Sólo las activas alimentan el desplegable del formulario de pacientes. |
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y **dos formas de enviarlo**: el botón **Enviar automático** (API de WAHA, sin abrir el celular) de cada fila o **Enviar todos** para la lista completa, y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. Cuando el paciente responde **1 / SI** el turno queda confirmado y con **2 / NO** se cancela. |
 | **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
@@ -1430,6 +1439,37 @@ CDN, HTML y `fetch` contra la misma API `v1`.
 > `--desactivar-faltantes` (baja **lógica** de las que ya no figuran en la
 > grilla) y `--sin-detalle`. Las prácticas que quedan así cargadas son las que
 > después se cotizan por cobertura en *Facturación y Caja → Convenios*.
+>
+> **Pacientes del sistema anterior (Access).** La planilla `pacientes.xlsx` que
+> exporta Access (`codigo`, `obra social`, `nombre`, `nro afiliado`, `plan obra
+> social`, `domicilio`, `Telefono` y `categoria`) se carga con
+> `python -m scripts.importar_pacientes_excel access/pacientes.xlsx`: las
+> columnas se ubican por el **nombre** del encabezado, crea las **obras
+> sociales** que falten con `mutuales.xlsx` (`codMutual` → `nomMutual`) y las
+> **categorías** con `categorias.xlsx` (las que dicen «MALO» quedan con aviso
+> previo al turno), busca esos dos catálogos junto a la planilla y es
+> **idempotente** (saltea los pacientes cuyo nombre + teléfono ya existe o ya
+> apareció en la misma planilla). El código `0`/`PARTICULAR` deja al paciente
+> **sin obra social** y el `plan` se anexa al número de afiliado
+> (`10-064083-11 (PLAN UNICO)`) porque el modelo no tiene un campo propio
+> (`--sin-plan` lo desactiva). El teléfono se normaliza —de
+> `+5493512169073LIDIA` queda el número— y, cuando la celda no trae ninguno
+> (`0` o una anotación), el paciente **no se pierde**: se guarda con
+> `--telefono-sin-dato` (por defecto `000000`) y el resumen informa cuántos
+> quedaron así para completarlos desde el panel. Acepta `--dry-run` (muestra los
+> totales sin escribir), `--limite N` (prueba con las primeras filas) y
+> `--detalle`. El «codigo» del sistema anterior **no se importa**: no todos son
+> documentos y usarlo como DNI sería incorrecto. Escribe donde apunte
+> `DATABASE_URL`, así que la misma orden sirve para la base local y para Neon
+> (con la cadena de producción en el entorno y `--dry-run` primero).
+>
+> **Qué cambia cuando la base tiene ~10.000 pacientes.** El panel pide el
+> listado completo (`GET /api/v1/pacientes`) y filtra en el navegador. Con la
+> base del Access esa respuesta pesa 4,3 MB: el JSON viaja **comprimido con
+> gzip** (`GZipMiddleware`) y queda en ~250 KB, la tabla de pacientes trae su
+> **buscador** (nombre, DNI, teléfono o cobertura) y pinta hasta 200 filas con
+> un aviso al pie, y la vista móvil del odontólogo lista hasta 60 fichas. Los
+> listados de *turnos*, *presupuestos* y *cuenta corriente* no cambiaron.
 >
 > **Migración de la cobertura al catálogo.** Las bases creadas con el campo de
 > texto `Paciente.obra_social` necesitan el paso a la clave foránea
@@ -1982,7 +2022,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**834 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**998 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de

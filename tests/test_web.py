@@ -8,6 +8,8 @@ import re
 
 from html.parser import HTMLParser
 
+from app.models.paciente import Paciente
+
 
 class _ArbolHTML(HTMLParser):
     """Ruta de ancestros de cada ``id`` del documento.
@@ -743,6 +745,54 @@ def test_la_ficha_de_salud_sigue_sin_guardarse_en_cache(client):
     r = client.get("/anamnesis/token-de-prueba")
     assert r.status_code == 200
     assert "no-store" in r.headers.get("cache-control", "")
+
+
+def test_el_listado_de_pacientes_viaja_comprimido(client, db_session):
+    """La tabla del panel pide la base completa: el JSON se sirve con gzip.
+
+    Con los 9.937 pacientes del sistema anterior la respuesta pesaba 4,3 MB y
+    tardaba segundos en llegar. ``GZipMiddleware`` la comprime y el navegador la
+    descomprime solo, así que el contenido que ve el JS es el mismo.
+    """
+    for i in range(30):
+        db_session.add(
+            Paciente(nombre=f"Paciente {i:02d}", telefono=f"+549351000{i:04d}")
+        )
+    db_session.commit()
+
+    comprimido = client.get("/api/v1/pacientes", headers={"Accept-Encoding": "gzip"})
+    assert comprimido.status_code == 200
+    assert comprimido.headers.get("content-encoding") == "gzip"
+    assert len(comprimido.json()) == 30
+
+    plano = client.get("/api/v1/pacientes", headers={"Accept-Encoding": "identity"})
+    assert "content-encoding" not in plano.headers
+    assert len(plano.json()) == 30
+
+
+def test_las_respuestas_chicas_no_se_comprimen(client):
+    """Comprimir unos pocos bytes cuesta más que el ahorro: queda sin gzip."""
+    r = client.get("/health", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert "content-encoding" not in r.headers
+
+
+def test_la_tabla_de_pacientes_tiene_buscador_y_tope_de_filas(client):
+    """Con ~10.000 fichas no se pueden pintar todas las filas de una vez.
+
+    El buscador filtra sobre los datos ya cargados y la tabla corta en
+    ``TOPE_PACIENTES``; la vista móvil hace lo mismo con ``TOPE_FICHAS``.
+    """
+    html = client.get("/").text
+    assert 'id="buscar-paciente"' in html
+
+    app_js = client.get("/static/app.js").text
+    assert "function pacientesParaTabla" in app_js
+    assert "const TOPE_PACIENTES" in app_js
+    assert 'getElementById("buscar-paciente")' in app_js
+
+    movil_js = client.get("/static/medico.js").text
+    assert "const TOPE_FICHAS" in movil_js
 
 
 def test_el_panel_avisa_si_el_navegador_sirvio_un_javascript_viejo(client):

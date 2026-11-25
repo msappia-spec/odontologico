@@ -36,7 +36,7 @@ dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
 existen como libro mayor contable (`transacciones_cc`) y como pagos de egresos
 (`pagos_egresos`), no como pasarela.
 
-**Pruebas:** 34 archivos `test_*.py` (más `conftest.py`) y **834 casos** (suite
+**Pruebas:** 41 archivos `test_*.py` (más `conftest.py`) y **998 casos** (suite
 completa verificada al generar este documento).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
@@ -85,7 +85,7 @@ Sí es:
 | Transacciones | Cada servicio hace `commit()`; no hay Unit of Work explícita. | Transacciones locales por operación. |
 | Frontend | Panel de 8.690 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
 | Despliegue | `vercel.json` declara `framework: fastapi`; un solo deploy. | Escalado y fallos acoplados. |
-| Pruebas | SQLite en memoria + `TestClient`, 34 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
+| Pruebas | SQLite en memoria + `TestClient`, 41 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
 
 ### 1.3. Fortalezas
 
@@ -283,6 +283,8 @@ Odontologico/
 ├── scripts/
 │   ├── seed.py                      # Datos demo idempotentes
 │   ├── seed_nomenclador_cba.py      # Nomenclador de Córdoba
+│   ├── importar_nomenclador_excel.py # Nomenclador desde Excel → prestaciones
+│   ├── importar_pacientes_excel.py  # Pacientes del Access (Excel) → pacientes
 │   ├── migrar_*.py                  # Migraciones legacy de SQLite
 │   ├── migrar_sqlite_a_postgres.py  # Copia local → PostgreSQL
 │   ├── replicar_datos_api.py        # Copia local → app desplegada vía HTTP
@@ -290,7 +292,7 @@ Odontologico/
 │   ├── limpiar_base.py              # Limpieza transaccional de tablas
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 34 archivos test_*.py, 834 casos
+├── tests/                           # 41 archivos test_*.py, 998 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -399,7 +401,16 @@ servicios ni de `services` desde modelos.
   decimales (`app/core/money.py`);
 - baja de catálogos: **lógica** (`activa = false`), no física;
 - errores de negocio: excepciones de `app/core/exceptions.py`;
-- configuración: `settings` único, leído de `.env`/entorno.
+- configuración: `settings` único, leído de `.env`/entorno;
+- compresión: `GZipMiddleware` con umbral de 1 KB comprime las respuestas
+  grandes (el listado de pacientes con la base del Access pasa de 4,3 MB a
+  ~250 KB) y deja intactas las chicas.
+
+**Listados grandes.** `GET /api/v1/pacientes` devuelve la colección completa:
+el panel y la vista móvil la piden una vez y filtran en el navegador (sin
+pedidos por tecla). Con las ~10.000 fichas importadas del Access, el panel
+pinta hasta 200 filas y la vista móvil hasta 60, con un aviso de recorte al
+pie; el buscador de cada vista filtra sobre los datos ya cargados.
 
 ### 3.4. Flujos funcionales
 
@@ -783,7 +794,7 @@ Si no hay pendientes, responde `422`.
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 834 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 998 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -1319,6 +1330,8 @@ absolutas con `pathlib`.
 |---|---|---|
 | `seed.py` | `python -m scripts.seed` | Carga odontólogas, pacientes, obras sociales, agenda, prestaciones, aranceles y turnos demo. Idempotente por claves naturales. |
 | `seed_nomenclador_cba.py` | `python -m scripts.seed_nomenclador_cba [--actualizar] [--dry-run] [--sin-detalle]` | Precarga el nomenclador de Córdoba en `prestaciones`; no duplica códigos. |
+| `importar_nomenclador_excel.py` | `python -m scripts.importar_nomenclador_excel planilla.xlsx [--dry-run] [--solo-nuevas] [--desactivar-faltantes] [--sin-detalle]` | Crea y actualiza `prestaciones` desde la grilla del nomenclador (columnas por nombre). |
+| `importar_pacientes_excel.py` | `python -m scripts.importar_pacientes_excel access/pacientes.xlsx [--mutuales RUTA] [--categorias RUTA] [--telefono-sin-dato T] [--sin-plan] [--limite N] [--detalle] [--dry-run]` | Carga los pacientes del Access: crea obras sociales y categorías, normaliza el teléfono y saltea los que ya existen (idempotente). |
 | `migrar_pacientes_datos.py` | `python -m scripts.migrar_pacientes_datos` | Agrega `dni`, `obra_social` (texto) y `numero_afiliado` a bases legacy. |
 | `migrar_obra_social.py` | `python -m scripts.migrar_obra_social` | Crea `obras_sociales`, migra el texto heredado a `obra_social_id` y elimina la columna vieja si SQLite lo permite. |
 | `migrar_historias_clinicas.py` | `python -m scripts.migrar_historias_clinicas` | Crea `historias_clinicas`, `evoluciones_medicas` y `archivos_adjuntos` con sus índices. |
@@ -1377,6 +1390,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_replicar_datos_api.py` | Replicación por API con servidor HTTP falso. |
 | `test_reportes_pdf.py` | Estructura PDF, paginado y datos de los reportes. |
 | `test_seed_nomenclador_cba.py` | Seed idempotente, `--actualizar` y `--dry-run`. |
+| `test_importar_pacientes_excel.py` | Importador de Access: lectura por nombre de columna, teléfono y plan, obras sociales y categorías, carga idempotente y `main`. |
 | `test_turnos.py` | Alta y listado básico de turnos. |
 | `test_turnos_actualizacion.py` | Reprogramación, cancelación y reactivación. |
 | `test_turnos_paciente_ubicuo.py` | Prohibición de solapamiento del paciente entre profesionales. |
@@ -3189,11 +3203,32 @@ envíos se simulan (`settings.whatsapp_envio_real` es falso).
 | `python -m scripts.seed_nomenclador_cba` | Carga el nomenclador base; no duplica códigos. |
 | `python -m scripts.seed_nomenclador_cba --actualizar` | Actualiza descripción/valor de códigos existentes. |
 | `python -m scripts.seed_nomenclador_cba --dry-run` | Muestra sin escribir. |
+| `python -m scripts.importar_pacientes_excel access/pacientes.xlsx --dry-run` | Totales de la importación de pacientes sin escribir. |
+| `python -m scripts.importar_pacientes_excel access/pacientes.xlsx` | Importa los pacientes del Access (idempotente). |
 | `python -m scripts.migrar_sqlite_a_postgres --destino ... --ejecutar` | Copia local a PostgreSQL. |
 | `python -m scripts.replicar_datos_api --url ... --ejecutar` | Copia local a la app desplegada vía API. |
 
 > `seed.py` **agrega** datos demo. No ejecutarlo sobre una base con datos reales
 > sin revisar antes qué crea.
+
+#### Importar los pacientes del Access a producción
+
+El importador escribe donde apunte `DATABASE_URL`. Para cargar la base de Neon
+se pasa la cadena en el entorno (o se toma de `.env.vercel.local`, ignorado por
+git), siempre simulando primero:
+
+```powershell
+$env:DATABASE_URL='postgresql://usuario:clave@host/base?sslmode=require'
+python -m scripts.importar_pacientes_excel access/pacientes.xlsx --dry-run
+python -m scripts.importar_pacientes_excel access/pacientes.xlsx
+Remove-Item Env:DATABASE_URL
+```
+
+Tarda alrededor de un minuto y medio (9.931 altas en lotes de 500). Es
+idempotente por `nombre + teléfono`: una segunda pasada informa
+`0 se insertarían`. No modifica los pacientes que ya existen, así que los datos
+demo cargados a mano (con el nombre en otro orden) quedan como registros
+aparte.
 
 #### Limpieza de la base de producción (Vercel / Neon)
 
@@ -3247,7 +3282,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **834 tests**.
+- Resultado actual: **998 tests**.
 
 ### 8.5. Publicación
 
@@ -3527,7 +3562,7 @@ git ls-files
 
 **Fecha de última verificación:** 05/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 834 tests (todos aprobados).
+**Resultado de la suite:** 998 tests (todos aprobados).
 
 ### 10.5. Conclusión
 

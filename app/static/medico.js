@@ -1143,6 +1143,12 @@
     );
   }
 
+  /* La base del sistema anterior tiene ~10.000 fichas: dibujarlas todas deja
+     el celular varios segundos sin responder. Se listan las primeras
+     ``TOPE_FICHAS`` y, cuando hay más, se pide afinar la búsqueda (que filtra
+     sobre los datos ya cargados, sin pedidos al servidor). */
+  const TOPE_FICHAS = 60;
+
   function renderPacientes() {
     const cont = $("lista-pacientes");
     if (!cont) return;
@@ -1161,7 +1167,12 @@
         `Registrar “${esc(texto)}” como paciente nuevo</button>`;
       return;
     }
-    cont.innerHTML = encontrados.map(pacienteHTML).join("");
+    const visibles = encontrados.slice(0, TOPE_FICHAS);
+    const aviso =
+      encontrados.length > visibles.length
+        ? `<p class="m-ficha-nota">Mostrando ${visibles.length} de ${encontrados.length} fichas: escribí para afinar la búsqueda.</p>`
+        : "";
+    cont.innerHTML = visibles.map(pacienteHTML).join("") + aviso;
   }
 
   /* Ficha elegida: queda fijada en la hoja y se libera el espacio del buscador. */

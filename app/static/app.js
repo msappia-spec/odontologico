@@ -982,6 +982,26 @@
     }
   }
 
+  /* La tabla trae la base completa del sistema anterior (unas 10.000 fichas):
+     pintarlas todas deja el navegador segundos sin responder. Se muestran las
+     primeras ``TOPE_PACIENTES`` que coinciden con el buscador y se aclara al
+     pie cuántas quedaron afuera, para no confundir un recorte con la realidad. */
+  const TOPE_PACIENTES = 200;
+
+  /* Fichas que entran en la tabla: todas o las que coinciden con el buscador. */
+  function pacientesParaTabla() {
+    const buscador = document.getElementById("buscar-paciente");
+    const q = normalizarTexto(buscador ? buscador.value.trim() : "");
+    if (!q) return state.pacientes;
+    return state.pacientes.filter(
+      (p) =>
+        normalizarTexto(p.nombre).includes(q) ||
+        normalizarTexto(p.dni || "").includes(q) ||
+        normalizarTexto(p.telefono || "").includes(q) ||
+        normalizarTexto(p.obra_social || "").includes(q)
+    );
+  }
+
   function renderPacientes() {
     document.getElementById("count-pacientes").textContent = state.pacientes.length;
     const tbody = document.getElementById("lista-pacientes");
@@ -989,15 +1009,27 @@
       tbody.innerHTML = `<tr><td colspan="8">${vacio("Aún no hay pacientes registrados")}</td></tr>`;
       return;
     }
+    const encontrados = pacientesParaTabla();
+    if (!encontrados.length) {
+      tbody.innerHTML = `<tr><td colspan="8">${vacio("Ningún paciente coincide con la búsqueda")}</td></tr>`;
+      return;
+    }
+    const visibles = encontrados.slice(0, TOPE_PACIENTES);
     const guion = '<span class="text-slate-400">—</span>';
+    /* Los turnos se cuentan en un solo recorrido: hacerlo con ``filter`` dentro
+       del ``map`` recorre la agenda una vez por paciente. */
+    const turnosPorPaciente = new Map();
+    state.turnos.forEach((t) => {
+      turnosPorPaciente.set(t.paciente_id, (turnosPorPaciente.get(t.paciente_id) || 0) + 1);
+    });
     /* Los filiatorios que carga la ficha médica se sincronizan en el paciente:
        la fecha de nacimiento (con la edad calculada por la API) se muestra
        debajo del nombre para no sumar otra columna a la tabla. */
     const fechaLegible = (iso) =>
       window.FICHA_MEDICA ? FICHA_MEDICA.fechaLegible(iso) : iso;
-    tbody.innerHTML = state.pacientes
+    tbody.innerHTML = visibles
       .map((p) => {
-        const n = state.turnos.filter((t) => t.paciente_id === p.id).length;
+        const n = turnosPorPaciente.get(p.id) || 0;
         const nacimiento = p.fecha_nacimiento
           ? `<p class="text-[11px] text-slate-400">Nac. ${esc(fechaLegible(p.fecha_nacimiento))}` +
             (p.edad === null || p.edad === undefined ? "" : ` · ${p.edad} años`) +
@@ -1033,7 +1065,12 @@
           `</div></td></tr>`
         );
       })
-      .join("");
+      .join("") +
+      (encontrados.length > visibles.length
+        ? `<tr><td colspan="8" class="text-xs text-slate-500">` +
+          `Mostrando ${visibles.length} de ${encontrados.length} pacientes: ` +
+          `escribí en el buscador para encontrar el resto.</td></tr>`
+        : "");
   }
 
   /* ------------------ Historial de turnos de un paciente ------------------ */
@@ -9343,6 +9380,11 @@
       }
     });
     document.addEventListener("input", function (e) {
+      // Buscador de la tabla de pacientes: filtra sobre los datos ya cargados.
+      if (e.target.closest("#buscar-paciente")) {
+        renderPacientes();
+        return;
+      }
       // Monto que cubre la OS en la grilla de convenios: recalcula el coseguro.
       const monto = e.target.closest("[data-conv-monto]");
       if (monto) {

@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -65,6 +66,15 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+
+# --- Compresión --------------------------------------------------------------
+# Con 9.937 pacientes la tabla de la secretaría pide ``GET /api/v1/pacientes``
+# completo: 4,3 MB de JSON que, sin comprimir, tardaban unos 4,4 s en llegar.
+# ``GZipMiddleware`` lo reduce a ~0,5 MB (el JSON repite nombres de campo y
+# valores de cobertura) y el navegador lo descomprime solo. El umbral de 1 KB
+# deja intactas las respuestas chicas, donde comprimir cuesta más que el ahorro.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 # --- Caché de los recursos del panel -----------------------------------------
