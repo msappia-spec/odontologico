@@ -17,7 +17,8 @@
         backend (``GET /turnos?fecha_desde=&fecha_hasta=``).
      4. Acciones táctiles:
         * agendar en un horario libre: se elige el paciente de la **lista
-          completa** de fichas registradas (buscador por nombre, DNI o teléfono) o
+          completa** de fichas registradas (buscador por nombre, DNI, teléfono o
+          categoría) o
           se carga uno nuevo (``POST /pacientes`` + ``POST /turnos``);
         * **editar** un turno (lápiz): cambiar paciente, día, hora, duración o
           estado con ``PATCH /turnos/{id}``;
@@ -1081,9 +1082,18 @@
   }
 
   /* -------------------- Buscador de pacientes (fichas) -------------------- */
-  /* ``GET /pacientes`` trae la lista completa: acá se filtra por nombre, DNI o
-     teléfono mientras se escribe, sin una request por tecla. Con el campo vacío
-     se listan todas las fichas, que es lo que permite elegir al paciente. */
+  /* ``GET /pacientes`` trae la lista completa: acá se filtra por nombre, DNI,
+     teléfono o categoría mientras se escribe, sin una request por tecla. Con el
+     campo vacío se listan todas las fichas, que es lo que permite elegir al
+     paciente. */
+  /* Categoría de la ficha como texto buscable: el código (``MALO``) y el nombre
+     del catálogo. Los guiones bajos pasan a espacios para que «sin categorizar»
+     también encuentre. */
+  function textoCategoriaPaciente(p) {
+    const codigo = String(p.categoria || "SIN_CATEGORIZAR");
+    return [codigo, codigo.replace(/_/g, " "), p.categoria_nombre || ""].join(" ");
+  }
+
   function pacientesFiltrados(texto) {
     const q = normalizar(texto);
     const lista = q
@@ -1091,7 +1101,8 @@
           return (
             normalizar(p.nombre).includes(q) ||
             normalizar(p.dni || "").includes(q) ||
-            normalizar(p.telefono || "").includes(q)
+            normalizar(p.telefono || "").includes(q) ||
+            normalizar(textoCategoriaPaciente(p)).includes(q)
           );
         })
       : state.pacientes.slice();

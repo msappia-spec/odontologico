@@ -89,6 +89,7 @@ def test_la_hoja_movil_busca_fichas_existentes_antes_de_crear_una(client):
     assert "function pacientesFiltrados(" in js
     assert "function elegirPaciente(" in js
     assert "function mostrarAltaPacienteNuevo(" in js
+    assert "function textoCategoriaPaciente(" in js  # también se busca por categoría
     assert "data-paciente=" in js          # cada ficha se elige por id
     assert "data-alta-nuevo" in js         # «registrar como paciente nuevo»
 

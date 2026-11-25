@@ -410,7 +410,12 @@ servicios ni de `services` desde modelos.
 el panel y la vista móvil la piden una vez y filtran en el navegador (sin
 pedidos por tecla). Con las ~10.000 fichas importadas del Access, el panel
 pinta hasta 200 filas y la vista móvil hasta 60, con un aviso de recorte al
-pie; el buscador de cada vista filtra sobre los datos ya cargados.
+pie. El buscador de cada vista filtra sobre los datos ya cargados por nombre,
+DNI, teléfono, cobertura y **categoría** (el código del catálogo —`MALO`— y su
+nombre visible —*Malo*—, con los guiones bajos como espacios para que «sin
+categorizar» encuentre); el panel arma además un índice de texto por paciente
+una sola vez y lo rehace cuando cambian los pacientes o el catálogo, para no
+normalizar cinco campos en cada tecla.
 
 ### 3.4. Flujos funcionales
 

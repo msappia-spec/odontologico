@@ -780,19 +780,27 @@ def test_las_respuestas_chicas_no_se_comprimen(client):
 def test_la_tabla_de_pacientes_tiene_buscador_y_tope_de_filas(client):
     """Con ~10.000 fichas no se pueden pintar todas las filas de una vez.
 
-    El buscador filtra sobre los datos ya cargados y la tabla corta en
-    ``TOPE_PACIENTES``; la vista móvil hace lo mismo con ``TOPE_FICHAS``.
+    El buscador filtra sobre los datos ya cargados (nombre, DNI, teléfono,
+    cobertura y categoría) y la tabla corta en ``TOPE_PACIENTES``; la vista
+    móvil hace lo mismo con ``TOPE_FICHAS``.
     """
     html = client.get("/").text
     assert 'id="buscar-paciente"' in html
+    assert "categoría" in html
 
     app_js = client.get("/static/app.js").text
     assert "function pacientesParaTabla" in app_js
     assert "const TOPE_PACIENTES" in app_js
     assert 'getElementById("buscar-paciente")' in app_js
+    # La categoría del paciente también se busca (código y nombre del catálogo).
+    assert "function textoCategoriaPaciente" in app_js
+    assert "textoCategoriaPaciente(p)" in app_js
+    assert "function textosPacientes" in app_js
 
     movil_js = client.get("/static/medico.js").text
     assert "const TOPE_FICHAS" in movil_js
+    assert "function textoCategoriaPaciente" in movil_js
+    assert "normalizar(textoCategoriaPaciente(p))" in movil_js
 
 
 def test_el_panel_avisa_si_el_navegador_sirvio_un_javascript_viejo(client):

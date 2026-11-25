@@ -988,18 +988,62 @@
      pie cuántas quedaron afuera, para no confundir un recorte con la realidad. */
   const TOPE_PACIENTES = 200;
 
+  /* Categoría de la ficha como texto buscable: el código (``MALO``), su nombre
+     en el catálogo (``Malo``) y el que manda la API. Los guiones bajos se
+     cambian por espacios para que «sin categorizar» también encuentre. */
+  function textoCategoriaPaciente(p) {
+    const meta = categoriaPaciente(p.categoria);
+    const codigo = String(p.categoria || meta.codigo);
+    return [codigo, codigo.replace(/_/g, " "), meta.texto, p.categoria_nombre || ""]
+      .join(" ");
+  }
+
+  /* Texto normalizado de cada ficha para el buscador: nombre, DNI, teléfono,
+     cobertura y categoría. Se arma una sola vez por carga de datos —y se
+     rehace si cambia el catálogo de categorías— porque con ~10.000 fichas
+     normalizar cinco campos en cada tecla se siente al escribir. */
+  let indicePacientes = { pacientes: null, categorias: null, textos: null };
+
+  function textosPacientes() {
+    if (
+      indicePacientes.pacientes === state.pacientes &&
+      indicePacientes.categorias === state.categoriasPaciente
+    ) {
+      return indicePacientes.textos;
+    }
+    const textos = new Map();
+    state.pacientes.forEach((p) => {
+      textos.set(
+        p.id,
+        normalizarTexto(
+          [
+            p.nombre,
+            p.dni || "",
+            p.telefono || "",
+            p.obra_social || "",
+            textoCategoriaPaciente(p),
+          ].join(" ")
+        )
+      );
+    });
+    indicePacientes = {
+      pacientes: state.pacientes,
+      categorias: state.categoriasPaciente,
+      textos,
+    };
+    return textos;
+  }
+
   /* Fichas que entran en la tabla: todas o las que coinciden con el buscador. */
   function pacientesParaTabla() {
     const buscador = document.getElementById("buscar-paciente");
     const q = normalizarTexto(buscador ? buscador.value.trim() : "");
     if (!q) return state.pacientes;
-    return state.pacientes.filter(
-      (p) =>
-        normalizarTexto(p.nombre).includes(q) ||
-        normalizarTexto(p.dni || "").includes(q) ||
-        normalizarTexto(p.telefono || "").includes(q) ||
-        normalizarTexto(p.obra_social || "").includes(q)
-    );
+    const textos = textosPacientes();
+    return state.pacientes.filter((p) => {
+      const texto = textos.get(p.id);
+      return texto !== undefined && texto.includes(q);
+    });
   }
 
   function renderPacientes() {
