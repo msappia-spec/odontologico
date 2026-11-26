@@ -918,8 +918,10 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 - **Archivos:** `app/static/index.html`, `app/static/styles.css`,
   `app/static/app.js` (datos, formularios y toasts) y
   `app/static/calendar.js` (grilla mensual, filtro por odontólogo y panel del
-  día). El router que sirve la página está en `app/web/router.py` y el montaje
-  de `/static` en `app/main.py`.
+  día). La pestaña **Presupuestos** vive en `app/static/presupuestos.js` con sus
+  estilos en `app/static/presupuestos.css` (formulario, totales, listado, PDF y
+  el modal de envío por WhatsApp). El router que sirve la página está en
+  `app/web/router.py` y el montaje de `/static` en `app/main.py`.
 - **Encabezado:** el `<h1>` (`text-3xl font-bold text-slate-800 tracking-tight`)
   abarca todo el ancho del área de contenido y va **arriba de todo**, por encima
   de la barra de acciones fija (*Recordatorios* / *Nuevo turno*) y del
@@ -943,6 +945,7 @@ nuevas: HTML + Tailwind CSS (CDN) + JavaScript `fetch` contra la API.
 | **Recordatorios Pendientes** | Turnos de los próximos días que todavía no recibieron el aviso, con la vista previa del mensaje y **dos formas de enviarlo**: el botón **Enviar automático** (API de WAHA, sin abrir el celular) de cada fila o **Enviar todos** para la lista completa, y el botón verde **Enviar por WhatsApp** (enlace Click-to-Chat). El contador se ve en el menú y en la cabecera. Cuando el paciente responde **1 / SI** el turno queda confirmado y con **2 / NO** se cancela. |
 | **Bot WhatsApp** | **Menú configurable del FAQ Bot**: tabla con tecla, título, tipo de respuesta, texto (o detalle de lo que arma el bot), orden y estado; alta/edición en modal, baja lógica, reactivación, filtro **Mostrar las dadas de baja**, **vista previa** del mensaje exacto que recibe el paciente y **restaurar menú histórico**. La tecla (`0`..`9`) es única. |
 | **Facturación y Caja** | **Módulo 3.** Cinco pestañas: *Caja del día* (KPIs de efectivo, **transferencia**, **ingresos del día** y saldo de obras sociales + movimientos del día con acciones *Cobrar* / *Debitar* y columna **Medio**, más la tabla de **cobros de cuentas corrientes** del día con sus totales por medio), *Liquidación de obras sociales* (cobertura + mes, totales del período, botón **Generar presentación del período**, tildado de órdenes pagadas o debitadas, cierre en lote y **exportación a CSV** o **PDF para la cobertura**), *Liquidación de médicos* (elegís el profesional y el mes: **tabla de subtotales** con la producción, el efectivo, lo presentado a las obras sociales, los honorarios por profesional y los totales del consultorio al pie —según la forma de pago configurada en *Doctores*— más exportación a CSV o **PDF de la liquidación**, que respeta el profesional elegido), *Prestaciones y aranceles* (catálogo de prácticas y tabla de aranceles por cobertura) y *Convenios* (**todo el nomenclador de Córdoba** para la cobertura elegida, con el campo **Monto que cubre la OS**, el **coseguro sugerido** calculado en vivo, los totales de la grilla, guardado en lote y el **importador masivo**: *Descargar Plantilla Excel de Ejemplo* —dos columnas: `codigo` y `precio_cobertura`, en `.csv` o `.xlsx`— + recuadro de **arrastrar y soltar** con vista previa por fila y confirmación). El **formulario de cobro** —que se abre con el botón *Cobrar una visita* o desde la tarjeta de un turno— tiene un **buscador rápido** por código del nomenclador o nombre, muestra por cada práctica su **arancel**, lo que **cubre la obra social** y el **coseguro**, avisa que el saldo queda **PENDIENTE para la liquidación de la cobertura** y calcula el cartel **«Cobrar Coseguro en mostrador: $X.XXX»** con el total de las prácticas; se confirma con **Confirmar y cerrar atención**, que registra el movimiento de caja y finaliza el turno. |
+| **Presupuestos** | Cotizaciones del consultorio: elegís el paciente, cargás los trabajos con el **buscador del nomenclador** (código y descripción se completan solos, con el precio editable) o a mano, y ves el **total, las entregas y el saldo** calculados en vivo. La lista muestra el paciente, la fecha, el total, las entregas y el saldo, con las acciones *Editar*, *Eliminar*, **PDF** (descarga el documento con el diseño del consultorio) y el botón verde de **WhatsApp**: abre un modal con el **número de la ficha ya cargado** para revisarlo, permitir corregirlo y, si el envío sale bien, dejar tildado **Guardar este número en la ficha del paciente**. El mensaje lleva el saludo, la fecha, el detalle de los trabajos, el total, las entregas, el saldo y la forma de pago, con el **PDF adjunto**. |
 
 | **Cuenta corriente** | **Módulo 5.** Elegís el paciente y ves su **saldo deudor** (KPIs de saldo, total debitado, total cobrado y cantidad de planes) con una nota que lo explica en palabras —*el paciente debe*, *saldo a favor* o *cuenta saldada*—, la **tabla de planes de cuotas** (valor de cada cuota, total del tratamiento, entrega inicial y estado `ACTIVO` / `EN COBRANZA` / `FINALIZADO`, con las acciones *Registrar pago* —precarga el importe de una cuota en el formulario—, *A cobranza* y *Reactivar*) y el **libro mayor** con todos los débitos (deuda) y créditos (pagos) del paciente, del más nuevo al más viejo. Los dos formularios de la vista **abren un plan** (`POST /finanzas/plan-cuotas`: total, cuotas, entrega inicial del 50 % y la opción de cobrarla en el acto) y **registran un pago** (`POST /finanzas/pagar`, imputable a un plan o a cuenta general, con fecha y concepto). El saldo lo calcula siempre el servidor: la vista no lo edita y el plan se cierra solo cuando la cuenta queda saldada. **Al elegir un plan** en *Imputar al plan* el importe se completa con el **valor de la cuota** que informa el servidor (volver a *Saldo general* descarta esa precarga, nunca un importe escrito a mano) y, si el pago **supera la deuda**, el formulario lo avisa en vivo y **pregunta** si el excedente debe quedar como **saldo a favor** antes de registrar nada: aceptar lo imputa como crédito y muestra el `saldo_a_favor`, y cancelar devuelve el foco al importe para corregirlo. |
 | **Proveedores y egresos** | **Módulo 6.** Lo que el consultorio **debe**: tablero con la deuda total, la vencida, las facturas abiertas y la cantidad de proveedores, el desglose **por rubro** (mecánico dental, insumos, servicios) y la insignia del menú con las facturas impagas. El **alta de proveedor** (nombre, rubro y teléfono) vive en la misma vista; la tabla muestra el saldo, lo vencido y las facturas abiertas de cada uno con las acciones *Facturar* (abre el modal con el proveedor ya elegido) y *Facturas* (filtra la cartera). La **cartera de facturas recibidas** va por vencimiento, con filtros de proveedor, estado y *Sólo vencidas*, y el botón *Pagar* abre el modal con el **saldo precargado**, el **medio de pago** (`EFECTIVO`, `TRANSFERENCIA`, `TARJETA`) y la fecha; el servidor descuenta la factura y el saldo del proveedor en la misma operación. El campo **Paciente** del modal sólo se habilita en un proveedor mecánico dental (en otro rubro la API responde `422`) y un pago mayor al saldo se avisa antes de enviarlo. |
@@ -1540,6 +1543,7 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `PUT`  | `/presupuestos/{id}` | Reemplazar cabecera y todos los trabajos del presupuesto (mismo payload que el `POST`) |
 | `DELETE`| `/presupuestos/{id}` | Eliminar el presupuesto y sus renglones (`204`) |
 | `GET`  | `/presupuestos/{id}/pdf` | **PDF del presupuesto** con el diseño del documento del consultorio (`application/pdf`, inline). Imprime `Cód. <código> - <descripción>` y respeta los saltos de línea de la descripción |
+| `POST` | `/presupuestos/{id}/whatsapp` | **Enviar el presupuesto por WhatsApp**: genera el PDF y lo manda como adjunto con el resumen del presupuesto (`{WAHA_URL}/api/sendFile`, PDF en base64). El `telefono` del cuerpo es opcional: sin él usa el de la ficha. `actualizar_telefono=true` guarda el número corregido en el paciente **después** de un envío exitoso. Presupuesto inexistente → `404`; número inválido → `422`; fallo de WAHA → `502`. Sin credenciales responde `simulado: true` |
 | `POST` | `/obras-sociales` | Crear obra social (nombre único → `409`) |
 | `GET`  | `/obras-sociales` | Listar el catálogo (`?activas=true/false`, `?nombre=`) |
 | `GET`  | `/obras-sociales/{id}` | Obtener obra social |
@@ -1888,6 +1892,30 @@ curl -X POST $API/whatsapp/webhook -H "Content-Type: application/json" -d '{
 > puede invocar mediante un *cron*, el Task Scheduler de Windows o `APScheduler`,
 > por ejemplo `POST /api/v1/tareas/enviar-recordatorios` una vez al día.
 
+### Presupuestos por WhatsApp (`presupuesto_whatsapp_service`)
+
+- El botón verde de la pestaña **Presupuestos** abre un modal con el **teléfono de
+  la ficha ya cargado**: se revisa, se corrige si hace falta y recién ahí se
+  envía. El modal recuerda que el número sale del paciente y permite tildar
+  **Guardar este número en la ficha** para no tener que corregirlo cada vez.
+- El servidor arma el PDF con `presupuesto_pdf_service.generar_pdf` (el mismo
+  documento del botón **PDF**) y lo manda como **archivo adjunto** con
+  `POST {WAHA_URL}/api/sendFile`: `file.data` viaja en **base64** (el PDF se
+  genera al vuelo y no tiene una URL pública en Vercel), con `filename`,
+  `mimetype`, `caption` y `session`.
+- El `caption` lleva el saludo con el nombre del paciente, la fecha del
+  presupuesto («septiembre de 2026»), la cantidad de trabajos, el **total** y
+  —cuando hay entregas cargadas— las **entregas** y el **saldo**, más la
+  **forma de pago** (importes con separador de miles, `$830.000`).
+- Reglas: `telefono` vacío usa el de la ficha; menos de 10 dígitos → `422`;
+  presupuesto inexistente → `404`; WAHA caído → `502`. Sin `WAHA_URL`/`WAHA_API_KEY`
+  el envío se **simula** (la respuesta trae `simulado: true`) y el panel lo avisa.
+  El número corregido se guarda **sólo después** de un envío exitoso, así que un
+  error de WAHA no ensucia la ficha.
+- El transporte es el mismo de los recordatorios (`_enviar_http_whatsapp` con
+  `recurso="sendFile"`, cabecera `X-Api-Key` y pausa de 1,5 s), con timeout de
+  30 s porque el cuerpo incluye el PDF en base64.
+
 ### FAQ Bot: respuestas automáticas (`whatsapp_bot_service`)
 
 El paciente escribe al número del consultorio y el bot contesta solo, sin
@@ -2026,7 +2054,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**998 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**1004 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de

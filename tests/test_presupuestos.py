@@ -10,12 +10,20 @@ Cubren:
    saltos de línea para agregar aclaraciones.
 6. **PDF**: replica la plantilla del consultorio, imprime el código y los
    importes con separador de miles, y agrega páginas si el presupuesto es largo.
+7. **WhatsApp**: envía el PDF al teléfono de la ficha (simulado sin
+   credenciales), permite corregir el número antes de enviar, lo guarda en el
+   paciente cuando se pide y adjunta el archivo en base64 por ``/api/sendFile``.
 """
 
+import base64
+
+import httpx
 import pymupdf
 from sqlalchemy import func, select
 
+from app.core.config import settings
 from app.models.presupuesto import Presupuesto, PresupuestoItem
+from app.services import whatsapp_service
 
 API = "/api/v1"
 
@@ -384,3 +392,180 @@ def test_un_presupuesto_largo_continua_en_otra_pagina(client, paciente):
     assert "Trabajo 20" in texto
     assert texto.count("NOMBRE DEL PACIENTE:") == documento.page_count
     assert texto.count("PRESUPUESTO") >= documento.page_count
+
+
+class _RespuestaHttpFalsa:
+    """Respuesta mínima de ``httpx`` para no salir a la red en las pruebas."""
+
+    def __init__(self, data: dict, status_code: int = 200):
+        self._data = data
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            peticion = httpx.Request("POST", "http://turnos_waha:3000/api/sendFile")
+            raise httpx.HTTPStatusError(
+                "error",
+                request=peticion,
+                response=httpx.Response(
+                    self.status_code, request=peticion, json=self._data
+                ),
+            )
+
+    def json(self) -> dict:
+        return self._data
+
+
+def test_enviar_presupuesto_por_whatsapp_usa_el_telefono_de_la_ficha(
+    client, paciente
+):
+    """Sin credenciales de WAHA el envío se simula y el panel lo puede mostrar."""
+    creado = _crear(client, paciente.id)
+
+    respuesta = client.post(
+        f"{API}/presupuestos/{creado['id']}/whatsapp", json={}
+    )
+
+    assert respuesta.status_code == 200, respuesta.text
+    datos = respuesta.json()
+    assert datos["presupuesto_id"] == creado["id"]
+    assert datos["telefono"] == "5491122334455"
+    assert datos["nombre_archivo"] == "presupuesto-paciente-demo-2026-09-17.pdf"
+    assert datos["mensaje_id"].startswith("waha.SIMULADO.")
+    assert datos["simulado"] is True
+    assert datos["actualizado_telefono"] is False
+
+
+def test_el_numero_se_puede_corregir_y_guardar_en_la_ficha(
+    client, db_session, paciente
+):
+    """El modal revisa el número: si se corrige, se envía a ese y se guarda."""
+    creado = _crear(client, paciente.id)
+
+    respuesta = client.post(
+        f"{API}/presupuestos/{creado['id']}/whatsapp",
+        json={"telefono": "351 555-1234", "actualizar_telefono": True},
+    )
+
+    assert respuesta.status_code == 200, respuesta.text
+    datos = respuesta.json()
+    assert datos["telefono"] == "5493515551234"
+    assert datos["actualizado_telefono"] is True
+
+    db_session.refresh(paciente)
+    assert paciente.telefono == "5493515551234"
+    detalle = client.get(f"{API}/presupuestos/{creado['id']}").json()
+    assert detalle["paciente"]["telefono"] == "5493515551234"
+
+
+def test_el_numero_corregido_no_se_guarda_si_no_se_pide(
+    client, db_session, paciente
+):
+    """Tildar «guardar» es opcional: el envío puede usar un número de una vez."""
+    creado = _crear(client, paciente.id)
+
+    datos = client.post(
+        f"{API}/presupuestos/{creado['id']}/whatsapp",
+        json={"telefono": "351 555-1234"},
+    ).json()
+
+    assert datos["telefono"] == "5493515551234"
+    assert datos["actualizado_telefono"] is False
+    db_session.refresh(paciente)
+    assert paciente.telefono == "+5491122334455"
+
+
+def test_enviar_presupuesto_valida_el_numero_y_el_presupuesto(client, paciente):
+    creado = _crear(client, paciente.id)
+    url = f"{API}/presupuestos/{creado['id']}/whatsapp"
+
+    assert client.post(
+        f"{API}/presupuestos/999999/whatsapp", json={}
+    ).status_code == 404
+
+    sin_digitos = client.post(url, json={"telefono": "sin número"})
+    assert sin_digitos.status_code == 422
+    assert "no es válido" in sin_digitos.json()["detail"]
+
+    corto = client.post(url, json={"telefono": "1234"})
+    assert corto.status_code == 422
+
+    # El vacío del modal significa «usar el de la ficha», no un error.
+    assert client.post(url, json={"telefono": "   "}).status_code == 200
+
+
+def test_el_envio_real_adjunta_el_pdf_en_base64(client, paciente, monkeypatch):
+    """Con credenciales se hace ``POST /api/sendFile`` con el PDF y el resumen."""
+    monkeypatch.setattr(settings, "waha_url", "http://turnos_waha:3000")
+    monkeypatch.setattr(settings, "waha_api_key", "turnos2026")
+    monkeypatch.setattr(settings, "waha_session", "consultorio")
+
+    llamadas: list = []
+    pausas: list = []
+
+    def _post_falso(url: str, **kwargs):
+        llamadas.append({"url": url, **kwargs})
+        return _RespuestaHttpFalsa({"id": "true_5491122334455@c.us_PDF"})
+
+    monkeypatch.setattr(whatsapp_service.httpx, "post", _post_falso)
+    monkeypatch.setattr(whatsapp_service.time, "sleep", pausas.append)
+
+    creado = _crear(client, paciente.id)
+    respuesta = client.post(
+        f"{API}/presupuestos/{creado['id']}/whatsapp", json={}
+    )
+
+    assert respuesta.status_code == 200, respuesta.text
+    datos = respuesta.json()
+    assert datos["simulado"] is False
+    assert datos["mensaje_id"] == "true_5491122334455@c.us_PDF"
+    assert pausas == [whatsapp_service.PAUSA_ENVIO_WAHA]
+
+    assert len(llamadas) == 1
+    assert llamadas[0]["url"] == "http://turnos_waha:3000/api/sendFile"
+    assert llamadas[0]["headers"]["X-Api-Key"] == "turnos2026"
+
+    cuerpo = llamadas[0]["json"]
+    assert cuerpo["chatId"] == "5491122334455@c.us"
+    assert cuerpo["session"] == "consultorio"
+    assert cuerpo["file"]["mimetype"] == "application/pdf"
+    assert cuerpo["file"]["filename"] == (
+        "presupuesto-paciente-demo-2026-09-17.pdf"
+    )
+    assert base64.b64decode(cuerpo["file"]["data"]).startswith(b"%PDF")
+
+    assert "Hola Paciente Demo" in cuerpo["caption"]
+    assert "Trabajos: 2" in cuerpo["caption"]
+    assert "Total: $830.000" in cuerpo["caption"]
+    assert "Entregas: $230.000" in cuerpo["caption"]
+    assert "Saldo: $600.000" in cuerpo["caption"]
+    assert "Forma de pago: Contado / transferencia" in cuerpo["caption"]
+
+
+def test_si_waha_falla_responde_502_y_no_guarda_el_numero(
+    client, db_session, paciente, monkeypatch
+):
+    """El teléfono corregido se guarda sólo después de un envío exitoso."""
+    monkeypatch.setattr(settings, "waha_url", "http://turnos_waha:3000")
+    monkeypatch.setattr(settings, "waha_api_key", "turnos2026")
+
+    peticion = httpx.Request("POST", "http://turnos_waha:3000/api/sendFile")
+    fallo = httpx.Response(
+        500, request=peticion, json={"message": "Sin sesión de WhatsApp"}
+    )
+    monkeypatch.setattr(whatsapp_service.httpx, "post", lambda *_a, **_k: fallo)
+    monkeypatch.setattr(whatsapp_service.time, "sleep", lambda _s: None)
+
+    creado = _crear(client, paciente.id)
+    respuesta = client.post(
+        f"{API}/presupuestos/{creado['id']}/whatsapp",
+        json={"telefono": "351 555-1234", "actualizar_telefono": True},
+    )
+
+    assert respuesta.status_code == 502
+    assert "Sin sesión de WhatsApp" in respuesta.json()["detail"]
+
+    db_session.refresh(paciente)
+    assert paciente.telefono == "+5491122334455"
+
+

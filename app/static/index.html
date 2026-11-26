@@ -2097,6 +2097,48 @@
     </div>
   </div>
 
+  <!-- ============= MODAL: ENVIAR PRESUPUESTO POR WHATSAPP ============= -->
+  <!-- Muestra el teléfono de la ficha para revisarlo antes de enviar el PDF. -->
+  <div id="modal-pres-whatsapp" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-md p-6" role="dialog" aria-modal="true"
+         aria-labelledby="pres-wa-titulo">
+      <div class="flex items-start justify-between mb-5 gap-3">
+        <div class="min-w-0">
+          <h3 id="pres-wa-titulo" class="text-lg font-extrabold text-slate-900">Enviar presupuesto por WhatsApp</h3>
+          <p id="pres-wa-sub" class="text-xs text-slate-500">Se adjunta el PDF con un resumen del presupuesto.</p>
+        </div>
+        <button type="button" id="pres-wa-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="pres-wa-form" class="space-y-4" autocomplete="off">
+        <div>
+          <label class="field-label" for="pres-wa-telefono">Número de celular</label>
+          <input id="pres-wa-telefono" type="tel" class="field" inputmode="tel"
+                 maxlength="30" required placeholder="Ej.: 351 643-2863" />
+          <p id="pres-wa-ayuda" class="text-[11px] text-slate-400 mt-1">
+            Es el número cargado en la ficha del paciente. Si está mal, corregilo acá antes de enviar.
+          </p>
+        </div>
+        <label class="flex items-start gap-2.5 cursor-pointer select-none">
+          <input id="pres-wa-guardar" type="checkbox"
+                 class="mt-0.5 w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+          <span class="text-xs text-slate-600">
+            Guardar este número en la ficha del paciente para los próximos envíos.
+          </span>
+        </label>
+        <p class="text-[11px] text-slate-400">
+          Se envía el PDF del presupuesto con el total, las entregas, el saldo y la forma de pago.
+        </p>
+        <div id="pres-wa-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="pres-wa-cancelar" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="pres-wa-enviar" class="btn btn-primary flex-1">Enviar por WhatsApp</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- ===================== MODAL: NUEVO TURNO ===================== -->
   <div id="modal-turno" class="modal-backdrop hide">
     <div class="card anim-pop w-full max-w-lg p-6 max-h-[92vh] overflow-y-auto">

@@ -183,6 +183,17 @@
   border-radius: .5rem;
 }
 
+/* El envío por WhatsApp comparte el tamaño de las otras acciones del listado:
+   ``btn-wa`` está pensado para los enlaces grandes de recordatorios. */
+.pres-lista-acciones .btn-wa {
+  padding: .32rem .55rem;
+  font-size: .72rem;
+  border-radius: .5rem;
+  border: 0;
+  cursor: pointer;
+  box-shadow: none;
+}
+
 .pres-empty {
   padding: 1.4rem .8rem;
   text-align: center;

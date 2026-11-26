@@ -140,6 +140,10 @@ def test_dashboard_incluye_la_vista_de_presupuestos(client):
     assert 'id="pres-items"' in html
     assert 'id="pres-prestaciones-catalogo"' in html
     assert 'id="pres-lista"' in html
+    # Modal de envío por WhatsApp con el número revisable antes de mandar.
+    assert 'id="modal-pres-whatsapp"' in html
+    assert 'id="pres-wa-telefono"' in html
+    assert 'id="pres-wa-guardar"' in html
     assert "/static/presupuestos.js" in html
     assert "/static/presupuestos.css" in html
 
@@ -148,6 +152,8 @@ def test_dashboard_incluye_la_vista_de_presupuestos(client):
     assert "window.PresupuestosApp" in js
     assert "data-pres-editar" in js
     assert "data-pres-eliminar" in js
+    assert "data-pres-whatsapp" in js
+    assert "/whatsapp" in js
     assert "/prestaciones?activas=true" in js
     assert "pres-codigo" in js
     assert "/pdf" in js
@@ -159,6 +165,7 @@ def test_dashboard_incluye_la_vista_de_presupuestos(client):
     css = client.get("/static/presupuestos.css").text
     assert ".pres-item-grid" in css
     assert ".pres-totales" in css
+    assert ".pres-lista-acciones .btn-wa" in css
 
 
 def test_dashboard_incluye_la_vista_de_obras_sociales(client):

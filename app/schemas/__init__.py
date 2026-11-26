@@ -73,6 +73,8 @@ from app.schemas.obra_social import (
 from app.schemas.paciente import PacienteCreate, PacienteRead, PacienteUpdate
 from app.schemas.presupuesto import (
     PresupuestoCreate,
+    PresupuestoEnviadoWhatsApp,
+    PresupuestoEnvioWhatsApp,
     PresupuestoItemCreate,
     PresupuestoItemRead,
     PresupuestoRead,
@@ -151,6 +153,8 @@ __all__ = [
     "PacienteRead",
     "PacienteUpdate",
     "PresupuestoCreate",
+    "PresupuestoEnviadoWhatsApp",
+    "PresupuestoEnvioWhatsApp",
     "PresupuestoItemCreate",
     "PresupuestoItemRead",
     "PresupuestoRead",

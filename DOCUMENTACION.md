@@ -36,7 +36,7 @@ dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
 existen como libro mayor contable (`transacciones_cc`) y como pagos de egresos
 (`pagos_egresos`), no como pasarela.
 
-**Pruebas:** 41 archivos `test_*.py` (más `conftest.py`) y **998 casos** (suite
+**Pruebas:** 41 archivos `test_*.py` (más `conftest.py`) y **1004 casos** (suite
 completa verificada al generar este documento).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
@@ -292,7 +292,7 @@ Odontologico/
 │   ├── limpiar_base.py              # Limpieza transaccional de tablas
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 41 archivos test_*.py, 998 casos
+├── tests/                           # 41 archivos test_*.py, 1004 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -799,7 +799,7 @@ Si no hay pendientes, responde `422`.
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 998 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 1004 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -977,6 +977,9 @@ Si no hay pendientes, responde `422`.
 | `anamnesis_service.py` | `obtener_formulario_publico`, `guardar_declaracion_publica`, `guardar_declaracion_turno`, `listar_fichas_panel`, `obtener_enlace_ficha`, `enviar_ficha`, `necesita_completar_anamnesis` | Token, alta/edición de la ficha médica completa (paciente y profesional), sincronización de los filiatorios en el paciente, panel de fichas y envío manual del enlace. |
 | `odontograma_service.py` | `obtener_odontograma`, `guardar_odontograma`, `_aplicar_cabecera`, `_odontograma_de` | Lectura sin crear la historia, alta/corrección del gráfico y reemplazo del conjunto de dientes. |
 | `ficha_medica_service.py` | `obtener_ficha`, `guardar_ficha`, `_armar_read`, `_aplicar_cabecera`, `_ficha_de` | Lectura sin crear la historia, alta/corrección de la cabecera y el estado bucal, reemplazo del libro de trabajos y cálculo del saldo acumulado. |
+| `presupuesto_service.py` | `obtener_presupuesto_orm`, `_armar_read`, `_aplicar`, `listar_presupuestos`, `obtener_presupuesto`, `crear_presupuesto`, `actualizar_presupuesto`, `eliminar_presupuesto` | Cotizaciones con trabajos, entregas y saldo calculado (el total no se guarda: se recalcula de los renglones). |
+| `presupuesto_pdf_service.py` | `construir_pdf`, `generar_pdf`, `_pagina_primera`, `_pagina_continuacion`, `_texto_detalle`, `_dibujar_item` | PDF del presupuesto con el diseño del consultorio y paginación automática. |
+| `presupuesto_whatsapp_service.py` | `construir_mensaje`, `_resolver_telefono`, `enviar_presupuesto`, `_pesos`, `_mes_en_letras` | Envía el PDF del presupuesto por WAHA: mensaje con fecha, trabajos, total, entregas, saldo y forma de pago; valida el número, admite corregirlo y lo guarda en la ficha sólo después del envío exitoso. |
 | `arancel_service.py` | `obtener_arancel`, `listar_aranceles`, `crear_arancel`, `actualizar_arancel`, `reemplazar_arancel`, `eliminar_arancel`, `resolver_arancel`, `mapa_aranceles`, `coseguro_sugerido`, `convenio_de_obra_social`, `guardar_convenio`, `importar_aranceles`, `plantilla_aranceles` | Acuerdo OS–práctica, grilla de convenios, importador y plantilla. |
 | `facturacion_service.py` | `periodo_mensual`, `numero_presentacion`, `movimiento_de_turno`, `listar_movimientos`, `resumen_caja`, `_resolver_prestaciones`, `prestaciones_disponibles`, `presupuestar`, `facturar_turno`, `cobrar_movimiento`, `debitar_movimiento`, `presentacion_del_periodo`, `generar_presentacion` | Motor de facturación mixta, caja y presentaciones a obras sociales. |
 | `finanzas_service.py` | `transaccion`, `obtener_cuenta_corriente`, `informe_cuentas_corrientes`, `abrir_plan_cuotas`, `registrar_pago`, `cambiar_estado_plan`, `cobros_del_periodo`, `listar_transacciones`, `eliminar_transaccion` | Cuenta corriente, libro mayor *append-only*, recálculo del saldo, informe consolidado de la cobranza, planes de cuotas dentro de una unidad de trabajo (`commit`/`rollback`) y cobros del período (con su medio de pago) para la caja del día. |
@@ -985,7 +988,7 @@ Si no hay pendientes, responde `422`.
 | `reporte_pdf_service.py` | `pdf_presentacion_obra_social`, `pdf_liquidacion_profesionales`, `nombre_archivo_presentacion`, `nombre_archivo_liquidacion` | Render PDF de los dos reportes de facturación. |
 | `whatsapp_menu_service.py` | `opciones_por_defecto`, `contar_opciones`, `listar_opciones`, `obtener_menu_vigente`, `obtener_opcion`, `crear_opcion`, `actualizar_opcion`, `desactivar_opcion`, `sembrar_menu_por_defecto`, `restaurar_menu_por_defecto` | Menú configurable, unicidad de tecla y seed inicial. |
 | `whatsapp_bot_service.py` | `normalizar_texto`, `detectar_opcion`, `es_saludo_inicial`, `normalizar_destinatario`, `formatear_importe`, `obtener_prestacion_consulta`, `listar_obras_sociales_activas`, `mensaje_menu`, `mensaje_precio_consulta`, `mensaje_obras_sociales`, `mensaje_ubicacion`, `responder_mensaje` | Árbol de decisión del FAQ Bot y redacción de respuestas. |
-| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `enviar_recordatorios`, `enviar_recordatorio_pendiente`, `marcar_recordatorio_enviado`, `es_evento_de_mensaje`, `telefono_de_chat`, `numero_real_de_mensaje`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA, recordatorios (tarea programada y envío desde el panel), webhook (incluye remitentes `@lid`) y enlaces `wa.me`. |
+| `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `construir_payload_archivo`, `enviar_archivo_whatsapp`, `enviar_recordatorios`, `enviar_recordatorio_pendiente`, `marcar_recordatorio_enviado`, `es_evento_de_mensaje`, `telefono_de_chat`, `numero_real_de_mensaje`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA (`sendText` y `sendFile`), recordatorios (tarea programada y envío desde el panel), webhook (incluye remitentes `@lid`) y enlaces `wa.me`. |
 | `whatsapp_conversacion_service.py` | `obtener_conversacion`, `marcar_confirmacion_pendiente`, `marcar_menu`, `cerrar_confirmacion`, `obtener_confirmacion_pendiente` | Estado de conversación por teléfono (menú / confirmación pendiente). |
 
 **Orden de dependencia entre servicios (resumen):**
@@ -1151,6 +1154,8 @@ fallo de WhatsApp.
 | `PUT` | `/api/v1/whatsapp/menu/{id}` | Reemplazo completo. |
 | `PATCH` | `/api/v1/whatsapp/menu/{id}` | Edición parcial/reactivación. |
 | `DELETE` | `/api/v1/whatsapp/menu/{id}` | Baja lógica (`activa=false`). |
+| `POST` | `/api/v1/presupuestos/{id}/whatsapp` | **Presupuesto por WhatsApp:** genera el PDF, arma el resumen y lo manda con `POST {WAHA_URL}/api/sendFile` (`file.data` en base64, `caption` y `session`). `telefono` opcional (sin él usa el de la ficha); `actualizar_telefono=true` guarda el número corregido **después** del envío exitoso. `404` presupuesto inexistente, `422` número inválido, `502` fallo de WAHA; sin credenciales responde `simulado=true` sin salir a la red. |
+| `GET` | `/api/v1/presupuestos/{id}/pdf` | PDF del presupuesto con el diseño del consultorio (`application/pdf`, inline). |
 
 #### 5.4.6. Cuenta corriente y financiación
 
@@ -1291,6 +1296,8 @@ absolutas con `pathlib`.
 | `ficha_medica.css` | 226 líneas | Estilos del cuestionario en la página pública, el panel y la vista móvil (incluye la edad calculada). |
 | `odontograma.js` | 1.003 líneas | Modal de la **ficha médica**: datos del paciente, odontograma permanente/temporario, estado bucal, libro «Trabajo realizado», guardado por API y botón *Editar datos* que delega en el formulario de pacientes. |
 | `odontograma.css` | 885 líneas | Hoja del papel: datos, arcadas, estado bucal, tabla de trabajos, botón *Ficha médica*, móvil e impresión. |
+| `presupuestos.js` | 793 líneas | Pestaña **Presupuestos**: buscador del nomenclador, totales en vivo, listado, PDF y el modal de envío por WhatsApp (teléfono de la ficha revisable, corrección opcional y guardado en el paciente). |
+| `presupuestos.css` | 231 líneas | Estilos del formulario, los renglones de trabajo, los totales, el listado y sus acciones. |
 | `medico.html` | 360 líneas | Vista mobile-first, selección de profesional, agenda y hoja de historia/evolución. |
 | `medico.css` | 424 líneas | Estilos táctiles, hojas deslizantes y timeline. |
 | `medico.js` | 1.555 líneas | Agenda autónoma, navegación de fechas, alta/edición/cancelación, evolución clínica y refresco cada 60 s. |
@@ -1389,6 +1396,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_odontograma.py` | Lectura sin crear historia, tres estados por color, reemplazo de dientes, FDI permanente y temporario, y validaciones. |
 | `test_ficha_medica.py` | Ficha del paciente: lectura sin crear historia, cabecera y estado bucal, saldo acumulado del libro «Trabajo realizado», reemplazo y validaciones (`404`/`422`). |
 | `test_pacientes.py` | DNI, cobertura, búsqueda y normalización. |
+| `test_presupuestos.py` | Cotizaciones y sus totales, buscador por código/descripción, PDF paginado y envío por WhatsApp: teléfono de la ficha, corrección con y sin guardado, `404`/`422`/`502` y el `POST /api/sendFile` con el PDF en base64. |
 | `test_publicar.py` | Ejecutor de comandos, git/Vercel simulados y verificación. |
 | `test_recordatorios_click_to_chat.py` | Enlaces `wa.me`, ventana de días y marcado `ENVIADO`. |
 | `test_recordatorios_automaticos.py` | Envío por WAHA desde el panel (real y simulado), `422`/`409`/`404` y el circuito `1`/`si` → confirmado y `2`/`no` → cancelado. |
@@ -3287,7 +3295,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **998 tests**.
+- Resultado actual: **1004 tests**.
 
 ### 8.5. Publicación
 
@@ -3567,7 +3575,7 @@ git ls-files
 
 **Fecha de última verificación:** 05/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 998 tests (todos aprobados).
+**Resultado de la suite:** 1004 tests (todos aprobados).
 
 ### 10.5. Conclusión
 

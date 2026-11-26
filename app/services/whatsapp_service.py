@@ -6,10 +6,13 @@ Contiene tres responsabilidades separadas:
    que se puede *simular* o *ejecutar* con ``POST {WAHA_URL}/api/sendText``.
 2. **Envío saliente de texto libre** (``enviar_mensaje_texto``), que reutiliza el
    FAQ Bot (``whatsapp_bot_service``) para contestar los mensajes del paciente.
-3. **Lectura del webhook** de WAHA: extrae el teléfono y el texto y los deriva
+3. **Envío saliente de archivos** (``enviar_archivo_whatsapp``), que manda el
+   PDF de un presupuesto con ``POST {WAHA_URL}/api/sendFile`` en base64.
+4. **Lectura del webhook** de WAHA: extrae el teléfono y el texto y los deriva
    al bot, que decide si es una confirmación de turno o una opción del menú.
 """
 
+import base64
 import logging
 import time
 import uuid
@@ -150,9 +153,14 @@ def _detalle_error_waha(respuesta: httpx.Response) -> str:
     return str(data)
 
 
-def _enviar_http_whatsapp(payload: dict) -> str:
-    """Envía el mensaje a WAHA con ``POST /api/sendText`` y devuelve su id."""
-    url = f"{settings.waha_url_base}/api/sendText"
+def _enviar_http_whatsapp(payload: dict, recurso: str = "sendText") -> str:
+    """Envía el mensaje a WAHA (``sendText`` o ``sendFile``) y devuelve su id.
+
+    ``recurso`` permite reutilizar el transporte para los adjuntos: el permiso,
+    el encabezado ``X-Api-Key``, la pausa entre envíos y el manejo de errores
+    son los mismos que usa el texto.
+    """
+    url = f"{settings.waha_url_base}/api/{recurso}"
     headers = {
         "X-Api-Key": settings.waha_api_key or "",
         "Content-Type": "application/json",
@@ -161,8 +169,9 @@ def _enviar_http_whatsapp(payload: dict) -> str:
     # WAHA recomienda espaciar los envíos para no saturar la sesión.
     time.sleep(PAUSA_ENVIO_WAHA)
 
+    # 30 s: el PDF viaja en base64 y WAHA tarda más que con un texto corto.
     try:
-        respuesta = httpx.post(url, json=payload, headers=headers, timeout=10.0)
+        respuesta = httpx.post(url, json=payload, headers=headers, timeout=30.0)
         respuesta.raise_for_status()
         data = respuesta.json()
     except httpx.HTTPStatusError as exc:
@@ -177,11 +186,12 @@ def _enviar_http_whatsapp(payload: dict) -> str:
     return _id_mensaje_waha(data)
 
 
-def _simular_http_whatsapp(payload: dict) -> str:
+def _simular_http_whatsapp(payload: dict, recurso: str = "sendText") -> str:
     """Simula un ``POST`` HTTP a WAHA y devuelve un identificador ficticio."""
     mensaje_id = f"waha.SIMULADO.{uuid.uuid4().hex}"
     logger.info(
-        "SIMULACIÓN HTTP POST WAHA /api/sendText -> chatId=%s | message_id=%s",
+        "SIMULACIÓN HTTP POST WAHA /api/%s -> chatId=%s | message_id=%s",
+        recurso,
         payload.get("chatId"),
         mensaje_id,
     )
@@ -238,6 +248,77 @@ def enviar_mensaje_texto(telefono: str, texto: str, preview_url: bool = False) -
     if settings.whatsapp_envio_real:
         return _enviar_http_whatsapp(payload)
     return _simular_http_whatsapp(payload)
+
+
+def construir_payload_archivo(
+    telefono: str,
+    contenido: bytes,
+    nombre_archivo: str,
+    mimetype: str = "application/pdf",
+    caption: str = "",
+) -> dict:
+    """Arma el cuerpo JSON que espera ``POST /api/sendFile`` de WAHA.
+
+    WAHA admite el archivo por ``file.url`` o por ``file.data`` (base64). Se usa
+    base64 para no depender de que WAHA pueda descargar el documento desde la
+    aplicación: en Vercel el PDF se genera al vuelo y no tiene una URL pública.
+
+    Ejemplo del cuerpo::
+
+        {
+          "chatId": "549351...@c.us",
+          "file": {"mimetype": "application/pdf", "filename": "x.pdf",
+                   "data": "<base64>"},
+          "caption": "Hola…",
+          "session": "default"
+        }
+    """
+    return {
+        "chatId": construir_chat_id_waha(telefono),
+        "file": {
+            "mimetype": mimetype,
+            "filename": nombre_archivo,
+            "data": base64.b64encode(contenido).decode("ascii"),
+        },
+        "caption": caption or "",
+        "session": settings.waha_session,
+    }
+
+
+def enviar_archivo_whatsapp(
+    telefono: str,
+    contenido: bytes,
+    nombre_archivo: str,
+    mimetype: str = "application/pdf",
+    caption: str = "",
+) -> str:
+    """Envía (o simula) un archivo por WhatsApp y devuelve el id del mensaje.
+
+    Es la función que usa el presupuesto para mandar el PDF: con ``WAHA_URL`` y
+    ``WAHA_API_KEY`` configuradas hace el ``POST`` real a
+    ``{WAHA_URL}/api/sendFile``; si faltan, registra el envío simulado igual que
+    el texto para que el panel se pueda probar sin sesión de WhatsApp.
+    """
+    logger.info(
+        "Enviando WhatsApp (archivo %s) a %s",
+        nombre_archivo,
+        telefono or "SIN_TELEFONO",
+    )
+
+    payload = construir_payload_archivo(
+        telefono,
+        contenido,
+        nombre_archivo,
+        mimetype=mimetype,
+        caption=caption,
+    )
+    if not payload["chatId"]:
+        raise WhatsAppEnvioError(
+            f"El teléfono {telefono!r} no tiene dígitos utilizables para WhatsApp."
+        )
+    if settings.whatsapp_envio_real:
+        return _enviar_http_whatsapp(payload, recurso="sendFile")
+    return _simular_http_whatsapp(payload, recurso="sendFile")
 
 
 def _procesar_envio_turno(db: Session, turno: Turno) -> RecordatorioEnviado:

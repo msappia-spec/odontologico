@@ -17,6 +17,8 @@
     cargando: false,
     itemSeq: 0,
     direccionAuto: "",
+    // Presupuesto que se está enviando por WhatsApp (modal abierto).
+    envioId: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -330,6 +332,11 @@
             </div>
             <p class="pres-lista-detalle">${esc(detalle)}</p>
             <div class="pres-lista-acciones">
+              <button type="button" class="btn-wa" data-pres-whatsapp="${presupuesto.id}"
+                      title="Enviar este presupuesto por WhatsApp">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.04 2a9.9 9.9 0 0 0-8.4 15.14L2 22l4.98-1.6A9.9 9.9 0 1 0 12.04 2Zm5.8 14.06c-.24.68-1.4 1.3-1.93 1.35-.5.05-.96.2-3.27-.7-2.78-1.1-4.53-3.94-4.67-4.13-.14-.19-1.1-1.47-1.1-2.8 0-1.33.7-1.98.94-2.25.24-.27.53-.34.7-.34h.5c.16 0 .38-.06.59.45.22.53.74 1.83.8 1.96.07.13.11.28.02.45-.09.17-.13.27-.26.42-.13.15-.28.33-.4.44-.13.13-.27.27-.12.53.15.26.66 1.09 1.42 1.77.98.87 1.8 1.14 2.06 1.27.26.13.41.11.56-.07.15-.17.65-.76.82-1.02.17-.26.35-.22.59-.13.24.09 1.53.72 1.79.85.26.13.44.2.5.3.06.1.06.62-.18 1.3Z"/></svg>
+                WhatsApp
+              </button>
               <a class="btn btn-ghost" href="${API}${RUTA}/${presupuesto.id}/pdf"
                  target="_blank" rel="noopener" title="Abrir el PDF de este presupuesto">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
@@ -571,6 +578,115 @@
     }
   }
 
+  /* ----------------------- Envío por WhatsApp del PDF ------------------- */
+  /* El modal precarga el teléfono de la ficha para revisarlo: si está mal se
+     corrige ahí mismo y, si el envío sale bien, el checkbox permite dejarlo
+     guardado en el paciente. */
+  function mostrarErrorEnvio(mensaje) {
+    const caja = $("pres-wa-error");
+    if (!caja) return;
+    caja.textContent = mensaje || "";
+    caja.classList.toggle("hide", !mensaje);
+  }
+
+  function aplicarTelefonoEnMemoria(presupuesto, telefono) {
+    const paciente = pacienteDe(presupuesto.paciente_id);
+    if (paciente) paciente.telefono = telefono;
+    if (presupuesto.paciente) presupuesto.paciente.telefono = telefono;
+  }
+
+  function abrirEnvioWhatsApp(id) {
+    const presupuesto = presupuestoDe(id);
+    if (!presupuesto) {
+      toast("error", "No se encontró el presupuesto", "Actualizá la lista e intentá de nuevo.");
+      return;
+    }
+
+    state.envioId = presupuesto.id;
+    const paciente = presupuesto.paciente || {};
+    const telefono = paciente.telefono || "";
+
+    if ($("pres-wa-sub")) {
+      $("pres-wa-sub").textContent =
+        `${paciente.nombre || "Paciente"} · ${pesos(presupuesto.total)}`;
+    }
+    if ($("pres-wa-telefono")) $("pres-wa-telefono").value = telefono;
+    if ($("pres-wa-guardar")) $("pres-wa-guardar").checked = false;
+    if ($("pres-wa-ayuda")) {
+      $("pres-wa-ayuda").textContent = telefono
+        ? "Es el número cargado en la ficha del paciente. Si está mal, corregilo acá antes de enviar."
+        : "La ficha no tiene un teléfono cargado: escribí el número antes de enviar.";
+    }
+
+    mostrarErrorEnvio("");
+    const modal = $("modal-pres-whatsapp");
+    if (modal) modal.classList.remove("hide");
+    if ($("pres-wa-telefono")) {
+      $("pres-wa-telefono").focus();
+      $("pres-wa-telefono").select();
+    }
+  }
+
+  function cerrarEnvioWhatsApp() {
+    state.envioId = null;
+    mostrarErrorEnvio("");
+    const modal = $("modal-pres-whatsapp");
+    if (modal) modal.classList.add("hide");
+  }
+
+  async function enviarWhatsApp(evento) {
+    evento.preventDefault();
+    const id = state.envioId;
+    if (id == null) return;
+
+    const telefono = (($("pres-wa-telefono") && $("pres-wa-telefono").value) || "").trim();
+    if (!telefono) {
+      mostrarErrorEnvio("Ingresá el número de celular del paciente.");
+      if ($("pres-wa-telefono")) $("pres-wa-telefono").focus();
+      return;
+    }
+    const guardar = Boolean($("pres-wa-guardar") && $("pres-wa-guardar").checked);
+
+    const boton = $("pres-wa-enviar");
+    const textoBoton = boton ? boton.textContent : "";
+    if (boton) {
+      boton.disabled = true;
+      boton.textContent = "Enviando…";
+    }
+    mostrarErrorEnvio("");
+
+    try {
+      const enviado = await api(`${RUTA}/${id}/whatsapp`, {
+        method: "POST",
+        body: JSON.stringify({
+          telefono,
+          actualizar_telefono: guardar,
+        }),
+      });
+
+      const presupuesto = presupuestoDe(id);
+      if (presupuesto && enviado.actualizado_telefono) {
+        aplicarTelefonoEnMemoria(presupuesto, enviado.telefono);
+      }
+
+      cerrarEnvioWhatsApp();
+      toast(
+        "exito",
+        "Presupuesto enviado",
+        `${telefono}${enviado.simulado
+          ? " · simulado: faltan las credenciales de WAHA"
+          : ""}`
+      );
+    } catch (err) {
+      mostrarErrorEnvio(err.message);
+    } finally {
+      if (boton) {
+        boton.disabled = false;
+        boton.textContent = textoBoton || "Enviar por WhatsApp";
+      }
+    }
+  }
+
   /* ------------------------------ Eventos ------------------------------- */
   function actualizarDireccionDelPaciente() {
     const paciente = pacienteDe($("pres-paciente") ? $("pres-paciente").value : "");
@@ -607,6 +723,11 @@
     const lista = $("pres-lista");
     if (lista) {
       lista.addEventListener("click", (evento) => {
+        const whatsapp = evento.target.closest("[data-pres-whatsapp]");
+        if (whatsapp) {
+          abrirEnvioWhatsApp(whatsapp.dataset.presWhatsapp);
+          return;
+        }
         const editar = evento.target.closest("[data-pres-editar]");
         if (editar) {
           cargarEnFormulario(editar.dataset.presEditar);
@@ -625,6 +746,31 @@
 
     const paciente = $("pres-paciente");
     if (paciente) paciente.addEventListener("change", actualizarDireccionDelPaciente);
+
+    /* Modal de envío por WhatsApp: fondo, botones, formulario y tecla Esc. */
+    const formEnvio = $("pres-wa-form");
+    if (formEnvio) formEnvio.addEventListener("submit", enviarWhatsApp);
+
+    const cerrarEnvio = $("pres-wa-close");
+    if (cerrarEnvio) cerrarEnvio.addEventListener("click", cerrarEnvioWhatsApp);
+
+    const cancelarEnvio = $("pres-wa-cancelar");
+    if (cancelarEnvio) {
+      cancelarEnvio.addEventListener("click", cerrarEnvioWhatsApp);
+    }
+
+    const modalEnvio = $("modal-pres-whatsapp");
+    if (modalEnvio) {
+      modalEnvio.addEventListener("click", (evento) => {
+        if (evento.target === modalEnvio) cerrarEnvioWhatsApp();
+      });
+    }
+
+    document.addEventListener("keydown", (evento) => {
+      if (evento.key !== "Escape") return;
+      const modal = $("modal-pres-whatsapp");
+      if (modal && !modal.classList.contains("hide")) cerrarEnvioWhatsApp();
+    });
   }
 
   function iniciar() {

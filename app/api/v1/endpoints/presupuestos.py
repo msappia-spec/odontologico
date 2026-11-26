@@ -8,6 +8,8 @@ Rutas (prefijo ``/api/v1``):
 * ``PUT /presupuestos/{id}`` — reemplaza cabecera y trabajos.
 * ``DELETE /presupuestos/{id}`` — elimina el presupuesto.
 * ``GET /presupuestos/{id}/pdf`` — documento listo para imprimir o guardar.
+* ``POST /presupuestos/{id}/whatsapp`` — envía el PDF por WhatsApp al número
+  revisado en el panel (con opción de guardarlo en la ficha del paciente).
 
 El PDF se devuelve con ``Content-Disposition: inline`` para que el navegador lo
 abra en el visor y desde ahí se pueda imprimir, igual que la Historia Clínica
@@ -22,10 +24,16 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.presupuesto import (
     PresupuestoCreate,
+    PresupuestoEnviadoWhatsApp,
+    PresupuestoEnvioWhatsApp,
     PresupuestoRead,
     PresupuestoUpdate,
 )
-from app.services import presupuesto_pdf_service, presupuesto_service
+from app.services import (
+    presupuesto_pdf_service,
+    presupuesto_service,
+    presupuesto_whatsapp_service,
+)
 
 router = APIRouter(prefix="/presupuestos", tags=["Presupuestos"])
 
@@ -110,6 +118,34 @@ def descargar_presupuesto_pdf(
             "Content-Disposition": f'inline; filename="{nombre}"',
             "Cache-Control": "no-store",
         },
+    )
+
+
+@router.post(
+    "/{presupuesto_id}/whatsapp",
+    response_model=PresupuestoEnviadoWhatsApp,
+    summary="Enviar el presupuesto por WhatsApp",
+    description=(
+        "Genera el PDF del presupuesto y lo envía como adjunto por WhatsApp, "
+        "con un resumen del total, las entregas, el saldo y la forma de pago. "
+        "``telefono`` permite revisar/corregir el número antes de enviar (el "
+        "panel lo precarga con el de la ficha); si se omite se usa el del "
+        "paciente. Con ``actualizar_telefono`` el número corregido queda "
+        "guardado en la ficha después de un envío exitoso. Un presupuesto "
+        "inexistente responde **404**, un número inválido **422** y una falla "
+        "de WAHA **502**."
+    ),
+    responses={
+        502: {"description": "WAHA rechazó el envío o no respondió."},
+    },
+)
+def enviar_presupuesto_whatsapp(
+    presupuesto_id: int,
+    payload: PresupuestoEnvioWhatsApp,
+    db: Session = Depends(get_db),
+) -> PresupuestoEnviadoWhatsApp:
+    return presupuesto_whatsapp_service.enviar_presupuesto(
+        db, presupuesto_id, payload
     )
 
 

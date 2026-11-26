@@ -6,6 +6,10 @@ El documento que se imprime está formado por:
 * una lista ordenada de **trabajos**, cada uno con su detalle, precio y una
   entrega opcional.
 
+El envío por WhatsApp usa dos esquemas propios: ``PresupuestoEnvioWhatsApp``
+(número revisado en el panel y opción de guardarlo en la ficha) y
+``PresupuestoEnviadoWhatsApp`` (resultado del envío del PDF).
+
 Reglas de normalización (las mismas del resto del sistema):
 
 * los textos se recortan y el vacío se guarda como ``NULL``;
@@ -252,3 +256,60 @@ class PresupuestoRead(BaseModel):
             saldo=redondear_monto(total - total_entregas),
             paciente=PacienteRead.model_validate(presupuesto.paciente),
         )
+
+
+class PresupuestoEnvioWhatsApp(BaseModel):
+    """Datos del envío del presupuesto en PDF por WhatsApp.
+
+    El panel abre un modal con el teléfono de la ficha para que la secretaría
+    pueda corregirlo **antes** de enviar (por ejemplo, un número viejo o un
+    celular nuevo). Si ``telefono`` se omite se usa el del paciente.
+    """
+
+    telefono: Optional[str] = Field(
+        None,
+        max_length=30,
+        description=(
+            "Número al que se envía el PDF. Si se omite se usa el teléfono de "
+            "la ficha del paciente. Admite el formato local (``351 643-2863``) "
+            "o internacional (``+54 9 351 643-2863``)."
+        ),
+    )
+    actualizar_telefono: bool = Field(
+        False,
+        description=(
+            "Guarda el número corregido en la ficha del paciente para los "
+            "próximos envíos. Sólo se aplica si el número normalizado difiere "
+            "del que ya tenía cargado."
+        ),
+    )
+
+    @field_validator("telefono", mode="before")
+    @classmethod
+    def _telefono_vacio(cls, valor):
+        """El campo vacío del formulario significa «usar el de la ficha»."""
+        if valor is None:
+            return None
+        texto = str(valor).strip()
+        return texto or None
+
+
+class PresupuestoEnviadoWhatsApp(BaseModel):
+    """Resultado del envío del presupuesto por WhatsApp."""
+
+    presupuesto_id: int
+    telefono: str = Field(
+        ..., description="Número normalizado al que se envió (``549...``)."
+    )
+    nombre_archivo: str
+    mensaje_id: str
+    simulado: bool = Field(
+        False,
+        description=(
+            "``True`` cuando faltan ``WAHA_URL``/``WAHA_API_KEY`` y el envío "
+            "sólo se registró en el log."
+        ),
+    )
+    actualizado_telefono: bool = Field(
+        False, description="``True`` si el número quedó guardado en la ficha."
+    )
