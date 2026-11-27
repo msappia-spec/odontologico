@@ -425,6 +425,29 @@ select.field {
 }
 .toast.leaving { opacity: 0; transform: translateY(-6px); transition: all .25s ease; }
 
+/* Aviso de respuesta del paciente (confirmó o canceló el turno por WhatsApp):
+   entra desde la derecha en la esquina inferior y se retira solo a los 5 s. */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(22px) }
+  to   { opacity: 1; transform: translateX(0) }
+}
+.toast-turno {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  width: 340px;
+  max-width: calc(100vw - 2rem);
+  padding: .85rem 1rem;
+  border-radius: .85rem;
+  background: #fff;
+  border: 1px solid #e8edf3;
+  border-left: 4px solid #10b981;
+  box-shadow: 0 18px 40px -18px rgba(16, 24, 40, .45);
+  animation: slideInRight .3s cubic-bezier(.22, 1, .36, 1) both;
+}
+.toast-turno.cancelado { border-left-color: #ef4444; }
+.toast-turno.leaving { opacity: 0; transform: translateX(18px); transition: all .28s ease; }
+
 /* Tablas */
 .data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .data-table th {

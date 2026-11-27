@@ -60,6 +60,9 @@
     // paciente por WhatsApp. `revisandoTurnos` evita consultas superpuestas.
     selloTurnos: null,
     revisandoTurnos: false,
+    // Respuestas ya avisadas (`turno:marca`): si dos lecturas de la agenda se
+    // cruzan, la notificación de la esquina inferior derecha sale una sola vez.
+    avisosTurnos: {},
     // Catálogo de obras sociales (GET /obras-sociales): alimenta la vista
     // "Gestión de Obras Sociales" y el desplegable del formulario de pacientes.
     obrasSociales: [],
@@ -487,6 +490,86 @@
       el.classList.add("leaving");
       setTimeout(function () { el.remove(); }, 260);
     }, 4400);
+  }
+
+  /* ------------------ Aviso de respuesta del paciente -------------------- */
+  /* El paciente confirma o cancela el turno respondiendo el recordatorio por
+     WhatsApp y el webhook lo guarda por su cuenta. Cuando el panel lo detecta
+     (sello de la agenda), avisa en la esquina inferior derecha con el nombre
+     del paciente; el aviso se retira solo a los 5 segundos. */
+  const AVISO_TURNO_MS = 5000;
+
+  /* Marca de la respuesta de un turno: cambia cuando el paciente confirma o
+     cancela y también si después cambia de opinión (confirmó y luego canceló). */
+  function marcaRespuesta(turno) {
+    if (!turno || turno.estado_whatsapp !== "RESPONDIDO") return "";
+    return turno.estado_whatsapp + ":" + turno.estado_turno;
+  }
+
+  function notificarRespuestaTurno(turno) {
+    const cont = document.getElementById("toasts-turnos");
+    if (!cont) return;
+    const cancelo = turno.estado_turno === "CANCELADO";
+    const color = cancelo ? "#b91c1c" : "#047857";
+    const fondo = cancelo ? "#fef2f2" : "#ecfdf5";
+    const cuando =
+      fechaCorta(turno.fecha_hora_inicio) + " · " + parteHora(turno.fecha_hora_inicio);
+    const el = document.createElement("div");
+    el.className = "toast-turno" + (cancelo ? " cancelado" : "");
+    el.setAttribute("role", "status");
+    el.innerHTML =
+      `<span class="w-9 h-9 rounded-full flex items-center justify-center flex-none" ` +
+      `style="background:${fondo};color:${color}">` +
+      (cancelo ? ICON.x : ICON.check) +
+      `</span>` +
+      `<div class="flex-1 min-w-0">` +
+      `<p class="text-[11px] font-bold uppercase tracking-wide" style="color:${color}">` +
+      (cancelo ? "El paciente canceló el turno" : "El paciente confirmó el turno") +
+      `</p>` +
+      `<p class="text-sm font-bold text-slate-900 truncate">${esc(nombrePaciente(turno.paciente_id))}</p>` +
+      `<p class="text-xs text-slate-500 mt-0.5 truncate">${esc(cuando)} &middot; ` +
+      `${esc(nombreDoctor(turno.doctor_id))}</p>` +
+      `</div>`;
+    cont.appendChild(el);
+    setTimeout(function () {
+      el.classList.add("leaving");
+      setTimeout(function () { el.remove(); }, 300);
+    }, AVISO_TURNO_MS);
+  }
+
+  /* Compara la lectura anterior con la nueva y avisa sólo las respuestas
+     nuevas: un turno que ya venía respondido en la carga inicial no avisa,
+     porque no hubo novedad mientras la secretaría miraba la pantalla. */
+  function avisarRespuestasDeWhatsApp(anteriores, turnos) {
+    const avisos = [];
+    (turnos || []).forEach(function (t) {
+      const marca = marcaRespuesta(t);
+      if (!marca) return;
+      if (anteriores[t.id] === undefined) return; // turno que no estaba en la lista
+      if (anteriores[t.id] === marca) return; // ya se sabía
+      const clave = t.id + ":" + marca;
+      if (state.avisosTurnos[clave]) return; // otra lectura ya lo avisó
+      state.avisosTurnos[clave] = true;
+      avisos.push(t);
+    });
+    if (!avisos.length) return;
+    // La agenda llega ordenada por hora: primero los turnos más próximos. Si el
+    // paciente respondió varios juntos no se satura la pantalla: salen hasta tres.
+    avisos.sort(function (a, b) {
+      return String(a.fecha_hora_inicio).localeCompare(String(b.fecha_hora_inicio));
+    });
+    avisos.slice(0, 3).forEach(notificarRespuestaTurno);
+    podarAvisosDeTurnos();
+  }
+
+  /* El registro de avisos vive mientras la página está abierta (todo el día de
+     trabajo): se poda para que no crezca sin límite. */
+  function podarAvisosDeTurnos() {
+    const claves = Object.keys(state.avisosTurnos);
+    if (claves.length <= 300) return;
+    claves.slice(0, claves.length - 150).forEach(function (clave) {
+      delete state.avisosTurnos[clave];
+    });
   }
 
   /* --------------------------- Render de apoyo --------------------------- */
@@ -1660,11 +1743,18 @@
      como la respuesta «1/SI» o «2/NO» de un paciente al recordatorio, que el
      webhook guarda como CONFIRMADO / CANCELADO sin que la secretaría haga nada. */
   async function refrescarTurnos() {
+    // Foto del estado anterior: el webhook de WhatsApp actualiza los turnos por
+    // fuera del navegador y la comparación detecta quién confirmó o canceló.
+    const anteriores = {};
+    (state.turnos || []).forEach(function (t) {
+      anteriores[t.id] = marcaRespuesta(t);
+    });
     try {
       state.turnos = (await api("/turnos?limit=500")) || [];
       renderDashboard();
       renderAgenda();
       document.dispatchEvent(new CustomEvent("odonto:datos"));
+      avisarRespuestasDeWhatsApp(anteriores, state.turnos);
     } catch (_err) {
       /* Es un refresco de cortesía: la vista conserva lo que ya tenía y se
          olvida el sello para que el próximo control vuelva a intentarlo. */

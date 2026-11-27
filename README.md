@@ -1018,8 +1018,13 @@ mismo seguimiento de la respuesta:
   está abierta consulta cada 10 segundos `GET /api/v1/turnos/sello` —una huella
   liviana del estado de todos los turnos— y, sólo si cambió, relee los turnos y
   redibuja la agenda; además revisa al volver a la pestaña o a la ventana. Así el
-  estado nuevo aparece en segundos: verde si confirmó y gris si canceló. La vista
-  móvil del odontólogo (`/medico`) hace lo mismo sobre su propia agenda.
+  estado nuevo aparece en segundos: verde si confirmó y gris si canceló. La
+  respuesta también se anuncia con una **notificación en la esquina inferior
+  derecha** que muestra el estado («El paciente confirmó el turno» / «El paciente
+  canceló el turno»), el nombre del paciente, el horario y el profesional, y se
+  retira sola a los **5 segundos** (no repite avisos de turnos que ya venían
+  respondidos al abrir el panel). La vista móvil del odontólogo (`/medico`) hace
+  lo mismo sobre su propia agenda.
 - El mensaje no depende del idioma del sistema: la fecha se arma "en letras"
   (`viernes 16 de octubre de 2026 a las 10:00`) y el profesional se nombra con
   su artículo (`con la Dra. Gómez`, `con el Dr. House`). Los teléfonos se
@@ -1138,7 +1143,9 @@ CDN, HTML y `fetch` contra la misma API `v1`.
   Principal de la recepción (y a la inversa). Ambas pantallas consultan cada 10 s
   `GET /api/v1/turnos/sello` y releen los turnos sólo si cambió —también al volver
   a la app y con el botón *Actualizar*—, así la confirmación o cancelación que el
-  paciente manda por WhatsApp se ve sin recargar la página. Los rechazos del
+  paciente manda por WhatsApp se ve sin recargar la página y, en el panel, se
+  anuncia con una notificación de 5 segundos abajo a la derecha con el nombre del
+  paciente. Los rechazos del
   backend se explican en pantalla: `409` (el odontólogo ya tiene un turno en ese
   horario), `400` (el paciente está citado en otra agenda) y los errores de
   validación del alta.
@@ -2061,7 +2068,7 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**1014 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**1015 pruebas**): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), el **sello de cambios de la agenda**
 (`test_turnos_sello.py`: huella estable sin cambios y distinta al crear,
 confirmar, cancelar o reprogramar; el circuito real `1`/`si` y `2`/`no` del

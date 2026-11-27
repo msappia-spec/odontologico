@@ -36,7 +36,7 @@ dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
 existen como libro mayor contable (`transacciones_cc`) y como pagos de egresos
 (`pagos_egresos`), no como pasarela.
 
-**Pruebas:** 42 archivos `test_*.py` (más `conftest.py`) y **1014 casos** (suite
+**Pruebas:** 42 archivos `test_*.py` (más `conftest.py`) y **1015 casos** (suite
 completa verificada al generar este documento).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
@@ -83,7 +83,7 @@ Sí es:
 | Schemas | 14 archivos Pydantic, con contratos de entrada/salida separados. | Contratos explícitos y validación centralizada. |
 | Acceso a datos | Los servicios usan `Session` y `select()` directamente; no hay repositorios. | Acoplamiento servicio–ORM. |
 | Transacciones | Cada servicio hace `commit()`; no hay Unit of Work explícita. | Transacciones locales por operación. |
-| Frontend | Panel de 9.664 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
+| Frontend | Panel de 9.754 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
 | Despliegue | `vercel.json` declara `framework: fastapi`; un solo deploy. | Escalado y fallos acoplados. |
 | Pruebas | SQLite en memoria + `TestClient`, 42 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
 
@@ -292,7 +292,7 @@ Odontologico/
 │   ├── limpiar_base.py              # Limpieza transaccional de tablas
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 42 archivos test_*.py, 1014 casos
+├── tests/                           # 42 archivos test_*.py, 1015 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -525,7 +525,10 @@ adicional.
    página**: la agenda y el Panel Principal consultan cada 10 segundos
    `GET /api/v1/turnos/sello` (huella liviana de todos los turnos) y, sólo si
    cambió, releen los turnos y redibujan; además revisan al volver a la pestaña
-   o a la ventana.
+   o a la ventana. Si la novedad es una respuesta del paciente, el panel también
+   muestra un **aviso de 5 segundos en la esquina inferior derecha** («El
+   paciente confirmó el turno» o «El paciente canceló el turno») con el nombre,
+   el horario y el profesional.
 5. Sin confirmación pendiente, lee el menú activo de `opciones_menu_whatsapp`
    (o las cuatro opciones históricas si la tabla está vacía). Si el texto es un
    saludo o una tecla válida, responde según la opción (`TEXTO`, `PRECIO`,
@@ -742,7 +745,11 @@ Si no hay pendientes, responde `422`.
   tablas de proveedores y facturas se piden al entrar a la pestaña). Mientras la
   pestaña sigue abierta consulta cada 10 s `GET /turnos/sello` y relee los
   turnos sólo si la huella cambió: así ve la confirmación o cancelación que el
-  paciente mandó por WhatsApp sin que nadie recargue (F5).
+  paciente mandó por WhatsApp sin que nadie recargue (F5). Cuando la novedad es
+  una respuesta, además aparece un **aviso de 5 s en la esquina inferior
+  derecha** con el estado, el nombre del paciente, el horario y el profesional
+  (`#toasts-turnos` + `.toast-turno`); no se repite para los turnos que ya venían
+  respondidos al abrir el panel.
 - **Vista móvil (`/medico`)**: `medico.js` es autónomo, no carga `app.js`.
   Recuerda el profesional en `localStorage`, consulta turnos por rango de fechas,
   agenda con `POST /turnos` y edita/cancela con `PATCH /turnos/{id}`. Consulta
@@ -806,7 +813,7 @@ Si no hay pendientes, responde `422`.
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 1014 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 1015 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -1296,9 +1303,9 @@ absolutas con `pathlib`.
 
 | Archivo | Tamaño aproximado | Responsabilidad |
 |---|---:|---|
-| `index.html` | 2.538 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente, proveedores y egresos y bot. |
-| `styles.css` | 1.348 líneas | Componentes, animaciones, timeline clínica y utilidades propias. |
-| `app.js` | 9.664 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia, el control del sello de cambios de la agenda (sin F5) y puente `window.OdontoApp`. |
+| `index.html` | 3.038 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente, proveedores y egresos y bot; incluye los contenedores de avisos (`#toasts` y `#toasts-turnos`). |
+| `styles.css` | 1.912 líneas | Componentes, animaciones (incluido el aviso de respuesta del paciente), timeline clínica y utilidades propias. |
+| `app.js` | 9.754 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia, el control del sello de cambios de la agenda (sin F5), el aviso de 5 s de la respuesta del paciente y puente `window.OdontoApp`. |
 | `calendar.js` | 986 líneas | Calendario mensual, filtro por odontólogo, tooltip, panel del día y bloques libres; consume `window.OdontoApp` y expone `window.OdontoCalendar`. |
 | `ficha_medica.js` | 686 líneas | Catálogo único de **124 campos** (8 filiatorios + antecedentes familiares, personales, odontológicos, examen y diagnóstico) + formulario, edad calculada y resumen reutilizables. |
 | `ficha_medica.css` | 226 líneas | Estilos del cuestionario en la página pública, el panel y la vista móvil (incluye la edad calculada). |
@@ -3304,7 +3311,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **1014 tests**.
+- Resultado actual: **1015 tests**.
 
 ### 8.5. Publicación
 
@@ -3584,7 +3591,7 @@ git ls-files
 
 **Fecha de última verificación:** 05/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 1014 tests (todos aprobados).
+**Resultado de la suite:** 1015 tests (todos aprobados).
 
 ### 10.5. Conclusión
 

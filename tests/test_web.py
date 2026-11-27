@@ -998,3 +998,35 @@ def test_el_panel_y_la_agenda_se_actualizan_solos_tras_la_respuesta_por_whatsapp
     assert sello.status_code == 200, sello.text
     assert set(sello.json()) == {"sello", "cantidad"}
 
+
+def test_el_panel_avisa_la_respuesta_del_paciente_abajo_a_la_derecha(client):
+    """La confirmación (o cancelación) por WhatsApp se anuncia con el paciente.
+
+    El aviso aparece en la esquina inferior derecha, dice qué contestó el
+    paciente y su nombre, y se retira solo a los 5 segundos. Un turno que ya
+    venía respondido cuando se abrió el panel no genera aviso: no hubo novedad
+    mientras la secretaría miraba la pantalla.
+    """
+    html = client.get("/").text
+    assert 'id="toasts-turnos"' in html
+    assert "bottom-4 right-4" in html
+
+    panel = client.get("/static/app.js").text
+    assert "const AVISO_TURNO_MS = 5000;" in panel
+    assert "function notificarRespuestaTurno(" in panel
+    assert "function avisarRespuestasDeWhatsApp(" in panel
+    assert "function marcaRespuesta(" in panel
+    assert "avisarRespuestasDeWhatsApp(anteriores, state.turnos);" in panel
+    assert "El paciente confirmó el turno" in panel
+    assert "El paciente canceló el turno" in panel
+    # El aviso no se repite aunque dos lecturas de la agenda se crucen.
+    assert "state.avisosTurnos" in panel
+    # Se arma con el nombre del paciente y el horario del turno.
+    assert "esc(nombrePaciente(turno.paciente_id))" in panel
+    assert "parteHora(turno.fecha_hora_inicio)" in panel
+
+    estilos = client.get("/static/styles.css").text
+    assert ".toast-turno" in estilos
+    assert ".toast-turno.cancelado" in estilos
+    assert "slideInRight" in estilos
+

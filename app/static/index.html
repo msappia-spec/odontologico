@@ -2982,6 +2982,10 @@
 
   <!-- ===================== TOASTS ===================== -->
   <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col gap-3"></div>
+  <!-- Respuestas del paciente por WhatsApp: abajo a la derecha para no tapar
+       el trabajo y sin interceptar clics (el aviso se va solo a los 5 s). -->
+  <div id="toasts-turnos"
+       class="fixed bottom-4 right-4 z-[70] flex flex-col gap-3 items-end pointer-events-none"></div>
 
 
   <script src="/static/ficha_medica.js"></script>
