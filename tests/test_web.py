@@ -970,3 +970,31 @@ def test_la_categoria_del_paciente_avisa_antes_de_asignar_un_turno(client):
     # El aviso no guarda el turno: deja el formulario abierto hasta confirmar.
     assert "const payload = state.turnoAlertaPendiente;" in js
 
+
+def test_el_panel_y_la_agenda_se_actualizan_solos_tras_la_respuesta_por_whatsapp(
+    client,
+):
+    """Sin F5: ambas pantallas consultan el sello de la agenda.
+
+    Cuando el paciente responde «1/SI» o «2/NO» al recordatorio, el webhook de
+    WhatsApp cambia el turno por fuera del navegador. El panel de la secretaría y
+    la agenda del odontólogo consultan ``GET /turnos/sello`` cada pocos segundos
+    y releen los turnos sólo si el sello cambió.
+    """
+    panel = client.get("/static/app.js").text
+    assert "/turnos/sello" in panel
+    assert "function revisarCambiosDeTurnos(" in panel
+    assert "setInterval(revisarCambiosDeTurnos, REVISAR_TURNOS_MS)" in panel
+    assert "visibilitychange" in panel
+
+    movil = client.get("/static/medico.js").text
+    assert "/turnos/sello" in movil
+    assert "function revisarCambiosDeAgenda(" in movil
+    assert "setInterval(revisarCambiosDeAgenda, CONTROL_MS)" in movil
+    assert "visibilitychange" in movil
+
+    # El endpoint viaja en la API en vivo con su huella y la cantidad de turnos.
+    sello = client.get("/api/v1/turnos/sello")
+    assert sello.status_code == 200, sello.text
+    assert set(sello.json()) == {"sello", "cantidad"}
+

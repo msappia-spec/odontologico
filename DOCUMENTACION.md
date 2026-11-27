@@ -36,7 +36,7 @@ dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
 existen como libro mayor contable (`transacciones_cc`) y como pagos de egresos
 (`pagos_egresos`), no como pasarela.
 
-**Pruebas:** 41 archivos `test_*.py` (más `conftest.py`) y **1004 casos** (suite
+**Pruebas:** 42 archivos `test_*.py` (más `conftest.py`) y **1014 casos** (suite
 completa verificada al generar este documento).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
@@ -83,9 +83,9 @@ Sí es:
 | Schemas | 14 archivos Pydantic, con contratos de entrada/salida separados. | Contratos explícitos y validación centralizada. |
 | Acceso a datos | Los servicios usan `Session` y `select()` directamente; no hay repositorios. | Acoplamiento servicio–ORM. |
 | Transacciones | Cada servicio hace `commit()`; no hay Unit of Work explícita. | Transacciones locales por operación. |
-| Frontend | Panel de 8.690 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
+| Frontend | Panel de 9.667 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
 | Despliegue | `vercel.json` declara `framework: fastapi`; un solo deploy. | Escalado y fallos acoplados. |
-| Pruebas | SQLite en memoria + `TestClient`, 41 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
+| Pruebas | SQLite en memoria + `TestClient`, 42 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
 
 ### 1.3. Fortalezas
 
@@ -292,7 +292,7 @@ Odontologico/
 │   ├── limpiar_base.py              # Limpieza transaccional de tablas
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 41 archivos test_*.py, 1004 casos
+├── tests/                           # 42 archivos test_*.py, 1014 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -521,9 +521,11 @@ adicional.
 4. Si hay un recordatorio pendiente, `1`/`si` confirma y `2`/`no` cancela el
    turno (`tipo = CONFIRMACION`); cualquier otra respuesta repite la pregunta y
    mantiene el estado. El turno queda en `CONFIRMADO` o `CANCELADO` con
-   `estado_whatsapp = RESPONDIDO` y el panel lo refleja: la agenda y el Panel
-   Principal releen los turnos cada minuto (con la pestaña visible) y al volver
-   a la vista.
+   `estado_whatsapp = RESPONDIDO` y el panel lo refleja **sin recargar la
+   página**: la agenda y el Panel Principal consultan cada 10 segundos
+   `GET /api/v1/turnos/sello` (huella liviana de todos los turnos) y, sólo si
+   cambió, releen los turnos y redibujan; además revisan al volver a la pestaña
+   o a la ventana.
 5. Sin confirmación pendiente, lee el menú activo de `opciones_menu_whatsapp`
    (o las cuatro opciones históricas si la tabla está vacía). Si el texto es un
    saludo o una tecla válida, responde según la opción (`TEXTO`, `PRECIO`,
@@ -737,11 +739,16 @@ Si no hay pendientes, responde `422`.
   `/turnos?limit=500`, `/obras-sociales` y `/categorias-paciente`, y luego pide
   en paralelo recordatorios, fichas de salud, disponibilidad, menú del bot y el
   tablero de cuentas por pagar del Módulo 6 (alimenta la insignia del menú; las
-  tablas de proveedores y facturas se piden al entrar a la pestaña).
+  tablas de proveedores y facturas se piden al entrar a la pestaña). Mientras la
+  pestaña sigue abierta consulta cada 10 s `GET /turnos/sello` y relee los
+  turnos sólo si la huella cambió: así ve la confirmación o cancelación que el
+  paciente mandó por WhatsApp sin que nadie recargue (F5).
 - **Vista móvil (`/medico`)**: `medico.js` es autónomo, no carga `app.js`.
   Recuerda el profesional en `localStorage`, consulta turnos por rango de fechas,
-  agenda con `POST /turnos` y edita/cancela con `PATCH /turnos/{id}`. Se refresca
-  cada 60 segundos y al volver a la pestaña.
+  agenda con `POST /turnos` y edita/cancela con `PATCH /turnos/{id}`. Consulta
+  cada 10 s el sello de cambios (`GET /turnos/sello`) y sólo relee la agenda si
+  cambió; también revisa al volver a la pestaña. Si el sello no está disponible,
+  recarga la agenda cada 60 s como respaldo.
 - **Anamnesis (`/anamnesis/{token}`)**: `anamnesis.js` lee el token del path,
   hace `GET` y `POST` contra `/api/v1/anamnesis/{token}` y usa `textContent`
   para insertar datos del paciente (evita XSS).
@@ -799,7 +806,7 @@ Si no hay pendientes, responde `422`.
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 1004 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 1014 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -972,7 +979,7 @@ Si no hay pendientes, responde `422`.
 | `obra_social_service.py` | `obtener_obra_social`, `_validar_nombre_libre`, `listar_obras_sociales`, `crear_obra_social`, `actualizar_obra_social`, `desactivar_obra_social`, `resolver_por_nombre` | Catálogo con nombre único, baja lógica y compatibilidad con texto heredado. |
 | `prestacion_service.py` | `obtener_prestacion`, `obtener_prestacion_activa`, `_validar_codigo_libre`, `listar_prestaciones`, `crear_prestacion`, `actualizar_prestacion`, `desactivar_prestacion` | Catálogo de prácticas y bloqueo de prácticas inactivas al facturar. |
 | `disponibilidad_service.py` | `listar_rangos`, `rangos_del_dia`, `agregar_rango`, `reemplazar_agenda`, `eliminar_rango`, `RangoEfectivo`, `DisponibilidadEfectivaDia`, `listar_excepciones`, `excepciones_del_dia`, `agregar_excepcion`, `reemplazar_excepciones_del_dia`, `eliminar_excepcion`, `rangos_efectivos_del_dia` | Agenda semanal, excepciones por fecha, unión/resta de tramos y precedencia. |
-| `turno_service.py` | `_validar_solapamiento`, `_validar_paciente_ubicuo`, `crear_turno`, `listar_turnos`, `obtener_turno`, `actualizar_turno`, `_bloques_de_rangos`, `_turnos_vigentes_del_dia`, `horarios_disponibles` | Alta/edición, solapamientos, agenda y bloques libres. |
+| `turno_service.py` | `_validar_solapamiento`, `_validar_paciente_ubicuo`, `crear_turno`, `listar_turnos`, `obtener_turno`, `actualizar_turno`, `_bloques_de_rangos`, `_turnos_vigentes_del_dia`, `sello_de_turnos`, `horarios_disponibles` | Alta/edición, solapamientos, agenda, bloques libres y la huella (`sello_de_turnos`) con la que el frontend detecta los cambios hechos por WhatsApp. |
 | `historia_clinica_service.py` | `numero_ficha_de`, `obtener_historia`, `obtener_o_crear_historia`, `crear_evolucion`, `listar_evoluciones`, `obtener_evolucion`, `detalle_historia` | Ficha automática, evoluciones inmutables y línea de tiempo. |
 | `anamnesis_service.py` | `obtener_formulario_publico`, `guardar_declaracion_publica`, `guardar_declaracion_turno`, `listar_fichas_panel`, `obtener_enlace_ficha`, `enviar_ficha`, `necesita_completar_anamnesis` | Token, alta/edición de la ficha médica completa (paciente y profesional), sincronización de los filiatorios en el paciente, panel de fichas y envío manual del enlace. |
 | `odontograma_service.py` | `obtener_odontograma`, `guardar_odontograma`, `_aplicar_cabecera`, `_odontograma_de` | Lectura sin crear la historia, alta/corrección del gráfico y reemplazo del conjunto de dientes. |
@@ -1069,6 +1076,7 @@ fallo de WhatsApp.
 | `DELETE` | `/api/v1/categorias-paciente/{id}` | Baja lógica (`activa=false`); la categoría por defecto responde `422`. |
 | `POST` | `/api/v1/turnos` | Crea turno; valida solapes de doctor y paciente. |
 | `GET` | `/api/v1/turnos?skip=&limit=&doctor_id=&paciente_id=&fecha_desde=&fecha_hasta=` | Lista paginada (máx. 500) por rango. |
+| `GET` | `/api/v1/turnos/sello` | Huella (`sha1`) del estado de todos los turnos + cantidad. El panel y la vista móvil la consultan cada 10 s y releen los turnos sólo si cambió, para ver al instante la respuesta del paciente por WhatsApp. |
 | `GET` | `/api/v1/turnos/{id}` | Detalle. |
 | `PATCH` | `/api/v1/turnos/{id}` | Reprograma, reasigna, confirma, cancela o reactiva. |
 
@@ -1290,7 +1298,7 @@ absolutas con `pathlib`.
 |---|---:|---|
 | `index.html` | 2.538 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente, proveedores y egresos y bot. |
 | `styles.css` | 1.348 líneas | Componentes, animaciones, timeline clínica y utilidades propias. |
-| `app.js` | 8.690 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia y puente `window.OdontoApp`. |
+| `app.js` | 9.667 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia, el control del sello de cambios de la agenda (sin F5) y puente `window.OdontoApp`. |
 | `calendar.js` | 986 líneas | Calendario mensual, filtro por odontólogo, tooltip, panel del día y bloques libres; consume `window.OdontoApp` y expone `window.OdontoCalendar`. |
 | `ficha_medica.js` | 686 líneas | Catálogo único de **124 campos** (8 filiatorios + antecedentes familiares, personales, odontológicos, examen y diagnóstico) + formulario, edad calculada y resumen reutilizables. |
 | `ficha_medica.css` | 226 líneas | Estilos del cuestionario en la página pública, el panel y la vista móvil (incluye la edad calculada). |
@@ -1300,7 +1308,7 @@ absolutas con `pathlib`.
 | `presupuestos.css` | 231 líneas | Estilos del formulario, los renglones de trabajo, los totales, el listado y sus acciones. |
 | `medico.html` | 360 líneas | Vista mobile-first, selección de profesional, agenda y hoja de historia/evolución. |
 | `medico.css` | 424 líneas | Estilos táctiles, hojas deslizantes y timeline. |
-| `medico.js` | 1.555 líneas | Agenda autónoma, navegación de fechas, alta/edición/cancelación, evolución clínica y refresco cada 60 s. |
+| `medico.js` | 1.711 líneas | Agenda autónoma, navegación de fechas, alta/edición/cancelación, evolución clínica y control del sello de cambios cada 10 s (relectura sólo si la agenda cambió). |
 | `anamnesis.html` | 192 líneas | Página pública: estados de carga/error, contexto del turno y contenedor del cuestionario. |
 | `anamnesis.css` | 493 líneas | Estilos de la ficha pública. |
 | `anamnesis.js` | 348 líneas | Token del path, GET/POST, validación de consentimiento, fusión de filiatorios y render seguro con `textContent`. |
@@ -1408,6 +1416,7 @@ el `lifespan` para no tocar la base real. `whatsapp_sin_credenciales` es
 | `test_turnos_actualizacion.py` | Reprogramación, cancelación y reactivación. |
 | `test_turnos_paciente_ubicuo.py` | Prohibición de solapamiento del paciente entre profesionales. |
 | `test_turnos_rango_fechas.py` | Filtros `fecha_desde`/`fecha_hasta`. |
+| `test_turnos_sello.py` | **Sello de cambios de la agenda** (`GET /turnos/sello`): estable sin cambios y distinto al crear, confirmar, cancelar o reprogramar; incluye el circuito real del webhook (`1`/`si` y `2`/`no`) y un cambio guardado directo por ORM. |
 | `test_web.py` | Panel, vista móvil, anamnesis, estáticos, `/health`, cabeceras de caché, el anidamiento del documento (vistas hijas de `main`, modales fuera de ellas) y los avisos del pago de la cuenta corriente (precarga de la cuota y confirmación del saldo a favor). |
 | `test_whatsapp_bot.py` | FAQ Bot, normalización, menú, precios y atención manual. |
 | `test_whatsapp_flow.py` | Flujo completo recordatorio → webhook → estado del turno. |
@@ -3295,7 +3304,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **1004 tests**.
+- Resultado actual: **1014 tests**.
 
 ### 8.5. Publicación
 
@@ -3575,7 +3584,7 @@ git ls-files
 
 **Fecha de última verificación:** 05/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 1004 tests (todos aprobados).
+**Resultado de la suite:** 1014 tests (todos aprobados).
 
 ### 10.5. Conclusión
 

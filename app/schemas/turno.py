@@ -79,3 +79,23 @@ class TurnoRead(TurnoBase):
     estado_turno: EstadoTurno
     estado_whatsapp: EstadoWhatsApp
     whatsapp_mensaje_id: Optional[str] = None
+
+
+class TurnosSello(BaseModel):
+    """Sello de cambios de la agenda (``GET /turnos/sello``).
+
+    Es la huella liviana que consultan el panel de la secretaría y la agenda del
+    odontólogo cada pocos segundos: si cambia, releen los turnos para mostrar lo
+    que el paciente confirmó o canceló por WhatsApp, sin recargar la página.
+    """
+
+    sello: str = Field(
+        ...,
+        description=(
+            "Huella del estado de todos los turnos: cambia ante cualquier alta, "
+            "confirmación, cancelación o reprogramación."
+        ),
+    )
+    cantidad: int = Field(
+        ..., ge=0, description="Cantidad de turnos registrados en el consultorio."
+    )

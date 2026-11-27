@@ -610,6 +610,7 @@ Odontologico/
 │   ├── test_ficha_medica.py        # Módulo 4: cabecera, estado bucal y libro de trabajos
 │   ├── test_turnos.py
 │   ├── test_turnos_actualizacion.py # PATCH /turnos/{id} (reprogramar, cancelar…)
+│   ├── test_turnos_sello.py        # GET /turnos/sello: cambios por WhatsApp sin F5
 │   ├── test_turnos_paciente_ubicuo.py
 │   ├── test_web.py                 # Panel Principal, estáticos y salud de la API
 │   └── test_whatsapp_flow.py
@@ -1012,10 +1013,13 @@ mismo seguimiento de la respuesta:
 - **La respuesta del paciente actualiza el turno.** Los dos caminos dejan el
   teléfono en `CONFIRMACION_TURNO` (`conversaciones_whatsapp`). Cuando el
   paciente contesta **1 / SI**, el webhook deja el turno en `CONFIRMADO`; con
-  **2 / NO** lo deja en `CANCELADO` y `estado_whatsapp` en `RESPONDIDO`. La
-  agenda y el panel principal releen los turnos **cada minuto** (con la pestaña
-  visible) y al volver a la vista, así el estado nuevo aparece solo: verde si
-  confirmó y gris si canceló.
+  **2 / NO** lo deja en `CANCELADO` y `estado_whatsapp` en `RESPONDIDO`. El
+  panel se actualiza **solo, sin recargar la página (F5)**: mientras la pestaña
+  está abierta consulta cada 10 segundos `GET /api/v1/turnos/sello` —una huella
+  liviana del estado de todos los turnos— y, sólo si cambió, relee los turnos y
+  redibuja la agenda; además revisa al volver a la pestaña o a la ventana. Así el
+  estado nuevo aparece en segundos: verde si confirmó y gris si canceló. La vista
+  móvil del odontólogo (`/medico`) hace lo mismo sobre su propia agenda.
 - El mensaje no depende del idioma del sistema: la fecha se arma "en letras"
   (`viernes 16 de octubre de 2026 a las 10:00`) y el profesional se nombra con
   su artículo (`con la Dra. Gómez`, `con el Dr. House`). Los teléfonos se
@@ -1131,8 +1135,10 @@ CDN, HTML y `fetch` contra la misma API `v1`.
   existe— y el turno con `POST /api/v1/turnos` en el horario del bloque.
 - **Siempre sincronizado:** al usar los mismos endpoints y la misma base SQLite,
   lo que se agenda o cancela desde el celular aparece al instante en el Panel
-  Principal de la recepción (y a la inversa). La agenda además se refresca al
-  volver a la app, cada 60 segundos y con el botón *Actualizar*. Los rechazos del
+  Principal de la recepción (y a la inversa). Ambas pantallas consultan cada 10 s
+  `GET /api/v1/turnos/sello` y releen los turnos sólo si cambió —también al volver
+  a la app y con el botón *Actualizar*—, así la confirmación o cancelación que el
+  paciente manda por WhatsApp se ve sin recargar la página. Los rechazos del
   backend se explican en pantalla: `409` (el odontólogo ya tiene un turno en ese
   horario), `400` (el paciente está citado en otra agenda) y los errores de
   validación del alta.
@@ -1552,6 +1558,7 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `DELETE`| `/obras-sociales/{id}` | **Baja lógica** de la cobertura (`activa = false`, conserva a los pacientes) |
 | `POST` | `/turnos` | Crear turno (valida `400` paciente ya agendado en otra agenda y `409` solapamiento del odontólogo) |
 | `GET`  | `/turnos` | Listar turnos (`?doctor_id=&paciente_id=&skip=&limit=`) |
+| `GET`  | `/turnos/sello` | **Sello de cambios** de la agenda (`sha1` + cantidad): el panel y la vista móvil lo consultan cada 10 s y releen los turnos sólo si cambió (respuesta del paciente por WhatsApp sin F5) |
 | `GET`  | `/turnos/{id}` | Obtener turno |
 | `PATCH`| `/turnos/{id}` | Actualizar turno (reprogramar, reasignar, cancelar o reactivar) con las mismas validaciones |
 | `GET` / `POST` | `/tareas/enviar-recordatorios` | **Tarea programada** de recordatorios WhatsApp; requiere `Bearer CRON_SECRET` |
@@ -2054,8 +2061,12 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**1004 pruebas**): creación y validación de turnos, solapamientos (exacto,
-parcial y contiguo), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
+Cubren (**1014 pruebas**): creación y validación de turnos, solapamientos (exacto,
+parcial y contiguo), el **sello de cambios de la agenda**
+(`test_turnos_sello.py`: huella estable sin cambios y distinta al crear,
+confirmar, cancelar o reprogramar; el circuito real `1`/`si` y `2`/`no` del
+webhook y un cambio guardado directo por ORM, que es lo que permite al panel
+actualizarse sin F5), la regla de **paciente ubicuo** (`test_turnos_paciente_ubicuo.py`:
 mismo paciente en otra agenda → `400`, turnos contiguos y cancelados permitidos,
 reprogramación y reactivación revalidadas), actualización de turnos, constraint de
 rango, **disponibilidad semanal por odontólogo** (`test_disponibilidad.py`),

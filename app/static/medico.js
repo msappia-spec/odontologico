@@ -38,8 +38,14 @@
      que ``turno_service.DURACION_BLOQUE_MIN``). */
   const DURACION_BLOQUE = 30;
 
-  /* Refresco automático suave: la agenda se vuelve a leer para ver los cambios
-     que haya hecho la secretaría desde el panel. */
+  /* Control de cambios de la agenda: cada pocos segundos se consulta el sello
+     liviano del backend (``GET /turnos/sello``) y sólo se relee la agenda si
+     cambió. Así la respuesta «1/SI» o «2/NO» que el paciente manda por WhatsApp
+     —y que el webhook guarda fuera de esta pantalla— aparece sin recargar. */
+  const CONTROL_MS = 10000;
+
+  /* Relectura completa de respaldo: se usa si el servidor no tiene el sello
+     (backend viejo) o si la consulta falla por red. */
   const REFRESCO_MS = 60000;
 
   /* Duración con la que se agenda si el usuario no elige otra cosa. */
@@ -67,6 +73,10 @@
     pacienteId: null,    // ficha elegida para el turno en curso
     pacienteNuevo: false, // la hoja está cargando un paciente nuevo
     refrescoId: null,
+    // Sello de la agenda (GET /turnos/sello) y hora de la última relectura de
+    // respaldo: detectan los cambios hechos por fuera de esta pantalla.
+    selloTurnos: null,
+    ultimaRelectura: 0,
     eventosListos: false,
     // Módulo 2: paciente cuya historia clínica se está viendo (null = agenda).
     histPaciente: null,
@@ -513,7 +523,9 @@
     $("pantalla-agenda").classList.remove("hide");
     $("m-header").classList.remove("hide");
     iniciarRefresco();
-    cargarAgenda(false);
+    // El sello se memoriza al terminar la carga: el primer control ya compara
+    // contra el estado que está en pantalla y no repite la relectura.
+    cargarAgenda(false).then(memorizarSello);
   }
 
   function mostrarSelector() {
@@ -525,13 +537,53 @@
 
   function iniciarRefresco() {
     if (state.refrescoId) return;
-    state.refrescoId = setInterval(function () {
-      if (document.hidden || $("pantalla-agenda").classList.contains("hide")) return;
-      cargarAgenda(true);
-    }, REFRESCO_MS);
+    state.refrescoId = setInterval(revisarCambiosDeAgenda, CONTROL_MS);
   }
   function detenerRefresco() {
     if (state.refrescoId) { clearInterval(state.refrescoId); state.refrescoId = null; }
+  }
+
+  /* Memoriza el sello vigente; si la consulta falla se olvida para que el
+     próximo control vuelva a intentarlo. */
+  async function memorizarSello() {
+    try {
+      const datos = await api("/turnos/sello");
+      state.selloTurnos = (datos && datos.sello) || null;
+    } catch (_err) {
+      state.selloTurnos = null;
+    }
+  }
+
+  /* Relee la agenda y vuelve a memorizar el sello: si un turno cambia mientras
+     se está recargando, el control siguiente lo detecta igual. */
+  async function recargarAgendaConSello() {
+    await cargarAgenda(true);
+    await memorizarSello();
+  }
+
+  /* Control de cambios sin recargar la pantalla: consulta el sello liviano y
+     sólo relee la agenda si cambió (el webhook de WhatsApp guarda la
+     confirmación «1/SI» o la cancelación «2/NO» del paciente por su cuenta). */
+  async function revisarCambiosDeAgenda() {
+    if (document.hidden || $("pantalla-agenda").classList.contains("hide")) return;
+    try {
+      const datos = await api("/turnos/sello");
+      const sello = datos && datos.sello;
+      if (!sello) { recargarDeRespaldo(); return; }
+      if (sello === state.selloTurnos) return;
+      state.selloTurnos = sello;
+      await recargarAgendaConSello();
+    } catch (_err) {
+      recargarDeRespaldo();
+    }
+  }
+
+  /* Sin sello disponible: relectura completa cada minuto, como antes. */
+  function recargarDeRespaldo() {
+    const ahora = Date.now();
+    if (ahora - state.ultimaRelectura < REFRESCO_MS) return;
+    state.ultimaRelectura = ahora;
+    cargarAgenda(true);
   }
 
   /* ------------------------------ Datos de la API ------------------------- */
@@ -1612,12 +1664,13 @@
       if (e.key === "Escape") cerrarHojas();
     });
 
-    /* Al volver a la app (o desbloquear el celular) se relee la agenda: la
-       secretaría pudo haber agendado o cancelado algo mientras tanto. */
+    /* Al volver a la app (o desbloquear el celular) se revisa la agenda en el
+       acto: la secretaría pudo haber agendado o cancelado algo, o el paciente
+       pudo haber respondido el recordatorio mientras tanto. */
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) return;
       if ($("pantalla-agenda").classList.contains("hide")) return;
-      cargarAgenda(true);
+      revisarCambiosDeAgenda();
     });
   }
 

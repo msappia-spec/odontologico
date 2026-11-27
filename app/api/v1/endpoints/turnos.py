@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.turno import Turno
-from app.schemas.turno import TurnoCreate, TurnoRead, TurnoUpdate
+from app.schemas.turno import TurnoCreate, TurnoRead, TurnoUpdate, TurnosSello
 from app.services import turno_service
 
 router = APIRouter(prefix="/turnos", tags=["Turnos"])
@@ -66,6 +66,24 @@ def listar_turnos(
             fecha_hasta=fecha_hasta,
         )
     )
+
+
+@router.get(
+    "/sello",
+    response_model=TurnosSello,
+    summary="Sello de cambios de la agenda",
+    description=(
+        "Devuelve una **huella liviana** del estado de todos los turnos "
+        "(`sello`) junto con su cantidad. El panel y la agenda del odontólogo "
+        "la consultan cada pocos segundos: si el sello cambia, releen los turnos "
+        "para mostrar **al instante** lo que el paciente confirmó o canceló por "
+        "WhatsApp, sin recargar la página (F5). No devuelve los turnos; para eso "
+        "está `GET /turnos`."
+    ),
+)
+def obtener_sello_de_turnos(db: Session = Depends(get_db)) -> TurnosSello:
+    sello, cantidad = turno_service.sello_de_turnos(db)
+    return TurnosSello(sello=sello, cantidad=cantidad)
 
 
 @router.get(

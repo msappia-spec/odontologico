@@ -15,6 +15,7 @@ agendados siguen existiendo —se pueden reprogramar y cancelar— para no perde
 historial.
 """
 
+import hashlib
 import logging
 from datetime import date as Date
 from datetime import datetime, time as Time, timedelta
@@ -415,5 +416,57 @@ def horarios_disponibles(
             continue
         libres.append((hora_inicio, hora_fin))
     return efectiva, libres
+
+
+def sello_de_turnos(db: Session) -> Tuple[str, int]:
+    """Huella del estado de todos los turnos, para detectar cambios externos.
+
+    El panel de la secretaría y la agenda del odontólogo la consultan cada pocos
+    segundos (``GET /turnos/sello``). Cuando un paciente responde «1/SI» o
+    «2/NO» al recordatorio, el webhook de WhatsApp cambia el turno —lo deja
+    ``CONFIRMADO`` o ``CANCELADO`` y el recordatorio ``RESPONDIDO``— sin pasar
+    por el navegador: el sello cambia y las pantallas abiertas releen los turnos
+    al instante, sin que nadie recargue la página.
+
+    La huella se calcula sobre lo que se muestra en pantalla (estado del turno,
+    estado del recordatorio, horario, profesional y paciente), así que cualquier
+    alta, baja, confirmación, cancelación o reprogramación la modifica. Se arma
+    en Python —y no con ``string_agg``/``md5`` de SQL— para que funcione igual en
+    SQLite (pruebas) y PostgreSQL (producción).
+
+    Returns:
+        Tupla ``(sello, cantidad)``: el ``sha1`` hexadecimal de la huella y la
+        cantidad de turnos del consultorio.
+    """
+    filas = db.execute(
+        select(
+            Turno.id,
+            Turno.estado_turno,
+            Turno.estado_whatsapp,
+            Turno.fecha_hora_inicio,
+            Turno.fecha_hora_fin,
+            Turno.doctor_id,
+            Turno.paciente_id,
+        ).order_by(Turno.id)
+    ).all()
+
+    huella = hashlib.sha1()
+    for (
+        turno_id,
+        estado_turno,
+        estado_whatsapp,
+        inicio,
+        fin,
+        doctor_id,
+        paciente_id,
+    ) in filas:
+        huella.update(
+            (
+                f"{turno_id}|{getattr(estado_turno, 'value', estado_turno)}|"
+                f"{getattr(estado_whatsapp, 'value', estado_whatsapp)}|"
+                f"{inicio}|{fin}|{doctor_id}|{paciente_id}\n"
+            ).encode("utf-8")
+        )
+    return huella.hexdigest(), len(filas)
 
 

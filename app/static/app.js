@@ -8,6 +8,13 @@
 
   const API = "/api/v1";
 
+  /* Cada cuánto se consulta el sello de la agenda (``GET /turnos/sello``). La
+     respuesta es mínima (una huella y la cantidad de turnos): sólo si cambió se
+     releen los turnos. Así la respuesta «1/SI» o «2/NO» que un paciente manda
+     por WhatsApp —y que el webhook guarda sin pasar por el panel— aparece en
+     pantalla en segundos, sin recargar la página (F5). */
+  const REVISAR_TURNOS_MS = 10000;
+
   /* Ruta del catálogo de obras sociales. Se arma con una función (una sola
      fuente de verdad) y se usa como argumento de ``api()`` en lugar de repetir
      el *template literal* en cada llamada. */
@@ -48,6 +55,11 @@
     doctores: [],
     pacientes: [],
     turnos: [],
+    // Sello de la agenda (GET /turnos/sello): detecta los cambios que ocurren
+    // por fuera del panel, como la confirmación o cancelación que responde el
+    // paciente por WhatsApp. `revisandoTurnos` evita consultas superpuestas.
+    selloTurnos: null,
+    revisandoTurnos: false,
     // Catálogo de obras sociales (GET /obras-sociales): alimenta la vista
     // "Gestión de Obras Sociales" y el desplegable del formulario de pacientes.
     obrasSociales: [],
@@ -1654,7 +1666,43 @@
       renderAgenda();
       document.dispatchEvent(new CustomEvent("odonto:datos"));
     } catch (_err) {
-      /* Es un refresco de cortesía: la vista conserva lo que ya tenía. */
+      /* Es un refresco de cortesía: la vista conserva lo que ya tenía y se
+         olvida el sello para que el próximo control vuelva a intentarlo. */
+      state.selloTurnos = null;
+    }
+  }
+
+  /* Control de cambios de la agenda sin recargar la página.
+     Consulta el sello liviano del backend y, sólo si cambió, relee los turnos y
+     redibuja; si la pestaña está en «Recordatorios», también refresca esa lista
+     (el turno que confirmó o canceló el paciente sale de los pendientes). Lo
+     dispara un intervalo mientras el panel está abierto y, además, el regreso a
+     la pestaña del navegador (los navegadores congelan los intervalos cuando
+     queda en segundo plano). */
+  async function revisarCambiosDeTurnos() {
+    // En segundo plano no se consulta: los navegadores ya congelan el
+    // intervalo y, al volver a la pestaña, `visibilitychange` revisa en el acto.
+    if (document.visibilityState !== "visible") return;
+    if (state.revisandoTurnos) return;
+    state.revisandoTurnos = true;
+    try {
+      const datos = await api("/turnos/sello");
+      const sello = datos && datos.sello;
+      if (!sello) return;
+      // El primer control sólo memoriza el sello: `cargarTodo()` ya trajo los
+      // turnos y no hace falta volver a pedirlos.
+      if (state.selloTurnos === null) {
+        state.selloTurnos = sello;
+        return;
+      }
+      if (sello === state.selloTurnos) return;
+      state.selloTurnos = sello;
+      await refrescarTurnos();
+      if (state.vista === "recordatorios") await cargarRecordatorios();
+    } catch (_err) {
+      /* Es un control de cortesía: si falla, la vista conserva lo que tenía. */
+    } finally {
+      state.revisandoTurnos = false;
     }
   }
 
@@ -9492,13 +9540,16 @@
     cambiarVista(state.vista);
     cargarTodo();
     // Las respuestas de WhatsApp (1/SI o 2/NO) llegan por el webhook y cambian
-    // el turno sin pasar por el panel: cada minuto, con la pestaña visible y la
-    // agenda abierta, se releen los turnos para mostrar CONFIRMADO / CANCELADO.
-    setInterval(function () {
-      if (document.visibilityState !== "visible") return;
-      if (state.vista !== "dashboard" && state.vista !== "calendario") return;
-      refrescarTurnos();
-    }, 60000);
+    // el turno sin pasar por el panel. Cada pocos segundos se consulta el sello
+    // de la agenda y, sólo si cambió, se releen los turnos: el estado
+    // CONFIRMADO o CANCELADO aparece en la vista abierta sin recargar (F5).
+    setInterval(revisarCambiosDeTurnos, REVISAR_TURNOS_MS);
+    // Al volver a la pestaña o a la ventana se revisa en el acto: el navegador
+    // congela los intervalos mientras la página queda en segundo plano.
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") revisarCambiosDeTurnos();
+    });
+    window.addEventListener("focus", revisarCambiosDeTurnos);
   });
   /* --------------------- Puente para módulos externos -------------------- */
   // calendar.js (calendario mensual + panel de disponibilidad) consume esta API
@@ -9541,6 +9592,7 @@
     renderRecordatorios,
     cargarRecordatorios,
     refrescarTurnos,
+    revisarCambiosDeTurnos,
     enviarRecordatoriosTodos,
     enviarRecordatorioPorApi,
     // Fichas de salud (Módulo 4: anamnesis)
