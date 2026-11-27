@@ -40,6 +40,10 @@ publicar.bat
 # Configuración local del propio CLI
 .vercel/
 
+# Respaldos de la base y scripts con credenciales de producción
+/backups/
+/borrar.bat
+
 # Secretos locales: en Vercel se cargan como Environment Variables,
 # no se empaquetan en el deploy.
 .env

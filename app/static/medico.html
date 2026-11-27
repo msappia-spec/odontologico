@@ -67,6 +67,46 @@
   </header>
   <main class="m-main">
 
+    <!-- ============== PANTALLA 0 · ACCESO DEL PROFESIONAL ============== -->
+    <!-- La API exige sesión: la agenda del odontólogo comparte la cookie del
+         panel. Si el celular no tiene sesión, este formulario la abre. -->
+    <section id="pantalla-login-movil" class="m-pantalla hide">
+      <div class="m-hero">
+        <img src="/static/img/logo-franciosi.svg" alt="Franciosi Odontología"
+             width="190" height="140" class="m-hero-logo" />
+        <p class="m-hero-eyebrow">Acceso del profesional</p>
+        <h1 class="m-hero-titulo">Iniciar sesión</h1>
+        <p class="m-hero-sub">Ingresá con el email y la contraseña que te dio la secretaría.</p>
+      </div>
+      <form id="form-login-movil" class="mx-4 mt-2 space-y-3 rounded-2xl bg-white p-4 shadow-sm"
+            autocomplete="on" novalidate>
+        <div>
+          <label class="field-label" for="movil-email">Email</label>
+          <input id="movil-email" type="email" class="field" required
+                 autocomplete="username" placeholder="nombre@consultorio.com" />
+        </div>
+        <div>
+          <label class="field-label" for="movil-password">Contraseña</label>
+          <input id="movil-password" type="password" class="field" required
+                 autocomplete="current-password" placeholder="Tu contraseña" />
+        </div>
+        <div id="movil-login-error" class="login-error hide" role="alert"></div>
+        <button type="submit" id="movil-login-submit" class="m-btn m-btn-primary w-full">
+          Ingresar a mi agenda
+        </button>
+        <!-- Atajo biométrico (huella / Face ID). Se muestra sólo si el celular
+             tiene biometría configurada; la contraseña sigue disponible. -->
+        <button type="button" id="movil-biometria" class="m-btn w-full hide">
+          Ingresar con Huella / FaceID
+        </button>
+        <p id="movil-biometria-nota" class="hide text-[11px] leading-snug text-slate-400"></p>
+        <p class="text-[11px] leading-snug text-slate-400">
+          ¿No podés entrar? Pedile a la secretaría que revise tu usuario en
+          «Usuarios y Permisos».
+        </p>
+      </form>
+    </section>
+
     <!-- =================== PANTALLA 1 · QUIÉN ATIENDE =================== -->
     <section id="pantalla-profesional" class="m-pantalla">
       <div class="m-hero">

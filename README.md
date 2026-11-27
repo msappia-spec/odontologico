@@ -558,7 +558,9 @@ Odontologico/
 │           ├── disponibilidad.py   # Agenda semanal + horarios disponibles
 │           ├── tareas.py           # Tarea programada de recordatorios
 │           ├── whatsapp.py         # Webhook WAHA (bot + confirmaciones) + recordatorios
-│           └── whatsapp_menu.py    # FAQ Bot: CRUD del menú que ve el paciente
+│           ├── whatsapp_menu.py    # FAQ Bot: CRUD del menú que ve el paciente
+│           ├── auth.py             # Login/logout, sesión (/auth/me), módulos y huella/Face ID
+│           └── usuarios.py         # Usuarios y permisos (ADMIN_USUARIOS)
 │   ├── web/
 │   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
 │   ├── resources/
@@ -567,6 +569,8 @@ Odontologico/
 │       ├── index.html              # Estructura + Tailwind (CDN)
 │       ├── styles.css              # Componentes, animaciones y línea de tiempo clínica
 │       ├── app.js                  # Lógica: fetch contra /api/v1 (+ ficha en sólo lectura)
+│       ├── usuarios.js             # Login, sesión, menú por permisos y vista de usuarios
+│       ├── biometria.js            # Huella / Face ID (WebAuthn): login y registro del dispositivo
 │       ├── medico.html             # Vista móvil del odontólogo (agenda + historia clínica)
 │       ├── medico.css              # Ajustes mobile-first (táctil, hojas, timeline clínico)
 │       ├── medico.js               # Profesional + agenda + acciones + nueva evolución
@@ -583,6 +587,7 @@ Odontologico/
 │   ├── importar_nomenclador_excel.py   # Nomenclador desde Excel → prestaciones (altas y precios)
 │   ├── importar_pacientes_excel.py    # Pacientes del Access (Excel) → tabla de pacientes
 │   ├── publicar.py                      # Publicar en un paso: pruebas + commit + push + deploy
+│   ├── crear_admin.py                   # Primer superadmin + SECRET_KEY del archivo de entorno
 │   ├── migrar_historias_clinicas.py      # Migración Módulo 2: ficha, evoluciones y adjuntos
 │   ├── migrar_ficha_medica.py            # Migración Módulo 4: ficha médica y trabajos
 │   ├── migrar_facturacion.py            # Migración Módulo 3: prácticas, aranceles, caja y pagos
@@ -657,12 +662,19 @@ python -m scripts.importar_nomenclador_excel "C:\Users\Marcos\Downloads\nomencla
 python -m scripts.importar_pacientes_excel access/pacientes.xlsx --dry-run
 python -m scripts.importar_pacientes_excel access/pacientes.xlsx
 
-# 5) Levantar el servidor
+# 5) Crear el primer usuario del panel (superadmin). Pide la contraseña por
+#    consola (mínimo 8: mayúscula, minúscula y número) y genera la SECRET_KEY
+#    de las sesiones en el .env si todavía no existe.
+python -m scripts.crear_admin --email admin@consultorio.com --nombre "Administrador"
+
+# 6) Levantar el servidor
 uvicorn app.main:app --reload
 ```
 
 - **Panel Principal (interfaz de la secretaría):** <http://127.0.0.1:8000/>
+  (pide login; usá el usuario creado en el paso 5)
 - **Agenda móvil del odontólogo (celular):** <http://127.0.0.1:8000/medico>
+  (comparte la sesión del panel; si se abre en otro celular, pide login)
 - Documentación interactiva (OpenAPI/Swagger): <http://127.0.0.1:8000/docs>
 - Health-check: <http://127.0.0.1:8000/health>
 
@@ -774,7 +786,9 @@ usa Vercel, sin borrar el esquema. Ofrece dos modos:
   adjuntos, caja, cuenta corriente (planes y movimientos) y disponibilidad
   específica. Conserva doctores, obras sociales, prestaciones, aranceles, agenda
   semanal y menú del bot.
-- **Todas las tablas:** las 25 tablas; vuelve a sembrar el menú del FAQ Bot.
+- **Todas las tablas:** las 29 tablas de datos; conserva los usuarios del panel
+  y sus credenciales biométricas (passkeys) y vuelve a sembrar el menú del FAQ
+  Bot.
 
 El CLI de Vercel no puede exportar `DATABASE_URL` porque está marcada como
 `Secret` (`vercel env pull` la reemplaza por `[SENSITIVE]`). Por eso el `.bat`
@@ -801,6 +815,9 @@ los conteos y recién borra cuando se escribe `SI`.
    | Variable | Valor | ¿Obligatoria? |
    |---|---|---|
    | `DATABASE_URL` | `postgresql+psycopg://usuario:clave@host:5432/db` | Sí, para persistir datos |
+   | `SECRET_KEY` | clave larga y aleatoria (la genera `crear_admin`) | Sí: firma las sesiones y los desafíos WebAuthn |
+   | `RP_ID` | `TU-PROYECTO.vercel.app` (sin `https://` ni barra) | Recomendada: vincula las passkeys al dominio |
+   | `RP_ORIGIN` | `https://TU-PROYECTO.vercel.app` | Recomendada: origen exacto que valida la huella/Face ID |
    | `DEBUG` | `false` | No |
    | `CORS_ORIGINS` | `["https://TU-PROYECTO.vercel.app"]` | No (por defecto `["*"]`) |
    | `RECORDATORIO_DIAS` | `3` | No |
@@ -2062,13 +2079,81 @@ mensaje se define en `PLANTILLA_RECORDATORIO`.
 
 ---
 
+## 🔐 Login, usuarios y permisos
+
+El panel y la API están protegidos con **JWT + permisos por pantalla**.
+
+- **Primer usuario:** `python -m scripts.crear_admin --email ... --nombre "..."`.
+  Crea un `es_superadmin` (acceso total) y asegura la `SECRET_KEY` de las
+  sesiones en el `.env`.
+- **Sesión:** `POST /api/v1/auth/login` valida la contraseña (bcrypt) y deja una
+  cookie `HttpOnly` + `SameSite=Lax` de 8 horas; también devuelve el token para
+  clientes `Bearer`. `GET /auth/me` revalida la cuenta en cada carga,
+  `GET /auth/modulos` lista los permisos y `POST /auth/logout` cierra la sesión.
+  Tras **5 intentos fallidos por minuto** desde la misma IP **o contra la misma
+  cuenta** el login responde `429` con `Retry-After`.
+- **Contraseñas:** mínimo 8 caracteres con una mayúscula, una minúscula y un
+  número; se guardan **sólo** como hash bcrypt con sal aleatoria (nunca en texto
+  plano, ni en logs).
+- **Módulos:** `PANEL_PRINCIPAL`, `AGENDA_TURNOS`, `FICHAS_SALUD`,
+  `CAJA_PRESUPUESTOS`, `CUENTA_CORRIENTE`, `PROVEEDORES_EGRESOS`,
+  `BORRAR_MOVIMIENTOS` (sensible y separado de la caja), `REGISTROS`,
+  `CONFIGURACION` y `ADMIN_USUARIOS`.
+- **Menú dinámico:** cada ítem del sidebar declara `data-modulo`; el panel oculta
+  las secciones sin permiso y la API responde `403` aunque se llame directo.
+- **Administración:** *Configuración → Usuarios y Permisos* (visible con
+  `ADMIN_USUARIOS` o superadmin) permite crear cuentas, marcar/desmarcar
+  secciones con checkboxes, vincular un odontólogo, activar/desactivar la cuenta
+  y blanquear la contraseña. Las cuentas **no se borran**: se desactivan, y el
+  bloqueo es inmediato (no espera a que expire el token).
+- **Huella digital / Face ID (WebAuthn / passkeys):** el login trae el botón
+  secundario **«Ingresar con Huella Digital / FaceID»** y el menú lateral
+  **«Registrar Huella de este dispositivo»** para registrar el celular o la
+  notebook (se guarda **sólo la clave pública**; la huella nunca sale del
+  dispositivo). Endpoints: `POST /auth/webauthn/registro/opciones` y
+  `/registro/verificar` (con sesión), `POST /auth/webauthn/login/opciones` y
+  `/login/verificar` (públicos) y `GET/DELETE /auth/webauthn/credenciales`. El
+  ingreso con huella devuelve **el mismo JWT + cookie `HttpOnly` + módulos** que
+  el login con contraseña, actualiza `sign_count` (anti-clonación) y
+  `ultimo_acceso`, y tiene su propio limitador de intentos. Si el equipo no
+  soporta WebAuthn, el botón se oculta y se explica que hay que usar la clave.
+  La agenda móvil `/medico` ofrece el mismo atajo.
+- **Requisito de dominio:** WebAuthn sólo funciona en **HTTPS** (los navegadores
+  consideran seguro `http://localhost`). Definí `RP_ID` (dominio sin esquema,
+  p. ej. `mi-panel.vercel.app`) y `RP_ORIGIN` (`https://mi-panel.vercel.app`) en
+  producción; si el dominio cambia, las huellas registradas dejan de valer y hay
+  que registrarlas otra vez.
+- **Rutas públicas:** `/health`, las páginas web, `POST /whatsapp/webhook`,
+  `/anamnesis/{token}`, el cron de `/tareas` (Bearer `CRON_SECRET`) y
+  `POST /auth/webauthn/login/*`.
+
+> **Antes de publicar:** definí `SECRET_KEY` en el entorno de Vercel y ejecutá
+> `python -m scripts.crear_admin --env-file .env.vercel.local --email ...`
+> apuntando a la base de producción. El script carga el `DATABASE_URL` de ese
+> archivo antes de importar la app (no hace falta exportarlo en la consola) y
+> crea/verifica el esquema sin borrar datos. Sin usuarios creados nadie puede
+> entrar al panel.
+
+Variables del `.env`:
+
+```dotenv
+SECRET_KEY="..."            # la genera crear_admin si falta
+ACCESS_TOKEN_EXPIRE_HOURS=8
+LOGIN_MAX_INTENTOS=5
+LOGIN_VENTANA_SEGUNDOS=60
+RP_ID=""                    # dominio sin https (localhost o *.vercel.app)
+RP_ORIGIN=""               # origen exacto (http://localhost:8000 o https://…)
+```
+
+---
+
 ## ✅ Pruebas
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**1015 pruebas**): creación y validación de turnos, solapamientos (exacto,
+Cubren (**1065 pruebas**, 1064 aprobadas y 1 omitida): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), el **sello de cambios de la agenda**
 (`test_turnos_sello.py`: huella estable sin cambios y distinta al crear,
 confirmar, cancelar o reprogramar; el circuito real `1`/`si` y `2`/`no` del
@@ -2109,6 +2194,28 @@ diálogos invisibles según la operación del menú—, los **dos avisos del for
 de pago de la cuenta corriente** —elegir un plan completa el importe con el valor
 de la cuota y un pago que supera la deuda se avisa y se confirma antes de dejar
 saldo a favor—, además de los colores por estado y la salud de la API).
+
+El **módulo de autenticación y permisos** tiene su archivo, `tests/test_auth.py`
+(*31 pruebas*): hash bcrypt con sal, catálogo de módulos, `401` sin sesión,
+login con token y cookie `HttpOnly`, email inexistente y clave incorrecta con el
+mismo mensaje, cuenta desactivada, bloqueo `429` tras cinco intentos, logout,
+`403` de cada router sin el módulo, superadmin con acceso total,
+`BORRAR_MOVIMIENTOS` separado de la caja, corte inmediato al desactivar una
+cuenta, alta de usuarios (email único y contraseña fuerte), permisos, blanqueo de
+clave, regla del último superadmin, rutas públicas y la generación idempotente de
+`SECRET_KEY`. También verifica que el panel traiga el login, los `data-modulo`
+del menú, la vista «Usuarios y Permisos» y el login de la agenda móvil.
+
+El **ingreso biométrico** se prueba en `tests/test_webauthn.py` (*19 pruebas*)
+con un autenticador WebAuthn sintético (ES256, attestation `none`) que firma de
+verdad, sin mockear `py_webauthn`: alta del dispositivo y guardado de la clave
+pública, desafío de registro que exige sesión y no sirve para login, desafío
+adulterado, login con huella que devuelve el mismo JWT + cookie + módulos,
+firma adulterada y contador anti-clonación (no avanza → `401`), credencial de
+otra persona, email inexistente sin enumeración, bloqueo `429` tras cinco fallos
+(sin afectar el login con contraseña), baja de un dispositivo sólo por su dueño,
+normalización de `RP_ID`/`RP_ORIGIN` y el atajo de huella en el panel y en
+`/medico`.
 
 La **ficha médica ampliada** se cubre en `tests/test_anamnesis.py`: además del
 token y del camino público, verifica los bloques familiares, personales y

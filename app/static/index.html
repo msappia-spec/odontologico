@@ -33,6 +33,65 @@
   <link rel="stylesheet" href="/static/presupuestos.css" />
 </head>
 <body class="min-h-screen">
+  <!-- ===================== LOGIN (barrera de entrada) ===================== -->
+  <!-- El panel arranca con esta pantalla fija por encima de todo. El JS pide
+       GET /auth/me con la cookie de sesión; si hay sesión vigente la oculta y
+       muestra el panel, y si no, deja el formulario para ingresar. -->
+  <div id="pantalla-login" class="login-screen" role="dialog" aria-modal="true" aria-labelledby="login-titulo">
+    <div class="login-card">
+      <div class="flex items-center gap-3">
+        <img src="/static/img/marca-franciosi.svg" alt="" width="36" height="46"
+             class="w-9 h-[46px] flex-none object-contain" />
+        <div class="leading-tight">
+          <p class="font-extrabold tracking-tight text-slate-900">Franciosi</p>
+          <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#b0716b]">Odontología</p>
+        </div>
+      </div>
+      <h1 id="login-titulo" class="mt-6 text-2xl font-extrabold tracking-tight text-slate-900">Panel de la secretaría</h1>
+      <p id="login-subtitulo" class="mt-1 text-sm text-slate-500">
+        Ingresá con tu email y contraseña para acceder al consultorio.
+      </p>
+      <form id="form-login" class="mt-6 space-y-4" autocomplete="on" novalidate>
+        <div>
+          <label class="field-label" for="login-email">Email</label>
+          <input id="login-email" name="email" type="email" class="field" required
+                 autocomplete="username" placeholder="nombre@consultorio.com" />
+        </div>
+        <div>
+          <label class="field-label" for="login-password">Contraseña</label>
+          <input id="login-password" name="password" type="password" class="field" required
+                 autocomplete="current-password" placeholder="Tu contraseña" />
+        </div>
+        <div id="login-error" class="login-error hide" role="alert"></div>
+        <button type="submit" id="login-submit" class="btn btn-primary w-full">
+          Ingresar al panel
+        </button>
+      </form>
+      <!-- Atajo biométrico: se muestra sólo si el navegador y el equipo lo
+           soportan (biometria.js consulta PublicKeyCredential). La contraseña
+           sigue siendo el respaldo principal. -->
+      <div class="login-divisor hide" id="login-divisor-biometria">
+        <span>o</span>
+      </div>
+      <button type="button" id="login-biometria" class="btn btn-ghost w-full login-biometria hide">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 11a2 2 0 0 0-2 2v2a2 2 0 0 0 4 0v-2a2 2 0 0 0-2-2Z"/>
+          <path d="M8.5 7.5A4.5 4.5 0 0 1 16.5 11v3.5a5.5 5.5 0 0 1-1 3.2"/>
+          <path d="M5.5 5A9 9 0 0 1 20 11v2"/>
+          <path d="M4 10v2a9 9 0 0 0 2 5.6"/>
+          <path d="M7 19a6 6 0 0 1-1-3v-3a6 6 0 0 1 1.2-3.6"/>
+        </svg>
+        <span>Ingresar con Huella Digital / FaceID</span>
+      </button>
+      <p id="login-biometria-nota" class="login-hint hide"></p>
+      <p class="login-hint">
+        ¿No tenés cuenta? Pedile a un administrador que te cree un usuario con las
+        secciones que necesitás. Las cuentas no se borran: se desactivan.
+      </p>
+    </div>
+  </div>
+
   <!-- Glifo oficial de WhatsApp, definido una sola vez y reutilizado con
        <use href="#ico-whatsapp"> por los botones estáticos y por las filas que
        renderiza app.js (botones verdes de recordatorios). -->
@@ -58,73 +117,104 @@
 
       <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
         <p class="px-3 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Operación</p>
-        <a class="nav-link" data-view="dashboard">
+        <a class="nav-link" data-view="dashboard" data-modulo="PANEL_PRINCIPAL">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
           Panel Principal
         </a>
-        <a class="nav-link active" data-view="calendario">
+        <a class="nav-link active" data-view="calendario" data-modulo="AGENDA_TURNOS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
           Calendario
         </a>
-        <a class="nav-link" data-view="disponibilidad">
+        <a class="nav-link" data-view="disponibilidad" data-modulo="AGENDA_TURNOS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
           Disponibilidad
         </a>
-        <a class="nav-link" data-view="recordatorios">
+        <a class="nav-link" data-view="recordatorios" data-modulo="AGENDA_TURNOS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
           <span class="flex-1">Recordatorios</span>
           <span id="nav-rec-pendientes" class="nav-badge hide">0</span>
         </a>
-        <a class="nav-link" data-view="fichas-salud">
+        <a class="nav-link" data-view="fichas-salud" data-modulo="FICHAS_SALUD">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6a1 1 0 0 1 1 1v1H8V4a1 1 0 0 1 1-1Z"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><path d="M8 12h2l1.5-2 2 4 1.5-2H17"/></svg>
           <span class="flex-1">Fichas de salud</span>
           <span id="nav-fichas-pendientes" class="nav-badge hide">0</span>
         </a>
-        <a class="nav-link" data-view="facturacion">
+        <a class="nav-link" data-view="facturacion" data-modulo="CAJA_PRESUPUESTOS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20M6 15h4"/></svg>
           <span class="flex-1">Facturación y Caja</span>
           <span id="nav-fact-pendientes" class="nav-badge hide">0</span>
         </a>
-        <a class="nav-link" data-view="presupuestos">
+        <a class="nav-link" data-view="presupuestos" data-modulo="CAJA_PRESUPUESTOS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9.5 14.5 12 12l2.5 2.5"/></svg>
           <span class="flex-1">Presupuestos</span>
         </a>
-        <a class="nav-link" data-view="cuenta-corriente">
+        <a class="nav-link" data-view="cuenta-corriente" data-modulo="CUENTA_CORRIENTE">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/><path d="M8 2v20M12 7h5M12 11h5"/></svg>
           <span class="flex-1">Cuenta corriente</span>
         </a>
-        <a class="nav-link" data-view="egresos">
+        <a class="nav-link" data-view="egresos" data-modulo="PROVEEDORES_EGRESOS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9.5 14.5 2.5-2.5 2.5 2.5"/></svg>
           <span class="flex-1">Proveedores y egresos</span>
           <span id="nav-egresos-deuda" class="nav-badge hide">0</span>
         </a>
-        <a class="nav-link" data-view="borrar-movimientos">
+        <a class="nav-link" data-view="borrar-movimientos" data-modulo="BORRAR_MOVIMIENTOS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
           <span class="flex-1">Borrar movimientos</span>
         </a>
         <p class="px-3 pt-4 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Registros</p>
-        <a class="nav-link" data-view="doctores">
+        <a class="nav-link" data-view="doctores" data-modulo="REGISTROS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 2.3v0"/><path d="M10 10.6V16a2 2 0 0 0 2 2"/><circle cx="12" cy="7" r="4"/><path d="M9 21v-2a4 4 0 0 1 4-4"/></svg>
           Doctores
         </a>
-        <a class="nav-link" data-view="pacientes">
+        <a class="nav-link" data-view="pacientes" data-modulo="REGISTROS">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           Pacientes
         </a>
         <p class="px-3 pt-4 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Configuración</p>
-        <a class="nav-link" data-view="obras-sociales">
+        <a class="nav-link" data-view="obras-sociales" data-modulo="CONFIGURACION">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 8.3-7 9-4-.7-7-4.6-7-9V6z"/><path d="M9.5 12.2l1.8 1.8 3.4-3.6"/></svg>
           <span class="flex-1">Obras Sociales</span>
           <span id="nav-os-activas" class="nav-badge hide">0</span>
         </a>
-        <a class="nav-link" data-view="bot-whatsapp">
+        <a class="nav-link" data-view="bot-whatsapp" data-modulo="CONFIGURACION">
           <svg class="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
           <span class="flex-1">Bot WhatsApp</span>
           <span id="nav-menu-wa-activas" class="nav-badge hide">0</span>
         </a>
+        <a class="nav-link" data-view="usuarios" data-modulo="ADMIN_USUARIOS">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M16 11l2 2 4-4"/></svg>
+          <span class="flex-1">Usuarios y Permisos</span>
+        </a>
       </nav>
 
       <div class="px-3 py-4 border-t border-white/10 space-y-2">
+        <!-- Sesión vigente: nombre, rol y salida. El JS lo completa con
+             GET /auth/me; si no hay sesión, la pantalla de login tapa el panel. -->
+        <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5">
+          <span id="sesion-avatar" class="w-8 h-8 rounded-full bg-brand-600 text-white text-[11px] font-bold flex items-center justify-center flex-none">--</span>
+          <div class="min-w-0 flex-1 leading-tight">
+            <p id="sesion-nombre" class="text-xs font-semibold text-white truncate">Sin sesión</p>
+            <p id="sesion-rol" class="text-[10px] text-slate-400 truncate">—</p>
+          </div>
+          <button type="button" id="btn-logout" class="text-slate-300 hover:text-white p-1.5 rounded-lg hover:bg-white/10"
+                  title="Cerrar sesión" aria-label="Cerrar sesión">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          </button>
+        </div>
+        <!-- Passkeys del usuario: registrar/administrar este celular o notebook.
+             biometria.js lo muestra sólo con sesión abierta y soporte WebAuthn. -->
+        <button type="button" id="btn-biometria" class="nav-link w-full text-left text-slate-300 hide"
+                title="Registrar la huella o Face ID de este dispositivo">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 11a2 2 0 0 0-2 2v2a2 2 0 0 0 4 0v-2a2 2 0 0 0-2-2Z"/>
+            <path d="M8.5 7.5A4.5 4.5 0 0 1 16.5 11v3.5a5.5 5.5 0 0 1-1 3.2"/>
+            <path d="M5.5 5A9 9 0 0 1 20 11v2"/>
+            <path d="M4 10v2a9 9 0 0 0 2 5.6"/>
+            <path d="M7 19a6 6 0 0 1-1-3v-3a6 6 0 0 1 1.2-3.6"/>
+          </svg>
+          Registrar Huella de este dispositivo
+        </button>
         <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5">
           <span id="api-status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
           <span id="api-status-text" class="text-xs text-slate-300">Conectando…</span>
@@ -163,12 +253,12 @@
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
           </button>
           <div class="ml-auto flex items-center gap-2">
-            <button id="btn-recordatorios" class="btn btn-ghost btn-sm hidden sm:inline-flex" title="Ver los recordatorios pendientes de envío">
+            <button id="btn-recordatorios" class="btn btn-ghost btn-sm hidden sm:inline-flex" data-modulo-requerido="AGENDA_TURNOS" title="Ver los recordatorios pendientes de envío">
               <svg class="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-whatsapp"/></svg>
               Recordatorios
               <span id="header-rec-pendientes" class="nav-badge hide">0</span>
             </button>
-            <button id="btn-nuevo-turno" class="btn btn-primary btn-sm">
+            <button id="btn-nuevo-turno" class="btn btn-primary btn-sm" data-modulo-requerido="AGENDA_TURNOS">
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
               <span class="hidden sm:inline">Nuevo turno</span>
             </button>
@@ -1040,6 +1130,61 @@
                 Es el mismo texto que manda el webhook. Los asteriscos son el <span class="font-semibold">negrita</span> de WhatsApp.
                 Si no hay opciones activas, el bot no responde y se muestra el aviso de menú vacío.
               </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============== VISTA: USUARIOS Y PERMISOS ============== -->
+        <!-- Sólo visible para quien tenga ADMIN_USUARIOS (o sea superadmin).
+             Cada cuenta se crea con contraseña fuerte y se le marcan las
+             secciones del menú a las que puede entrar. -->
+        <section id="view-usuarios" class="anim-fade space-y-5 hide">
+
+          <div class="card p-4 sm:p-5">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center flex-none">
+                <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M16 11l2 2 4-4"/></svg>
+              </span>
+              <div class="min-w-0 flex-1">
+                <h2 class="text-lg font-extrabold tracking-tight text-slate-900">Usuarios y permisos</h2>
+                <p id="usuarios-subtitulo" class="text-xs text-slate-500">
+                  Quién entra al panel y a qué secciones puede acceder.
+                </p>
+              </div>
+              <span id="count-usuarios" class="badge badge-brand">0</span>
+              <button type="button" id="btn-nuevo-usuario" class="btn btn-primary btn-sm">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                Nuevo usuario
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-3">
+              Las cuentas no se borran: se <span class="font-semibold">desactivan</span> para conservar la
+              auditoría. Un <span class="font-semibold">superadmin</span> entra a todo sin restricciones;
+              para el resto, las secciones no marcadas desaparecen del menú y la API responde 403.
+            </p>
+          </div>
+
+          <div class="card overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 class="font-bold text-slate-900">Equipo del consultorio</h2>
+                <p class="text-[11px] text-slate-400">El email es único y es el usuario del login.</p>
+              </div>
+              <button type="button" id="btn-refrescar-usuarios" class="btn btn-ghost btn-sm" title="Volver a pedir la lista">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Actualizar
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Usuario</th><th>Rol</th><th>Secciones</th><th>Último acceso</th>
+                    <th class="text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="lista-usuarios"></tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -2980,6 +3125,148 @@
     </div>
   </div>
 
+  <!-- ===================== MODAL: USUARIO (ALTA / PERMISOS) ===================== -->
+  <div id="modal-usuario" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-2xl p-6 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <h3 id="usuario-modal-titulo" class="text-lg font-extrabold text-slate-900">Nuevo usuario</h3>
+          <p class="text-xs text-slate-500">Elegí las secciones a las que puede entrar esta persona.</p>
+        </div>
+        <button type="button" id="modal-usuario-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-usuario" class="space-y-4" autocomplete="off" novalidate>
+        <input type="hidden" id="usuario-id" />
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="field-label" for="usuario-nombre">Nombre completo</label>
+            <input id="usuario-nombre" class="field" required maxlength="150" placeholder="Ej.: Ana Pérez" />
+          </div>
+          <div>
+            <label class="field-label" for="usuario-email">Email (usuario del login)</label>
+            <input id="usuario-email" type="email" class="field" required maxlength="150" placeholder="ana@consultorio.com" />
+          </div>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="field-label" for="usuario-password">Contraseña</label>
+            <input id="usuario-password" type="password" class="field" minlength="8" maxlength="64"
+                   autocomplete="new-password" placeholder="Mínimo 8: mayúscula, minúscula y número" />
+            <p id="usuario-password-nota" class="mt-1 text-[11px] text-slate-400">
+              Debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número.
+            </p>
+          </div>
+          <div>
+            <label class="field-label" for="usuario-doctor">Odontólogo vinculado (opcional)</label>
+            <select id="usuario-doctor" class="field">
+              <option value="">Sin vínculo</option>
+            </select>
+            <p class="mt-1 text-[11px] text-slate-400">Para que la agenda móvil sepa qué profesional es.</p>
+          </div>
+        </div>
+        <label class="flex items-start gap-2.5 rounded-xl border border-slate-200 px-3 py-2.5 cursor-pointer select-none">
+          <input id="usuario-superadmin" type="checkbox"
+                 class="mt-0.5 w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+          <span class="text-sm text-slate-700">
+            <span class="font-semibold">Superadmin</span>: accede a todo sin restricciones.
+            <span class="block text-[11px] text-slate-400">Sólo otro superadmin puede marcar esta casilla.</span>
+          </span>
+        </label>
+        <div>
+          <div class="flex items-center justify-between gap-3">
+            <p class="field-label mb-0">Secciones habilitadas</p>
+            <button type="button" id="usuario-marcar-todos" class="text-[11px] font-semibold text-brand-700 hover:underline">
+              Marcar todas
+            </button>
+          </div>
+          <div id="usuario-modulos" class="permiso-grid mt-2"></div>
+          <p id="usuario-modulos-nota" class="mt-2 text-[11px] text-slate-400">
+            Si no marcás ninguna, la cuenta puede entrar pero no verá ninguna sección.
+          </p>
+        </div>
+        <div id="usuario-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-usuario-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-usuario-save" class="btn btn-primary flex-1">Guardar usuario</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: RESET DE CONTRASEÑA ===================== -->
+  <div id="modal-reset-password" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-md p-6">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <h3 class="text-lg font-extrabold text-slate-900">Restablecer contraseña</h3>
+          <p id="usuario-reset-nombre" class="text-xs text-slate-500">—</p>
+        </div>
+        <button type="button" id="modal-reset-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-reset-password" class="space-y-4" autocomplete="off" novalidate>
+        <input type="hidden" id="usuario-reset-id" />
+        <div>
+          <label class="field-label" for="usuario-reset-password">Nueva contraseña</label>
+          <input id="usuario-reset-password" type="password" class="field" required minlength="8" maxlength="64"
+                 autocomplete="new-password" placeholder="Mínimo 8: mayúscula, minúscula y número" />
+          <p class="mt-1 text-[11px] text-slate-400">
+            La clave anterior deja de valer de inmediato. La persona no necesita cerrar sesión.
+          </p>
+        </div>
+        <div id="usuario-reset-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-reset-cancel" class="btn btn-ghost flex-1">Cancelar</button>
+          <button type="submit" id="modal-reset-save" class="btn btn-primary flex-1">Cambiar contraseña</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: HUELLA / FACE ID ===================== -->
+  <!-- Alta y baja de passkeys del usuario de la sesión. Todo el flujo lo
+       maneja biometria.js con navigator.credentials.create(). -->
+  <div id="modal-biometria" class="modal-backdrop hide">
+    <div class="card anim-pop w-full max-w-lg p-6">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <h3 class="text-lg font-extrabold text-slate-900">Huella digital / FaceID</h3>
+          <p class="text-xs text-slate-500">
+            Entrá al panel sin escribir la contraseña desde tus dispositivos.
+          </p>
+        </div>
+        <button type="button" id="modal-biometria-close" class="btn btn-ghost btn-sm" aria-label="Cerrar">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="field-label" for="bio-nombre">Nombre del dispositivo</label>
+          <input id="bio-nombre" class="field" maxlength="100" placeholder="Celular del doctor" />
+          <p class="mt-1 text-[11px] text-slate-400">
+            Se guarda sólo la llave pública: tu huella nunca sale del teléfono.
+          </p>
+        </div>
+        <button type="button" id="bio-registrar" class="btn btn-primary w-full">
+          Registrar huella de este dispositivo
+        </button>
+        <div id="bio-error" class="hide text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2"></div>
+        <div>
+          <p class="field-label mb-0">Dispositivos registrados</p>
+          <div id="bio-lista" class="bio-lista mt-2">
+            <p class="bio-vacio">Cargando…</p>
+          </div>
+        </div>
+        <div class="flex gap-3 pt-1">
+          <button type="button" id="modal-biometria-cerrar" class="btn btn-ghost flex-1">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== TOASTS ===================== -->
   <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col gap-3"></div>
   <!-- Respuestas del paciente por WhatsApp: abajo a la derecha para no tapar
@@ -2993,6 +3280,10 @@
   <script src="/static/app.js"></script>
   <script src="/static/presupuestos.js"></script>
   <script src="/static/calendar.js"></script>
+  <!-- Sesión (login/logout), permisos del menú y administración de usuarios. -->
+  <script src="/static/usuarios.js"></script>
+  <!-- Huella digital / Face ID (WebAuthn / passkeys). -->
+  <script src="/static/biometria.js"></script>
 
   <script>
     // Guardián de versión del panel.

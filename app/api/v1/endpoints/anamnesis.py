@@ -27,6 +27,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.security import require_module
 from app.db.session import get_db
 from app.schemas.antecedentes_salud import (
     AnamnesisGuardadaRead,
@@ -47,6 +48,7 @@ router = APIRouter(prefix="/anamnesis", tags=["Anamnesis"])
 @router.get(
     "/panel",
     response_model=List[FichaSaludPanelRead],
+    dependencies=[Depends(require_module("FICHAS_SALUD"))],
     summary="Listar las fichas de salud de los próximos turnos",
     description=(
         "Vista interna para la secretaría y el odontólogo: devuelve los turnos "
@@ -78,6 +80,7 @@ def listar_fichas_salud(
     "/panel/{turno_id}",
     response_model=AntecedentesSaludRead,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("FICHAS_SALUD"))],
     summary="Cargar la ficha médica desde el panel interno",
     description=(
         "Permite que la secretaría o el odontólogo complete o corrija la ficha "
@@ -101,6 +104,7 @@ def guardar_ficha_salud_panel(
 @router.get(
     "/panel/{turno_id}/enlace",
     response_model=FichaSaludEnlaceRead,
+    dependencies=[Depends(require_module("FICHAS_SALUD"))],
     summary="Obtener el enlace de la ficha para mandarlo al paciente",
     description=(
         "Devuelve el enlace público firmado, el texto sugerido y el enlace "
@@ -127,6 +131,7 @@ def obtener_enlace_ficha_salud(
     "/panel/{turno_id}/enviar",
     response_model=FichaSaludEnvioRead,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("FICHAS_SALUD"))],
     summary="Enviar la ficha de salud al paciente",
     description=(
         "Con 'canal=manual' (por defecto) no envía nada: devuelve el enlace y el "

@@ -86,6 +86,16 @@ from app.schemas.prestacion import (
     PrestacionUpdate,
 )
 from app.schemas.turno import TurnoCreate, TurnoRead, TurnoUpdate, TurnosSello
+from app.schemas.usuario import (
+    LoginRequest,
+    MensajeRead,
+    ModuloRead,
+    ResetPasswordRequest,
+    SesionRead,
+    UsuarioCreate,
+    UsuarioPermisosUpdate,
+    UsuarioRead,
+)
 from app.schemas.whatsapp import (
     RecordatorioPendiente,
     RecordatorioResultado,
@@ -165,6 +175,14 @@ __all__ = [
     "TurnoRead",
     "TurnoUpdate",
     "TurnosSello",
+    "UsuarioCreate",
+    "UsuarioPermisosUpdate",
+    "UsuarioRead",
+    "SesionRead",
+    "LoginRequest",
+    "ModuloRead",
+    "ResetPasswordRequest",
+    "MensajeRead",
     "WhatsAppWebhookPayload",
     "WebhookProcesadoResponse",
     "RecordatorioPendiente",

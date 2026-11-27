@@ -31,13 +31,17 @@ odontológico. Cubre seis módulos funcionales:
 SQLite (desarrollo) / PostgreSQL (producción), frontend HTML + CSS + JavaScript
 vanilla, despliegue en Vercel.
 
-**Base de datos:** 25 tablas, 25 entidades ORM principales y 12 enumeraciones de
-dominio. No hay tablas de usuarios, auditoría ni archivos binarios; los pagos
-existen como libro mayor contable (`transacciones_cc`) y como pagos de egresos
-(`pagos_egresos`), no como pasarela.
+**Base de datos:** 31 tablas, 31 entidades ORM principales y 12 enumeraciones de
+dominio. La tabla `usuarios` guarda las credenciales del panel (hash bcrypt, rol
+de superadmin, estado activo, vínculo opcional con `doctores` y la lista JSON de
+módulos permitidos). `credenciales_biometricas` guarda las **passkeys** de
+WebAuthn (huella / Face ID): sólo el `credential_id`, la clave pública COSE, el
+contador anti-clonación y el nombre del dispositivo. No hay tablas de auditoría
+ni archivos binarios; los pagos existen como libro mayor contable
+(`transacciones_cc`) y como pagos de egresos (`pagos_egresos`), no como pasarela.
 
-**Pruebas:** 42 archivos `test_*.py` (más `conftest.py`) y **1015 casos** (suite
-completa verificada al generar este documento).
+**Pruebas:** 44 archivos `test_*.py` (más `conftest.py`) y **1065 casos**
+(1064 aprobados y 1 omitido; suite completa verificada).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
 sistema de microservicios ni un monolito desordenado. La separación de
@@ -77,15 +81,15 @@ Sí es:
 | Dimensión | Observación en el código | Conclusión |
 |---|---|---|
 | Punto de entrada | Un único `app/main.py` crea `FastAPI`, monta estáticos y un `api_router`. | Monolito de despliegue. |
-| Routers | 15 archivos en `app/api/v1/endpoints/`, agrupados por recurso. | Separación por dominio en la capa HTTP. |
-| Servicios | 18 archivos en `app/services/`, uno por agregado o caso de uso. | Lógica de negocio fuera de las rutas. |
-| Modelos | 28 tablas en 20 archivos, todas registradas en un único `Base.metadata`. | Modelo de datos compartido. |
-| Schemas | 14 archivos Pydantic, con contratos de entrada/salida separados. | Contratos explícitos y validación centralizada. |
+| Routers | 21 archivos en `app/api/v1/endpoints/`, agrupados por recurso. | Separación por dominio en la capa HTTP; `auth` y `usuarios` son los nuevos. |
+| Servicios | 27 archivos en `app/services/`, uno por agregado o caso de uso. | Lógica de negocio fuera de las rutas. |
+| Modelos | 31 tablas en 23 archivos, todas registradas en un único `Base.metadata`. | Modelo de datos compartido. |
+| Schemas | 20 archivos Pydantic, con contratos de entrada/salida separados. | Contratos explícitos y validación centralizada. |
 | Acceso a datos | Los servicios usan `Session` y `select()` directamente; no hay repositorios. | Acoplamiento servicio–ORM. |
 | Transacciones | Cada servicio hace `commit()`; no hay Unit of Work explícita. | Transacciones locales por operación. |
-| Frontend | Panel de 9.754 líneas en `app.js`, más `calendar.js`; vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, pero panel poco granular. |
+| Frontend | Panel de 9.951 líneas en `app.js`, más `calendar.js`, `usuarios.js` (sesión y permisos) y `biometria.js` (huella/Face ID); vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, con el menú filtrado por módulos. |
 | Despliegue | `vercel.json` declara `framework: fastapi`; un solo deploy. | Escalado y fallos acoplados. |
-| Pruebas | SQLite en memoria + `TestClient`, 42 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
+| Pruebas | SQLite en memoria + `TestClient`, 44 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
 
 ### 1.3. Fortalezas
 
@@ -133,9 +137,11 @@ Sí es:
    (`PENDIENTE`, `CONFIRMADO`, etc.) se replican en `app.js`, `medico.js`,
    `whatsapp_bot_service` y los reportes PDF. Un cambio de estado exige tocar
    varios lugares.
-7. **Seguridad no modular.** No hay una capa de autenticación/autorización que
-   envuelva los routers; la API administrativa está abierta. Es el límite más
-   importante para usar el sistema con datos reales en Internet.
+7. **Seguridad concentrada en un módulo.** `app/core/security.py` autentica con
+   JWT (cookie HttpOnly) y autoriza cada router con `require_module(...)`, y el
+   menú del panel oculta las secciones no habilitadas. Las limitaciones que
+   quedan son de operación: el limitador de intentos es por proceso, no hay 2FA
+   ni firma del webhook de WhatsApp.
 
 ### 1.5. Madurez relativa
 
@@ -147,7 +153,7 @@ Sí es:
 | Testabilidad | **Alto** | `TestClient`, SQLite en memoria, dependencia `get_db` sustituible. |
 | Independencia de despliegue | **Bajo** | Un solo proceso y una sola base. |
 | Evolución del esquema | **Medio-bajo** | `create_all` + migraciones aditivas manuales; sin Alembic. |
-| Seguridad | **Bajo** | Sin autenticación de panel/API; webhook POST sin firma. |
+| Seguridad | **Medio** | JWT HS256 + bcrypt y permisos por módulo; faltan 2FA, firma del webhook y rate limit distribuido. |
 | Modularidad del frontend | **Medio-bajo** | `app.js` concentra demasiadas vistas. |
 
 ### 1.6. Recomendación de evolución
@@ -155,7 +161,8 @@ Sí es:
 No hace falta partir el sistema en microservicios. Para el tamaño actual conviene
 **mantener el monolito modular** y mejorar sus límites internos:
 
-1. agregar autenticación y autorización por rol (secretaría, odontólogo, admin);
+1. ~~agregar autenticación y autorización por rol~~ (hecho: JWT + permisos por
+   módulo); resta 2FA y la firma del webhook;
 2. introducir Alembic para migraciones versionadas y reversibles;
 3. separar `app.js` en módulos por vista (`turnos`, `facturacion`, `catalogos`,
    `whatsapp`, `historia`) sin cambiar el contrato HTTP;
@@ -290,9 +297,10 @@ Odontologico/
 │   ├── replicar_datos_api.py        # Copia local → app desplegada vía HTTP
 │   ├── enviar_ficha.py              # Enlace de la ficha de salud por API
 │   ├── limpiar_base.py              # Limpieza transaccional de tablas
+│   ├── crear_admin.py               # Primer superadmin + SECRET_KEY del archivo de entorno
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 42 archivos test_*.py, 1015 casos
+├── tests/                           # 44 archivos test_*.py, 1065 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -808,12 +816,13 @@ Si no hay pendientes, responde `422`.
 | `psycopg[binary]` | 3.3.6 | Driver PostgreSQL 3 usado por SQLAlchemy. |
 | `python-dotenv` | 1.2.4 | Carga de archivos `.env` (complemento de settings). |
 | `tzdata` | 2026.5 | Base de zonas horarias en plataformas que no la traen. |
+| `webauthn` | 3.0.1 | WebAuthn / passkeys: genera el desafío y verifica la firma de la huella o Face ID (clave pública COSE, origen y RP ID). |
 
 ### 4.2. Desarrollo (`requirements-dev.txt`)
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 1015 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 1065 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -835,7 +844,12 @@ Si no hay pendientes, responde `422`.
 - **openpyxl / pandas**: el XLSX se lee/escribe con `zipfile` + `xml` en
   `app/core/planilla_aranceles.py`.
 - **Redis / Celery / APScheduler**: no hay cola ni scheduler persistente.
-- **JWT / OAuth / passlib**: no hay autenticación implementada.
+- **JWT / bcrypt**: implementados en `app/core/security.py` (`PyJWT` 2.10.1 y
+  `bcrypt` 5.0.0, fijados en `requirements.txt`). La cookie de sesión es
+  `HttpOnly` + `SameSite=Lax`; el token también se devuelve como `Bearer`.
+- **WebAuthn / passkeys**: `py_webauthn` 3.0.1 en `app/core/webauthn.py` (opciones,
+  verificación de firma ES256/RS256/EdDSA y token de desafío firmado). El
+  navegador sólo envía una firma; **no se guarda ningún dato biométrico**.
 - **Node/npm**: el frontend se sirve tal cual.
 
 ---
@@ -861,7 +875,7 @@ Si no hay pendientes, responde `422`.
 
 | Archivo | Funciones / clases principales | Propósito |
 |---|---|---|
-| `config.py` | `Settings`, `url_publica`, `anamnesis_secreto_efectivo`, `whatsapp_envio_real` | Configuración tipada, adaptación a Vercel, normalización del driver PostgreSQL y secretos. |
+| `config.py` | `Settings`, `url_publica`, `anamnesis_secreto_efectivo`, `webauthn_rp_id`, `webauthn_rp_origin`, `whatsapp_envio_real` | Configuración tipada, adaptación a Vercel, normalización del driver PostgreSQL, secretos y Relying Party de WebAuthn. |
 | `datetime_utils.py` | `utcnow`, `to_naive_utc`, `rango_del_dia`, `dia_semana_de` | Convención UTC naive y cálculo del día calendario (0 = domingo). |
 | `exceptions.py` | `AppError`, `ValidacionError` (422), `RecursoNoEncontradoError` (404), `ConflictoError` (409), `TurnoSolapadoError`, `PacienteConTurnoSolapadoError` (400), `TurnoNoEncontradoError`, `TurnoYaFacturadoError`, `RespuestaWebhookInvalidaError` (400), `WhatsAppEnvioError` (502), `RegistroInmutableError` (403) | Errores de dominio con status HTTP. |
 | `logging_config.py` | `configurar_logging()` | Un handler a stdout; no duplica si uvicorn ya configuró. |
@@ -871,13 +885,15 @@ Si no hay pendientes, responde `422`.
 | `anamnesis_token.py` | `firmar_token_anamnesis`, `validar_token_anamnesis`, `construir_enlace_anamnesis`, `DatosTokenAnamnesis`, `TokenAnamnesisInvalidoError` | Token HMAC-SHA256 determinístico para la ficha pública. |
 | `pdf.py` | `DocumentoPDF`, `Columna`, `ancho_texto`, `envolver`, `recortar`, `fecha_legible`, `nombre_archivo` | Generador PDF A4 con tablas, totales y paginado, sin dependencias. |
 | `planilla_aranceles.py` | `leer_planilla`, `generar_csv`, `generar_xlsx`, `parsear_monto`, `canonizar_codigo`, `FilaPlanilla` | Importación/exportación de la planilla de aranceles (CSV/XLSX). |
+| `security.py` | `MODULOS`, `hash_password`, `verificar_password`, `crear_token_acceso`, `get_current_user`, `require_module`, `LimitadorIntentos`, `limitador_login`, `limitador_biometria` | Contraseñas bcrypt, JWT HS256, permisos por módulo y límites de intentos. |
+| `webauthn.py` | `opciones_de_registro`, `opciones_de_login`, `verificar_registro`, `verificar_login`, `crear_token_desafio`, `leer_token_desafio`, `b64url`, `bytes_de_b64url` | Huella / Face ID: desafío firmado y validación criptográfica con `py_webauthn`. |
 
 #### `app/db/`
 
 | Archivo | Elementos | Propósito |
 |---|---|---|
 | `base_class.py` | `Base(DeclarativeBase)` | Base común de todos los modelos. |
-| `base.py` | Imports de los 15 modelos + `Base` | Garantiza que `Base.metadata` tenga todas las tablas. |
+| `base.py` | Imports de todos los modelos (31 tablas) + `Base` | Garantiza que `Base.metadata` tenga todas las tablas. |
 | `session.py` | `_crear_engine`, `engine`, `SessionLocal`, `get_db` | Engine SQLite/PostgreSQL, pool pre-ping, sesión por request. |
 | `types.py` | `UTCDateTime` | `TIMESTAMP WITH TIME ZONE` en PostgreSQL, UTC naive en Python. |
 | `init_db.py` | `init_db`, `drop_db` | `create_all`, columnas faltantes y seed del menú. |
@@ -934,6 +950,8 @@ Si no hay pendientes, responde `422`.
 | `Proveedor` | `proveedores` | `id` (UUID), `nombre`, `telefono_contacto`, `tipo_proveedor`, `saldo_pendiente` (`NUMERIC(10,2)`) | Acreedor del consultorio; 1-N facturas. `facturas_abiertas` y `deuda_vencida` son propiedades. |
 | `GastoFactura` | `gastos_facturas` | `id` (UUID), `proveedor_id`, `paciente_id`, `concepto`, `monto_total`, `monto_pagado`, `fecha_emision`, `fecha_vencimiento`, `estado_pago` | N-1 proveedor; N-1 paciente (opcional); 1-N pagos. `saldo_pendiente` y `vencida` son propiedades. |
 | `PagoEgreso` | `pagos_egresos` | `id` (UUID), `gasto_factura_id`, `monto_pagado`, `metodo_pago`, `fecha_pago` | N-1 factura. *Append-only*. |
+| `Usuario` | `usuarios` | `id` (UUID), `email` (UQ), `nombre_completo`, `hashed_password`, `es_superadmin`, `activo`, `doctor_id`, `modulos_permitidos` (JSON), `ultimo_acceso` | N-1 doctor opcional; 1-N credenciales biométricas. |
+| `CredencialBiometrica` | `credenciales_biometricas` | `id` (UUID), `usuario_id`, `credential_id` (UQ, base64url), `public_key` (COSE), `sign_count`, `nombre_dispositivo`, `fecha_registro` | N-1 usuario; passkey de un celular o notebook. |
 
 **Enumeraciones (`app/models/enums.py`):**
 
@@ -976,6 +994,8 @@ Si no hay pendientes, responde `422`.
 | `egreso.py` | `ProveedorCreate/Read/DetalleRead`, `GastoFacturaCreate/Read`, `PagoEgresoCreate/Read`, `PagoEgresoRegistradoRead`, `DeudaPorTipoRead`, `ResumenEgresosRead` | Módulo 6: alta de proveedores, facturas recibidas (vencimiento por defecto a 30 días, `paciente_id` opcional), pagos de egresos y tablero de cuentas por pagar; importes en `Decimal` publicados como número JSON. |
 | `whatsapp.py` | `WhatsAppText`, `WhatsAppButtonReply`, `WhatsAppContext`, `WhatsAppInteractive`, `WhatsAppInboundMessage`, `WhatsAppWebhookPayload`, `WebhookProcesadoResponse`, `RespuestaBot`, `RecordatorioEnviado`, `RecordatorioResultado`, `RecordatorioPendiente`, `RecordatorioMarcado` | Parseo del webhook y respuestas. |
 | `opcion_menu_whatsapp.py` | `OpcionMenuBase`, `OpcionMenuCreate`, `OpcionMenuUpdate`, `OpcionMenuRead`, `MenuWhatsAppVistaPrevia` | CRUD y vista previa del menú. |
+| `usuario.py` | `PasswordFuerte`, `LoginRequest`, `ModuloRead`, `UsuarioCreate`, `UsuarioPermisosUpdate`, `ResetPasswordRequest`, `UsuarioRead`, `SesionRead`, `MensajeRead` | Cuentas del panel, regla de contraseña fuerte, lectura sin hash y respuesta de sesión. |
+| `webauthn.py` | `OpcionesWebAuthnRead`, `WebAuthnOpcionesLoginRequest`, `RegistroBiometricoRequest`, `LoginBiometricoRequest`, `CredencialBiometricaRead`, `CredencialRegistradaRead` | Huella / Face ID: opciones WebAuthn (JSON del navegador), desafío firmado y dispositivos registrados. |
 
 ### 5.3. Servicios (`app/services/`)
 
@@ -1004,6 +1024,8 @@ Si no hay pendientes, responde `422`.
 | `whatsapp_bot_service.py` | `normalizar_texto`, `detectar_opcion`, `es_saludo_inicial`, `normalizar_destinatario`, `formatear_importe`, `obtener_prestacion_consulta`, `listar_obras_sociales_activas`, `mensaje_menu`, `mensaje_precio_consulta`, `mensaje_obras_sociales`, `mensaje_ubicacion`, `responder_mensaje` | Árbol de decisión del FAQ Bot y redacción de respuestas. |
 | `whatsapp_service.py` | `construir_payload_recordatorio`, `enviar_mensaje_recordatorio`, `construir_payload_texto`, `enviar_mensaje_texto`, `construir_payload_archivo`, `enviar_archivo_whatsapp`, `enviar_recordatorios`, `enviar_recordatorio_pendiente`, `marcar_recordatorio_enviado`, `es_evento_de_mensaje`, `telefono_de_chat`, `numero_real_de_mensaje`, `extraer_mensaje`, `normalizar_telefono_waha`, `construir_mensaje_recordatorio`, `construir_enlace_whatsapp`, `listar_recordatorios_click_to_chat` | Transporte WAHA (`sendText` y `sendFile`), recordatorios (tarea programada y envío desde el panel), webhook (incluye remitentes `@lid`) y enlaces `wa.me`. |
 | `whatsapp_conversacion_service.py` | `obtener_conversacion`, `marcar_confirmacion_pendiente`, `marcar_menu`, `cerrar_confirmacion`, `obtener_confirmacion_pendiente` | Estado de conversación por teléfono (menú / confirmación pendiente). |
+| `usuario_service.py` | `normalizar_email`, `contar_superadmins_activos`, `listar_usuarios`, `obtener_por_email`, `obtener_usuario`, `crear_usuario`, `actualizar_permisos`, `resetear_password`, `registrar_acceso`, `leer_usuario` | Cuentas del panel: email único, hash bcrypt, regla del último superadmin, vínculo con el odontólogo y lectura sin contraseña. |
+| `credencial_service.py` | `listar_credenciales`, `ids_de_credenciales`, `contar_credenciales`, `buscar_por_credential_id`, `guardar_credencial`, `actualizar_contador`, `eliminar_credencial` | Passkeys de WebAuthn: alta de un dispositivo, búsqueda por `credential_id`, actualización del contador anti-clonación y baja. |
 
 **Orden de dependencia entre servicios (resumen):**
 
@@ -1303,19 +1325,21 @@ absolutas con `pathlib`.
 
 | Archivo | Tamaño aproximado | Responsabilidad |
 |---|---:|---|
-| `index.html` | 3.038 líneas | Estructura del panel: dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente, proveedores y egresos y bot; incluye los contenedores de avisos (`#toasts` y `#toasts-turnos`). |
-| `styles.css` | 1.912 líneas | Componentes, animaciones (incluido el aviso de respuesta del paciente), timeline clínica y utilidades propias. |
-| `app.js` | 9.754 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia, el control del sello de cambios de la agenda (sin F5), el aviso de 5 s de la respuesta del paciente y puente `window.OdontoApp`. |
-| `calendar.js` | 986 líneas | Calendario mensual, filtro por odontólogo, tooltip, panel del día y bloques libres; consume `window.OdontoApp` y expone `window.OdontoCalendar`. |
+| `index.html` | 3.329 líneas | Estructura del panel: login (con atajo biométrico), dashboard, agenda, calendario, doctores, pacientes (con filiatorios), historia, disponibilidad, recordatorios, fichas de salud, facturación, cuenta corriente, proveedores y egresos, bot y usuarios/permisos; incluye los contenedores de avisos (`#toasts` y `#toasts-turnos`) y el modal de huella/Face ID. |
+| `styles.css` | 2.107 líneas | Componentes, animaciones (incluido el aviso de respuesta del paciente), login, grilla de permisos, atajo biométrico, timeline clínica y utilidades propias. |
+| `app.js` | 9.951 líneas | Estado global, cliente `fetch`, render, modales (ficha médica, envío del enlace, factura y pago de proveedores), disponibilidad, facturación, caja, cuenta corriente, proveedores y egresos, historia, el control del sello de cambios de la agenda (sin F5), el aviso de 5 s de la respuesta del paciente, el filtrado del menú por permisos y puente `window.OdontoApp`. |
+| `usuarios.js` | 789 líneas | Login/logout, verificación de sesión, expiración, `aplicarSesion` (compartido con el login biométrico), vista «Usuarios y Permisos» y modales de alta, permisos y blanqueo de contraseña; consume la API por `window.OdontoApp.api`. |
+| `biometria.js` | 508 líneas | Huella digital / Face ID (WebAuthn): `navigator.credentials.get()` en el login, `create()` para registrar el dispositivo, modal de alta/baja de passkeys, soporte con respaldo de contraseña y base64url ↔ ArrayBuffer. |
+| `calendar.js` | 1.686 líneas | Calendario mensual, filtro por odontólogo, tooltip, panel del día y bloques libres; consume `window.OdontoApp` y expone `window.OdontoCalendar`. |
 | `ficha_medica.js` | 686 líneas | Catálogo único de **124 campos** (8 filiatorios + antecedentes familiares, personales, odontológicos, examen y diagnóstico) + formulario, edad calculada y resumen reutilizables. |
 | `ficha_medica.css` | 226 líneas | Estilos del cuestionario en la página pública, el panel y la vista móvil (incluye la edad calculada). |
-| `odontograma.js` | 1.003 líneas | Modal de la **ficha médica**: datos del paciente, odontograma permanente/temporario, estado bucal, libro «Trabajo realizado», guardado por API y botón *Editar datos* que delega en el formulario de pacientes. |
-| `odontograma.css` | 885 líneas | Hoja del papel: datos, arcadas, estado bucal, tabla de trabajos, botón *Ficha médica*, móvil e impresión. |
+| `odontograma.js` | 1.520 líneas | Modal de la **ficha médica**: datos del paciente, odontograma permanente/temporario, estado bucal, libro «Trabajo realizado», guardado por API y botón *Editar datos* que delega en el formulario de pacientes. |
+| `odontograma.css` | 901 líneas | Hoja del papel: datos, arcadas, estado bucal, tabla de trabajos, botón *Ficha médica*, móvil e impresión. |
 | `presupuestos.js` | 793 líneas | Pestaña **Presupuestos**: buscador del nomenclador, totales en vivo, listado, PDF y el modal de envío por WhatsApp (teléfono de la ficha revisable, corrección opcional y guardado en el paciente). |
 | `presupuestos.css` | 231 líneas | Estilos del formulario, los renglones de trabajo, los totales, el listado y sus acciones. |
-| `medico.html` | 360 líneas | Vista mobile-first, selección de profesional, agenda y hoja de historia/evolución. |
-| `medico.css` | 424 líneas | Estilos táctiles, hojas deslizantes y timeline. |
-| `medico.js` | 1.711 líneas | Agenda autónoma, navegación de fechas, alta/edición/cancelación, evolución clínica y control del sello de cambios cada 10 s (relectura sólo si la agenda cambió). |
+| `medico.html` | 407 líneas | Vista mobile-first, selección de profesional, agenda, hoja de historia/evolución y acceso con huella/Face ID. |
+| `medico.css` | 427 líneas | Estilos táctiles, hojas deslizantes y timeline. |
+| `medico.js` | 1.976 líneas | Agenda autónoma, navegación de fechas, alta/edición/cancelación, evolución clínica, ingreso con huella/Face ID y control del sello de cambios cada 10 s (relectura sólo si la agenda cambió). |
 | `anamnesis.html` | 192 líneas | Página pública: estados de carga/error, contexto del turno y contenedor del cuestionario. |
 | `anamnesis.css` | 493 líneas | Estilos de la ficha pública. |
 | `anamnesis.js` | 348 líneas | Token del path, GET/POST, validación de consentimiento, fusión de filiatorios y render seguro con `textContent`. |
@@ -1563,14 +1587,21 @@ aplicación lista
 | 23 | `pagos_egresos` | 6 | Pagos aplicados a una factura, con su método. |
 | 24 | `fichas_medicas` | 4 | Cabecera de la ficha médica: vencimiento, grupo familiar, antecedentes y estado bucal. |
 | 25 | `ficha_medica_trabajos` | 4 | Libro «Trabajo realizado» (fecha, código, pieza, debe y haber). |
+| 26 | `categorias_paciente` | 1 | Catálogo administrable de categorías de pacientes. |
+| 27 | `conversaciones_whatsapp` | 1 | Estado del bot por teléfono (menú o confirmación pendiente). |
+| 28 | `presupuestos` | 3 | Cotizaciones de tratamientos con entregas y saldo. |
+| 29 | `presupuesto_items` | 3 | Renglones del presupuesto (código, pieza y precio). |
+| 30 | `usuarios` | Panel | Cuentas, hash bcrypt y módulos permitidos. |
+| 31 | `credenciales_biometricas` | Panel | Passkeys WebAuthn (huella / Face ID) por usuario. |
 
 ### 6.4. Diccionario de datos exhaustivo
 
 > Convenciones de las tablas:
 >
-> - **PK**: clave primaria entera autoincremental (índice implícito). Las tres
->   tablas del Módulo 5 usan **PK `UUID`** (`CHAR(32)` en SQLite y `UUID` nativo
->   en PostgreSQL); por eso su clave foránea a `pacientes` sigue siendo `INTEGER`.
+> - **PK**: clave primaria entera autoincremental (índice implícito). Las tablas
+>   del Módulo 5, `presupuestos`, `usuarios` y `credenciales_biometricas` usan
+>   **PK `UUID`** (`CHAR(32)` en SQLite y `UUID` nativo en PostgreSQL); por eso
+>   sus claves foráneas a tablas con PK entera siguen siendo `INTEGER`.
 > - **FK**: clave foránea, con la acción `ON DELETE` indicada.
 > - **Nulo**: `No` = `NOT NULL`; `Sí` = admite `NULL`.
 > - **Default**: valor a nivel de base (`server_default`). El default Python
@@ -2272,8 +2303,48 @@ completo y descarta los renglones en blanco.
 - Los importes negativos y los textos fuera de largo responden `422`; el tope de
   renglones es `MAX_RENGLONES_TRABAJO` (100).
 
-### 6.5. Relaciones del sistema
+#### 6.4.27. `usuarios` (panel)
 
+Cuentas de acceso al panel. `id` es `UUID` (`CHAR(32)` en SQLite / `UUID` nativo
+en PostgreSQL), igual que las tablas contables y `credenciales_biometricas`.
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `CHAR(32) / UUID` | No | `uuid4()` | **PK** | Identificador de la cuenta. |
+| `email` | `VARCHAR(150) / VARCHAR(150)` | No | — | **UQ** + **IDX** | Usuario del login (se guarda en minúsculas). |
+| `nombre_completo` | `VARCHAR(150) / VARCHAR(150)` | No | — | — | Nombre visible en el panel y la agenda móvil. |
+| `hashed_password` | `VARCHAR(255) / VARCHAR(255)` | No | — | — | Hash bcrypt con sal; nunca la clave. |
+| `es_superadmin` | `BOOLEAN / BOOLEAN` | No | `false` | — | Acceso total sin importar los módulos. |
+| `activo` | `BOOLEAN / BOOLEAN` | No | `true` | — | `false` corta el acceso en la siguiente petición. |
+| `doctor_id` | `INTEGER / INTEGER` | Sí | `NULL` | **FK** → `doctores.id` (`SET NULL`); **IDX** | Odontólogo vinculado (agenda móvil). |
+| `modulos_permitidos` | `JSON / JSON` | No | `'[]'` | — | Códigos del catálogo habilitados. |
+| `ultimo_acceso` | `DATETIME / TIMESTAMP` | Sí | `NULL` | — | Último login correcto (UTC naive). |
+
+**Restricciones y notas:** la contraseña se guarda sólo como hash; el sistema no
+puede quedar sin superadmins activos; desactivar una cuenta invalida su token en
+la siguiente petición aunque el JWT siga vigente.
+
+#### 6.4.28. `credenciales_biometricas` (WebAuthn / passkeys)
+
+Llaves públicas de los dispositivos registrados por cada usuario (huella digital
+o Face ID). La clave privada nunca sale del Secure Enclave / TPM.
+
+| Campo | Tipo SQLite / PostgreSQL | Nulo | Default | Clave / índice | Descripción |
+|---|---|---|---|---|---|
+| `id` | `CHAR(32) / UUID` | No | `uuid4()` | **PK** | Identificador del registro. |
+| `usuario_id` | `CHAR(32) / UUID` | No | — | **FK** → `usuarios.id` (`CASCADE`); **IDX** | Dueño de la credencial. |
+| `credential_id` | `VARCHAR(2048) / VARCHAR(2048)` | No | — | **UQ** + **IDX** | ID del autenticador en base64url sin `=` (el estándar permite hasta 1023 bytes). |
+| `public_key` | `BLOB / BYTEA` | No | — | — | Clave pública COSE (no es un secreto). |
+| `sign_count` | `INTEGER / INTEGER` | No | `0` | — | Contador de firmas (anti-clonación). |
+| `nombre_dispositivo` | `VARCHAR(100) / VARCHAR(100)` | No | `Dispositivo` | — | «Celular del doctor», «Notebook». |
+| `fecha_registro` | `DATETIME / TIMESTAMP` | No | `utcnow()` | — | Alta del dispositivo (UTC naive). |
+
+**Restricciones y notas:** un `credential_id` pertenece a una sola cuenta; al
+borrar el usuario se borran sus credenciales; un contador que retrocede se
+rechaza como posible clonación; el ingreso con huella actualiza `sign_count` y
+`ultimo_acceso` y emite el mismo JWT que la contraseña.
+
+### 6.5. Relaciones del sistema
 | Origen | Campo | Destino | Cardinalidad | `ON DELETE` | Regla |
 |---|---|---|---|---|---|
 | `pacientes` | `obra_social_id` | `obras_sociales.id` | N:1 | `SET NULL` | Un paciente tiene una cobertura o ninguna. |
@@ -2303,6 +2374,8 @@ completo y descarta los renglones en blanco.
 | `gastos_facturas` | `proveedor_id` | `proveedores.id` | N:1 | `RESTRICT` | Un proveedor emite muchas facturas; ninguna se borra en cascada. |
 | `gastos_facturas` | `paciente_id` | `pacientes.id` | N:1 | `SET NULL` | Opcional: pieza de un paciente (sólo mecánico dental). |
 | `pagos_egresos` | `gasto_factura_id` | `gastos_facturas.id` | N:1 | `CASCADE` | Un pago pertenece a una factura. |
+| `usuarios` | `doctor_id` | `doctores.id` | N:1 | `SET NULL` | Varias cuentas pueden vincularse al mismo profesional (o a ninguno). |
+| `credenciales_biometricas` | `usuario_id` | `usuarios.id` | N:1 | `CASCADE` | Un usuario registra varios dispositivos (celular y notebook). |
 
 **Relación N:M conceptual:** `obras_sociales` ↔ `prestaciones`, resuelta por
 `aranceles_obra_social` con los atributos `monto_cubre_os` y
@@ -3092,16 +3165,17 @@ Vercel.
 
 | Prioridad | Tema | Situación actual | Acción recomendada |
 |---|---|---|---|
-| **P0** | Autenticación | No hay login ni token de API en el panel/API. | Agregar autenticación (JWT/sesión) y proteger todos los routers salvo `/health`, `/anamnesis/{token}` y estáticos públicos. |
-| **P0** | Autorización | Cualquiera puede listar pacientes, historias y caja. | Roles: secretaría, odontólogo, administrador; filtros por profesional. |
+| **Resuelto** | Autenticación | Login JWT HS256 (8 h) con cookie `HttpOnly` + `SameSite=Lax`; contraseñas bcrypt; `GET /auth/me` revalida la cuenta. | Mantener `SECRET_KEY` sólo en el entorno y rotarla si se sospecha compromiso. |
+| **Resuelto** | Autorización | `require_module(...)` en cada router y menú dinámico por módulos; superadmin con acceso total; `BORRAR_MOVIMIENTOS` es un permiso aparte. | Revisar los módulos al alta de cada empleado y desactivar (no borrar) las cuentas. |
 | **P0** | Firma del webhook | `POST /whatsapp/webhook` no valida `X-Hub-Signature-256`. | Verificar HMAC del body con el secreto de la app de Meta antes de procesar. |
 | **P1** | CORS | `CORS_ORIGINS=["*"]` por defecto. | Restringir a los dominios reales; no usar `*` con credenciales. |
 | **P1** | Secretos | `WHATSAPP_*`, `ANAMNESIS_TOKEN_SECRET`, `DATABASE_URL` en entorno. | Mantener en Vercel/GitHub Secrets; rotar; nunca commitear `.env`. |
 | **P1** | Enlaces de anamnesis | Token determinístico sin vencimiento. | Evaluar expiración/rotación; mientras el turno exista, el enlace sigue válido. |
-| **P1** | Rate limiting | Sin límites por IP/teléfono. | Limitar webhook, anamnesis y login para evitar abuso/fuerza bruta. |
+| **P1** | Rate limiting | Login limitado a 5 fallos/min por IP y por cuenta (HTTP 429 + `Retry-After`); el ingreso con huella usa contadores propios. Los contadores son por proceso. | Complementar con límites en el proxy/CDN y del webhook/anamnesis. |
 | **P1** | Auditoría | No se registra quién modificó pacientes, historias o caja. | Tabla de auditoría y usuario autenticado. |
 | **P1** | Logs | Algunos logs incluyen teléfono y texto del paciente. | Minimizar PII, redactar teléfonos/textos clínicos y definir retención. |
 | **P2** | Cabeceras | Sólo se agregan headers en la página de anamnesis. | CSP, `X-Content-Type-Options`, `X-Frame-Options`, HSTS en producción. |
+| **P2** | Passkeys | Se acepta attestation `none` (la biometría la valida el sistema operativo) y el desafío firmado puede reutilizarse dentro de sus 2 minutos. | Suficiente para el consultorio; evaluar attestation certificada y desafíos de un solo uso si se exige hardware verificado. |
 | **P2** | Archivos | `url_archivo` es una URL arbitraria. | Validar esquema/host, no permitir `file://`, considerar URLs firmadas. |
 | **P2** | Dependencias | Versiones fijas, sin escaneo automatizado. | `pip-audit`, Dependabot y revisión periódica. |
 | **P2** | Backups | Dependen del proveedor. | Verificar restore y cifrado de backups. |
@@ -3114,6 +3188,56 @@ Vercel.
 - DNI/telefono normalizados;
 - errores de dominio sin filtrar stack traces al cliente;
 - `.env`, bases y tokens fuera de Git.
+
+**Módulo de autenticación, usuarios y permisos (implementado):**
+
+- `app/models/usuario.py`: tabla `usuarios` (UUID, email único, hash bcrypt,
+  `es_superadmin`, `activo`, `doctor_id` opcional, módulos en JSON y
+  `ultimo_acceso`).
+- `app/models/credencial_biometrica.py`: tabla `credenciales_biometricas`
+  (UUID, FK `usuario_id` con `CASCADE`, `credential_id` base64url único, clave
+  pública COSE, `sign_count`, nombre del dispositivo y fecha UTC). Relación
+  uno-a-muchos: un médico puede registrar su celular y su notebook.
+- `app/core/security.py`: catálogo de los 10 módulos, `hash_password` /
+  `verificar_password`, JWT HS256 (8 horas), `get_current_user`,
+  `require_module(*codigos)` y limitadores de intentos por IP/cuenta (uno para
+  contraseña y otro independiente para biometría).
+- `app/core/webauthn.py`: resolución de `RP_ID` / `RP_ORIGIN`, opciones de
+  registro y login, verificación con `py_webauthn` y **token de desafío** (JWT de
+  2 minutos) que permite operar sin estado entre las dos peticiones, incluso en
+  Vercel.
+- `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` y `GET /auth/modulos`.
+  `/usuarios` (con `ADMIN_USUARIOS`): listar, crear, cambiar módulos/estado y
+  blanquear contraseña.
+- WebAuthn / passkeys: `POST /auth/webauthn/registro/opciones` y
+  `POST /auth/webauthn/registro/verificar` (con sesión);
+  `POST /auth/webauthn/login/opciones` y `POST /auth/webauthn/login/verificar`
+  (públicos, devuelven el mismo JWT + cookie + `modulos_permitidos` que el login
+  tradicional); `GET /auth/webauthn/credenciales` y
+  `DELETE /auth/webauthn/credenciales/{id}` para administrar los dispositivos.
+- `scripts/crear_admin.py`: crea el primer superadmin y genera la `SECRET_KEY`
+  del archivo de entorno. Con `--env-file` carga `DATABASE_URL` y el resto de
+  las variables **antes** de importar la app, así el mismo comando sirve para la
+  base local (`.env`) o para producción (`.env.vercel.local`). Verifica/crea el
+  esquema con `init_db()` y nunca imprime la contraseña.
+- Frontend: pantalla de login con atajo «Ingresar con Huella Digital / FaceID»,
+  menú filtrado por `data-modulo`, vista «Usuarios y Permisos» con checkboxes y
+  modal de passkeys (`biometria.js`); la agenda móvil del odontólogo pide sesión
+  y también ofrece huella/Face ID. Si el navegador no soporta WebAuthn, el botón
+  se oculta, se explica el motivo y la contraseña sigue disponible.
+- Reglas: nadie puede desactivarse a sí mismo ni quitarse `ADMIN_USUARIOS`; el
+  sistema nunca queda sin superadmins activos; un administrador común no puede
+  administrar cuentas de superadmin.
+- Seguridad de passkeys: el email inexistente y la cuenta sin credenciales
+  reciben la misma respuesta (no hay enumeración); la credencial se busca por
+  `credential_id` y debe pertenecer al usuario del desafío; un `sign_count` que
+  retrocede se rechaza (clonación); los fallos biométricos se limitan por IP y
+  por cuenta sin bloquear el login con contraseña. Los autenticadores que no
+  implementan el contador (lo dejan en 0) funcionan igual; si un lector lo deja
+  fijo en un valor positivo, hay que volver a registrar el dispositivo.
+- Público a propósito: `/health`, las páginas web, `POST /whatsapp/webhook`,
+  `/anamnesis/{token}`, el cron de `/tareas` (Bearer `CRON_SECRET`) y las dos
+  rutas `webauthn/login/*`.
 
 **Rotación de `ANAMNESIS_TOKEN_SECRET`:** invalida todos los enlaces emitidos
 antes de la rotación. Si se rota, reenviar los enlaces desde el panel.
@@ -3144,7 +3268,8 @@ antes de la rotación. Si se rota, reenviar los enlaces desde el panel.
 - Devolver entidades ORM sin `response_model`.
 - Editar una evolución o borrarla desde un script.
 - Duplicar la lógica de estados en el frontend sin actualizar todas las copias.
-- Exponer la API administrativa sin autenticación.
+- Agregar un router nuevo sin `require_module(...)` (salvo las rutas públicas
+  documentadas en 7.11).
 
 ---
 
@@ -3209,6 +3334,15 @@ También avisa si el `.env` no define `DATABASE_URL`.
 | `DATABASE_URL_DESTINO` | vacío | Destino opcional de `migrar_sqlite_a_postgres`. |
 | `CORS_ORIGINS` | `["*"]` | Orígenes permitidos; acepta lista JSON. |
 | `CORS_ALLOW_CREDENTIALS` | `false` | Cookies/credenciales CORS. |
+| `SECRET_KEY` | vacío (clave derivada) | Firma de los JWT de sesión y de los desafíos WebAuthn. En producción es obligatoria. |
+| `ACCESS_TOKEN_EXPIRE_HOURS` | `8` | Vigencia de la cookie/token de sesión. |
+| `LOGIN_MAX_INTENTOS` | `5` | Fallos permitidos por IP y por cuenta antes del `429`. |
+| `LOGIN_VENTANA_SEGUNDOS` | `60` | Ventana móvil de los limitadores (también la biometría). |
+| `RP_ID` | vacío (se deduce del dominio) | Dominio de las passkeys, **sin** esquema ni puerto: `localhost` o `mi-panel.vercel.app`. |
+| `RP_ORIGIN` | vacío (`PUBLIC_BASE_URL` / Vercel) | Origen exacto que valida WebAuthn: `http://localhost:8000` o `https://…`. |
+| `RP_NAME` | `Franciosi Odontología` | Nombre visible en el diálogo de huella / Face ID. |
+| `WEBAUTHN_CHALLENGE_EXPIRE_MINUTES` | `2` | Validez del desafío firmado entre opciones y verificación. |
+| `WEBAUTHN_TIMEOUT_MS` | `60000` | Espera máxima del lector biométrico. |
 | `WAHA_URL` | `http://localhost:3000` | URL base de WAHA (sin `/api`). |
 | `WAHA_API_KEY` | vacío | Valor de la cabecera `X-Api-Key`. |
 | `WAHA_SESSION` | `default` | Sesión de WAHA que envía y recibe. |
@@ -3279,7 +3413,7 @@ Modos:
 | Modo | Qué vacía | Qué conserva |
 |---|---|---|
 | `operativo` (recomendado) | `pacientes`, `turnos`, `historias_clinicas`, `evoluciones_medicas`, `antecedentes_salud`, `odontogramas`, `odontograma_dientes`, `archivos_adjuntos`, `movimientos_caja`, `detalles_movimiento_caja`, `disponibilidad_especifica`, `cuentas_corrientes`, `transacciones_cc`, `planes_cuotas` | `doctores`, `obras_sociales`, `prestaciones`, `aranceles_obra_social`, `disponibilidad_doctores` y `opciones_menu_whatsapp` |
-| `todo` | Las 25 tablas | Nada; vuelve a sembrar las 4 opciones del menú del bot |
+| `todo` | Las 29 tablas de datos | Los `usuarios` del panel y sus `credenciales_biometricas`; vuelve a sembrar las 4 opciones del menú del bot |
 
 El `.bat` primero ejecuta un **simulacro** (conteos), después pide escribir `SI`
 y recién entonces borra. En PostgreSQL usa `TRUNCATE ... RESTART IDENTITY` sin
@@ -3311,7 +3445,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **1015 tests**.
+- Resultado actual: **1065 tests** (1064 aprobados y 1 omitido).
 
 ### 8.5. Publicación
 
@@ -3369,7 +3503,7 @@ detached; remoto `origin`; tests en verde.
 
 | Prioridad | Riesgo | Impacto | Mitigación recomendada |
 |---|---|---|---|
-| **P0** | API y panel sin autenticación | Cualquiera con la URL puede leer/editar datos clínicos y de caja. | Autenticación + RBAC antes de usar con datos reales en Internet. |
+| **Resuelto** | API y panel sin autenticación | Ya no: login JWT + `require_module(...)` por router y menú dinámico. | Mantener `SECRET_KEY` en el entorno y crear el primer superadmin con `scripts/crear_admin.py`. |
 | **P0** | Webhook POST sin firma | Un tercero podría simular respuestas de pacientes. | Validar `X-Hub-Signature-256` con el App Secret de Meta. |
 | **P1** | SQLite efímero en Vercel | Pérdida total de datos entre despliegues. | `DATABASE_URL` PostgreSQL y backups verificados. |
 | **P1** | Migraciones sin versionado | Deriva de esquema, cambios no reproducibles, rollback difícil. | Adoptar Alembic; mantener scripts legacy sólo para datos. |
@@ -3394,7 +3528,7 @@ detached; remoto `origin`; tests en verde.
 
 **Fase 1 — antes de producción con datos reales:**
 
-1. autenticación y roles;
+1. ~~autenticación y roles~~ (hecho: JWT + módulos) y endurecer el webhook;
 2. firma del webhook;
 3. PostgreSQL persistente + backups;
 4. CORS restringido;
@@ -3589,9 +3723,9 @@ python -m pytest
 git ls-files
 ```
 
-**Fecha de última verificación:** 05/11/2026.
+**Fecha de última verificación:** 23/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 1015 tests (todos aprobados).
+**Resultado de la suite:** 1065 tests (1064 aprobados y 1 omitido).
 
 ### 10.5. Conclusión
 
@@ -3607,14 +3741,15 @@ por capas**, adecuado para un consultorio y para el tamaño actual del dominio:
 - el frontend está desacoplado por HTTP, aunque el panel merece dividirse.
 
 Los riesgos principales no son de “arquitectura de carpetas”, sino de
-**operación y seguridad**: falta autenticación, el webhook no verifica firma, las
-migraciones no están versionadas y SQLite en Vercel no persiste. Resolver esos
+**operación y seguridad**: la autenticación y los permisos por módulo ya están
+resueltos (JWT + bcrypt + `require_module`), pero el webhook no verifica firma,
+las migraciones no están versionadas y SQLite en Vercel no persiste. Resolver esos
 puntos es más urgente que partir el sistema en servicios.
 
 La evolución recomendada es incremental: **mantener el monolito modular**,
-agregar autenticación/RBAC, adoptar PostgreSQL y Alembic, endurecer el webhook y
-separar `app.js` por vistas. Con esas mejoras, la estructura actual puede
-sostener el crecimiento del consultorio sin una reescritura.
+endurecer el webhook, sumar 2FA y rate limiting distribuido, adoptar PostgreSQL y
+Alembic, y separar `app.js` por vistas. Con esas mejoras, la estructura actual
+puede sostener el crecimiento del consultorio sin una reescritura.
 
 ---
 

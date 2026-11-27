@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.core.datetime_utils import rango_del_dia, utcnow
 from app.core.money import sumar_montos
+from app.core.security import require_module
 from app.db.session import get_db
 from app.models.enums import EstadoPagoMovimiento
 from app.models.movimiento_caja import MovimientoCaja
@@ -299,6 +300,7 @@ def debitar_movimiento(
 @router.delete(
     "/movimientos-caja/{movimiento_id}",
     response_model=MovimientoCajaEliminadoRead,
+    dependencies=[Depends(require_module("BORRAR_MOVIMIENTOS"))],
     summary="Eliminar un movimiento de caja",
     description=(
         "Borra **físicamente** el cierre de caja de una visita, con su detalle de "

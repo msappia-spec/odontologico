@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import WhatsAppEnvioError
+from app.core.security import require_module
 from app.db.session import get_db
 from app.schemas.whatsapp import (
     RecordatorioEnviado,
@@ -152,6 +153,7 @@ def recibir_webhook(
     "/recordatorios-pendientes",
     response_model=List[RecordatorioPendiente],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("AGENDA_TURNOS"))],
     summary="Recordatorios pendientes para enviar por enlace (wa.me)",
     description=(
         "Devuelve, ordenados cronológicamente, los turnos que ocurren dentro de "
@@ -179,6 +181,7 @@ def listar_recordatorios_pendientes(
     "/recordatorios-pendientes/{turno_id}/enviar",
     response_model=RecordatorioEnviado,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("AGENDA_TURNOS"))],
     summary="Enviar un recordatorio automático por WAHA",
     description=(
         "Envía el recordatorio de un turno con la misma API de WAHA que la "
@@ -201,6 +204,7 @@ def enviar_recordatorio_pendiente(
     "/recordatorios-pendientes/{turno_id}/enviado",
     response_model=RecordatorioMarcado,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("AGENDA_TURNOS"))],
     summary="Marcar como enviado el recordatorio mandado por Click-to-Chat",
     description=(
         "Lo llama el panel cuando la secretaría abre el enlace 'wa.me' y manda "

@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 from typing import List, Optional
+from urllib.parse import urlsplit
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -165,6 +166,34 @@ class Settings(BaseSettings):
     # Secreto que autoriza al cron de Vercel a disparar envíos automáticos.
     cron_secret: Optional[str] = None
 
+    # --- Autenticación del panel (Módulo de usuarios y permisos) ---
+    # Clave con la que se firman los JWT (HS256). Debe ser larga y aleatoria y
+    # vivir en el ``.env`` (``SECRET_KEY``); ``scripts/crear_admin.py`` la genera
+    # si falta. Si no está definida se deriva una clave estable de la
+    # configuración (válido para desarrollo y pruebas, no para producción).
+    secret_key: Optional[str] = None
+    # Horas que dura la sesión firmada (cookie HttpOnly + token Bearer).
+    access_token_expire_hours: int = 8
+    # Fuerza bruta: intentos fallidos permitidos por IP dentro de la ventana.
+    login_max_intentos: int = 5
+    login_ventana_segundos: int = 60
+
+    # --- WebAuthn / passkeys (huella digital y Face ID) ---
+    # ``RP_ID`` es el dominio sin esquema ni puerto con el que el navegador
+    # vincula las passkeys ("localhost" en desarrollo, "mi-panel.vercel.app" en
+    # producción). ``RP_ORIGIN`` es el origen completo ("https://…"). Si no se
+    # definen se deducen de ``url_publica``, que ya conoce el dominio de Vercel;
+    # en producción conviene fijarlos para que un cambio de dominio no invalide
+    # las huellas registradas.
+    rp_id: Optional[str] = None
+    rp_origin: Optional[str] = None
+    #: Nombre visible del consultorio en el diálogo de huella/Face ID.
+    rp_name: str = "Franciosi Odontología"
+    #: Minutos que vale el desafío firmado entre "opciones" y "verificar".
+    webauthn_challenge_expire_minutes: int = 2
+    #: Tiempo máximo que el navegador espera la biometría (milisegundos).
+    webauthn_timeout_ms: int = 60000
+
     # --- Ficha de salud pública (anamnesis) ---
     # Base absoluta con la que se arma el enlace que recibe el paciente por
     # WhatsApp (``https://mi-consultorio.com/anamnesis/<token>``). Si no se
@@ -207,6 +236,68 @@ class Settings(BaseSettings):
             return self.anamnesis_token_secret.strip()
         semilla = f"{self.database_url}|{self.app_name}|anamnesis"
         return hashlib.sha256(semilla.encode("utf-8")).hexdigest()
+
+    @property
+    def jwt_secret_efectivo(self) -> str:
+        """Clave con la que se firman los JWT del panel.
+
+        Prioridad: ``SECRET_KEY`` del entorno -> una clave derivada de la
+        configuración. La derivada mantiene el sistema arrancable en desarrollo y
+        en las pruebas sin ``.env``, pero **en producción hay que definir
+        SECRET_KEY**: si cambia la base o el nombre de la app, las sesiones
+        emitidas dejan de valer (los usuarios vuelven a loguearse).
+        """
+        if self.secret_key and self.secret_key.strip():
+            return self.secret_key.strip()
+        semilla = f"{self.database_url}|{self.app_name}|sesion"
+        return hashlib.sha256(semilla.encode("utf-8")).hexdigest()
+
+    @property
+    def cookie_sesion_segura(self) -> bool:
+        """Indica si la cookie de sesión debe viajar sólo por HTTPS.
+
+        Se deduce de la URL pública: en Vercel es ``https://`` y la cookie se
+        marca ``Secure``; en local (``http://localhost:8000``) no, porque el
+        navegador descartaría una cookie ``Secure`` enviada por HTTP y el login
+        no funcionaría en desarrollo.
+        """
+        return self.url_publica.lower().startswith("https://")
+
+    @property
+    def webauthn_rp_id(self) -> str:
+        """Dominio con el que se vinculan las passkeys (sin esquema ni puerto).
+
+        Prioridad: ``RP_ID`` explícito -> host de ``url_publica`` (que en Vercel
+        sale de ``VERCEL_PROJECT_PRODUCTION_URL``). Se normaliza por si alguien
+        pega una URL completa en la variable: WebAuthn exige un dominio.
+        """
+        valor = (self.rp_id or "").strip()
+        if valor:
+            valor = valor.split("://", 1)[-1].split("/", 1)[0]
+            # Un puerto no forma parte del RP ID; IPv6 entre corchetes se deja.
+            if valor and not valor.startswith("[") and valor.count(":") == 1:
+                valor = valor.split(":", 1)[0]
+            return valor.lower() or "localhost"
+        host = urlsplit(self.url_publica).hostname or "localhost"
+        return host.lower()
+
+    @property
+    def webauthn_rp_origin(self) -> str:
+        """Origen exacto que valida WebAuthn (``https://dominio[:puerto]``).
+
+        Sin ``RP_ORIGIN`` se usa ``url_publica``: en local es
+        ``http://localhost:8000`` (los navegadores tratan ``localhost`` como
+        origen seguro y permiten WebAuthn sin HTTPS) y en Vercel es el dominio
+        ``https`` del proyecto. No debe llevar barra final.
+        """
+        if self.rp_origin and self.rp_origin.strip():
+            return self.rp_origin.strip().rstrip("/")
+        return self.url_publica
+
+    @property
+    def webauthn_rp_name(self) -> str:
+        """Nombre visible del consultorio en el diálogo de huella/Face ID."""
+        return (self.rp_name or "").strip() or self.app_name
 
     @property
     def whatsapp_envio_real(self) -> bool:

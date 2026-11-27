@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.datetime_utils import rango_del_dia, utcnow
+from app.core.security import require_module
 from app.db.session import get_db
 from app.models.enums import MedioPago, TipoMovimientoCC
 from app.schemas.finanzas import (
@@ -242,6 +243,7 @@ def listar_transacciones(
 @router.delete(
     "/cuenta-corriente/transacciones/{transaccion_id}",
     response_model=TransaccionEliminadaRead,
+    dependencies=[Depends(require_module("BORRAR_MOVIMIENTOS"))],
     summary="Eliminar un movimiento de cuenta corriente",
     description=(
         "Borra **físicamente** un movimiento del libro mayor (un débito o un "

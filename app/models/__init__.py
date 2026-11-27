@@ -1,11 +1,13 @@
 """Modelos ORM del dominio (Módulo 1: turnos; Módulo 2: historia clínica;
 Módulo 3: facturación, caja y liquidaciones; Módulo 4: anamnesis; Módulo 5:
-cuentas corrientes y financiación de pacientes)."""
+cuentas corrientes y financiación de pacientes; y el módulo de usuarios,
+permisos y passkeys del panel)."""
 
 from app.models.antecedentes_salud import AntecedentesSalud
 from app.models.arancel_obra_social import ArancelObraSocial
 from app.models.archivo_adjunto import ArchivoAdjunto
 from app.models.conversacion_whatsapp import ConversacionWhatsApp
+from app.models.credencial_biometrica import CredencialBiometrica
 from app.models.cuenta_corriente import CuentaCorriente, PlanCuotas, TransaccionCC
 from app.models.disponibilidad import DisponibilidadDoctor
 from app.models.disponibilidad_especifica import DisponibilidadEspecifica
@@ -35,12 +37,14 @@ from app.models.paciente import Paciente
 from app.models.presupuesto import Presupuesto, PresupuestoItem
 from app.models.prestacion import Prestacion
 from app.models.turno import Turno
+from app.models.usuario import Usuario
 
 __all__ = [
     "AntecedentesSalud",
     "ArancelObraSocial",
     "ArchivoAdjunto",
     "ConversacionWhatsApp",
+    "CredencialBiometrica",
     "CuentaCorriente",
     "DetalleMovimientoCaja",
     "DisponibilidadDoctor",
@@ -65,6 +69,7 @@ __all__ = [
     "Proveedor",
     "TransaccionCC",
     "Turno",
+    "Usuario",
     "EstadoConversacionWhatsApp",
     "EstadoPagoFactura",
     "EstadoPagoMovimiento",

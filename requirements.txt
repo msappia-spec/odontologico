@@ -15,4 +15,10 @@ pymupdf==2.0
 psycopg[binary]==3.3.6
 python-dotenv==1.2.4
 tzdata==2026.5
+# Autenticación del panel: JWT (HS256) y hash de contraseñas con sal aleatoria.
+bcrypt==5.0.0
+PyJWT==2.10.1
+# Huella digital / Face ID (WebAuthn / passkeys). py_webauthn valida la firma
+# del autenticador con su clave pública; no se guarda ningún dato biométrico.
+webauthn==3.0.1
 

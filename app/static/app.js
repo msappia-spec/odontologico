@@ -50,8 +50,41 @@
     SECRETARIA: "Avisa que una secretaria responde a la brevedad.",
   };
 
+  /* Sección del menú -> código de permiso que la habilita.
+     Es el mismo catálogo que valida el backend (``app/core/security.py``): si
+     acá falta una vista nueva, queda oculta para todos salvo el superadmin. */
+  const VISTA_MODULO = {
+    dashboard: "PANEL_PRINCIPAL",
+    calendario: "AGENDA_TURNOS",
+    disponibilidad: "AGENDA_TURNOS",
+    recordatorios: "AGENDA_TURNOS",
+    "fichas-salud": "FICHAS_SALUD",
+    facturacion: "CAJA_PRESUPUESTOS",
+    presupuestos: "CAJA_PRESUPUESTOS",
+    "cuenta-corriente": "CUENTA_CORRIENTE",
+    egresos: "PROVEEDORES_EGRESOS",
+    "borrar-movimientos": "BORRAR_MOVIMIENTOS",
+    doctores: "REGISTROS",
+    pacientes: "REGISTROS",
+    "obras-sociales": "CONFIGURACION",
+    "bot-whatsapp": "CONFIGURACION",
+    usuarios: "ADMIN_USUARIOS",
+  };
+
   /* ------------------------------- Estado ------------------------------- */
   const state = {
+    // --- Sesión y permisos (Módulo de usuarios) ---
+    // Cuenta logueada (GET /auth/me) con ``es_superadmin`` y sus módulos; el
+    // menú y las peticiones se filtran con `puede()`. ``sesionVerificada`` evita
+    // que un 401 del primer chequeo dispare dos veces la pantalla de login.
+    usuario: null,
+    modulos: [],
+    sesionVerificada: false,
+    // Equipo del consultorio (GET /usuarios): sólo con ADMIN_USUARIOS.
+    usuarios: [],
+    usuariosError: null,
+    usuarioEditId: null,
+    usuarioResetId: null,
     doctores: [],
     pacientes: [],
     turnos: [],
@@ -425,14 +458,49 @@
     return badge(ESTADO_WA[t.estado_whatsapp] || { texto: t.estado_whatsapp, clase: "badge-slate", icono: "" });
   }
 
+  /* --------------------------- Permisos de la sesión --------------------- */
+  /* Los códigos son los mismos del catálogo del backend. Un superadmin entra a
+     todo sin importar su lista de módulos; una cuenta sin sesión no puede nada
+     (el panel igual está tapado por la pantalla de login). */
+  function puede(codigo) {
+    const usuario = state.usuario;
+    if (!usuario) return false;
+    if (usuario.es_superadmin) return true;
+    return (usuario.modulos_permitidos || []).indexOf(codigo) !== -1;
+  }
+
+  function puedeAlguna() {
+    return Array.prototype.some.call(arguments, puede);
+  }
+
+  function puedeVista(vista) {
+    const modulo = VISTA_MODULO[vista];
+    return !modulo || puede(modulo);
+  }
+
   /* ----------------------------- Cliente HTTP ---------------------------- */
   async function api(path, options) {
-    const opts = Object.assign({ headers: { "Content-Type": "application/json" } }, options || {});
+    const opts = Object.assign(
+      { credentials: "same-origin", headers: { "Content-Type": "application/json" } },
+      options || {}
+    );
     const res = await fetch(API + path, opts);
     const texto = await res.text();
     let data = null;
     if (texto) { try { data = JSON.parse(texto); } catch (_) { data = texto; } }
     if (!res.ok) {
+      // 401 con una sesión abierta: el token venció o la cuenta se desactivó.
+      // Se vuelve al login sin recargar (y sin hacerlo en /auth/*, que ya está
+      // manejando el error de credenciales en su formulario).
+      if (
+        res.status === 401 &&
+        state.usuario &&
+        !path.startsWith("/auth/") &&
+        window.SesionApp &&
+        window.SesionApp.sesionExpirada
+      ) {
+        window.SesionApp.sesionExpirada();
+      }
       // El error conserva el status y el cuerpo de la respuesta para que la UI
       // pueda reaccionar distinto según el tipo de conflicto (p. ej. HTTP 400
       // cuando el paciente ya está agendado en la agenda de otro odontólogo).
@@ -1700,41 +1768,104 @@
 
   /* --------------------------- Carga de datos ---------------------------- */
   async function cargarTodo() {
-    try {
-      const datos = await Promise.all([
-        api("/doctores"),
-        api("/pacientes"),
-        api("/turnos?limit=500"),
-        // El catálogo completo (activas y dadas de baja): la vista de gestión
-        // filtra localmente y el desplegable sólo ofrece las activas.
-        api(OBRAS_SOCIALES),
-        // Categorías administrativas de pacientes (mismo criterio: todas, para
-        // poder mostrarlas en el modal y en las insignias de la tabla).
-        api(CATEGORIAS_PACIENTE),
-      ]);
-      state.doctores = datos[0] || [];
-      state.pacientes = datos[1] || [];
-      state.turnos = datos[2] || [];
-      state.obrasSociales = datos[3] || [];
-      state.categoriasPaciente = datos[4] || [];
-      renderTodo();
-      estadoApi(true);
-      // Los recordatorios pendientes se piden aparte para no demorar el panel.
+    // Cada petición se pide sólo si el usuario tiene alguna sección que la use:
+    // una cuenta sin «Proveedores y egresos», por ejemplo, no debe recibir un
+    // 403 por la insignia de deuda ni ver un error al abrir el panel.
+    const pedidos = [];
+    // Doctores: lo necesitan la agenda, registros, la ficha médica, la caja y
+    // también la administración de usuarios (para vincular una cuenta).
+    if (
+      puedeAlguna(
+        "AGENDA_TURNOS",
+        "REGISTROS",
+        "FICHAS_SALUD",
+        "CAJA_PRESUPUESTOS",
+        "ADMIN_USUARIOS",
+        "PANEL_PRINCIPAL"
+      )
+    ) {
+      pedidos.push(
+        api("/doctores").then(function (datos) {
+          state.doctores = datos || [];
+        })
+      );
+    }
+    // Pacientes: dato base de las pantallas operativas (no de la de usuarios).
+    if (
+      puedeAlguna(
+        "AGENDA_TURNOS",
+        "REGISTROS",
+        "FICHAS_SALUD",
+        "CAJA_PRESUPUESTOS",
+        "CUENTA_CORRIENTE",
+        "PROVEEDORES_EGRESOS",
+        "PANEL_PRINCIPAL"
+      )
+    ) {
+      pedidos.push(
+        api("/pacientes").then(function (datos) {
+          state.pacientes = datos || [];
+        })
+      );
+    }
+    if (puedeAlguna("AGENDA_TURNOS", "PANEL_PRINCIPAL")) {
+      pedidos.push(
+        api("/turnos?limit=500").then(function (datos) {
+          state.turnos = datos || [];
+        })
+      );
+    }
+    if (puedeAlguna("CONFIGURACION", "CAJA_PRESUPUESTOS", "REGISTROS", "AGENDA_TURNOS")) {
+      // El catálogo completo (activas y dadas de baja): la vista de gestión
+      // filtra localmente y el desplegable sólo ofrece las activas.
+      pedidos.push(
+        api(OBRAS_SOCIALES).then(function (datos) {
+          state.obrasSociales = datos || [];
+        })
+      );
+    }
+    if (puedeAlguna("REGISTROS", "AGENDA_TURNOS")) {
+      // Categorías administrativas de pacientes (mismo criterio: todas, para
+      // poder mostrarlas en el modal y en las insignias de la tabla).
+      pedidos.push(
+        api(CATEGORIAS_PACIENTE).then(function (datos) {
+          state.categoriasPaciente = datos || [];
+        })
+      );
+    }
+
+    // ``allSettled``: si una sección falla, las demás igual se muestran y el
+    // panel avisa cuál no cargó (antes un 403 tumbaba toda la carga inicial).
+    const resultados = await Promise.allSettled(pedidos);
+    renderTodo();
+    const fallidos = resultados.filter(function (r) {
+      return r.status === "rejected";
+    });
+    estadoApi(fallidos.length === 0);
+    if (fallidos.length) {
+      toast(
+        "error",
+        "No se pudieron cargar algunos datos",
+        fallidos[0].reason ? fallidos[0].reason.message : "Error desconocido"
+      );
+    }
+
+    // Los recordatorios y la disponibilidad se piden aparte para no demorar el
+    // panel; cada bloque sólo si la cuenta tiene la sección habilitada.
+    if (puede("AGENDA_TURNOS")) {
       cargarRecordatorios();
-      // Las fichas de salud alimentan su propio panel y el contador del menú.
-      cargarFichasSalud();
-      // La agenda semanal de cada odontólogo también llega en su propia petición.
       cargarDisponibilidad();
-      // El menú del bot se pide aparte para no frenar el panel si la consulta falla.
-      cargarMenuWhatsApp();
-      // La insignia de «Proveedores y egresos» muestra las facturas abiertas;
-      // el tablero completo se pide al entrar a la pestaña.
+    }
+    // Las fichas de salud alimentan su propio panel y el contador del menú.
+    if (puede("FICHAS_SALUD")) cargarFichasSalud();
+    // El menú del bot se pide aparte para no frenar el panel si la consulta falla.
+    if (puede("CONFIGURACION")) cargarMenuWhatsApp();
+    // La insignia de «Proveedores y egresos» muestra las facturas abiertas;
+    // el tablero completo se pide al entrar a la pestaña.
+    if (puede("PROVEEDORES_EGRESOS")) {
       cargarResumenEgreso().catch(function () {
         /* la insignia es opcional: la vista avisa si la consulta falla */
       });
-    } catch (err) {
-      estadoApi(false);
-      toast("error", "No se pudo conectar con el servidor", err.message);
     }
   }
 
@@ -6353,6 +6484,10 @@
       "Bot WhatsApp",
       "Menú de opciones que el bot le ofrece a los pacientes por WhatsApp",
     ],
+    usuarios: [
+      "Usuarios y Permisos",
+      "Equipo del consultorio: alta de cuentas y secciones habilitadas para cada una",
+    ],
     facturacion: [
       "Facturación y Caja",
       "Cierre de visitas, coseguros del mostrador y liquidación de obras sociales y profesionales",
@@ -6389,6 +6524,16 @@
       // página puede traer una pestaña que esta versión del JS todavía no
       // conoce; se deja rastro en la consola en lugar de no hacer nada.
       console.warn("Vista desconocida en esta versión del panel:", v);
+      return;
+    }
+    if (state.usuario && !puedeVista(v)) {
+      // Defensa en profundidad: el ítem está oculto, pero una llamada directa
+      // (consola, enlace de una versión vieja) tampoco debe abrir la sección.
+      toast(
+        "error",
+        "Sección sin permiso",
+        "Tu usuario no tiene habilitada la sección «" + VISTAS[v][0] + "»."
+      );
       return;
     }
     state.vista = v;
@@ -6460,6 +6605,11 @@
       // pide al backend: es el texto exacto que recibe el paciente.
       renderMenuWhatsApp();
       cargarVistaPreviaMenu();
+    }
+    if (v === "usuarios" && window.SesionApp && window.SesionApp.alEntrarUsuarios) {
+      // El equipo se pide al entrar: otro administrador pudo crear o desactivar
+      // una cuenta desde la última visita.
+      window.SesionApp.alEntrarUsuarios();
     }
   }
 
@@ -9621,9 +9771,39 @@
   }
 
   /* -------------------------------- Init --------------------------------- */
-  document.addEventListener("DOMContentLoaded", function () {
+  /* Aplica los permisos de la cuenta al menú: oculta las secciones que no tiene
+     y, si la vista activa quedó oculta, viaja a la primera permitida. Los
+     botones del encabezado con ``data-modulo-requerido`` siguen la misma regla. */
+  function aplicarPermisos() {
+    document.querySelectorAll(".nav-link[data-view]").forEach(function (a) {
+      a.classList.toggle("hide", !puedeVista(a.dataset.view));
+    });
+    document.querySelectorAll("[data-modulo-requerido]").forEach(function (el) {
+      el.classList.toggle("hide", !puede(el.dataset.moduloRequerido));
+    });
+    // Los títulos de grupo («Operación», «Registros», «Configuración») se
+    // ocultan cuando todas sus secciones quedaron ocultas.
+    document.querySelectorAll("#sidebar nav > p").forEach(function (titulo) {
+      let visible = false;
+      let hermano = titulo.nextElementSibling;
+      while (hermano && hermano.tagName !== "P") {
+        if (!hermano.classList.contains("hide")) visible = true;
+        hermano = hermano.nextElementSibling;
+      }
+      titulo.classList.toggle("hide", !visible);
+    });
+    if (!puedeVista(state.vista)) {
+      const primera = Object.keys(VISTAS).filter(puedeVista)[0];
+      state.vista = primera || "dashboard";
+    }
+  }
+
+  /* Arranca el panel una vez confirmada la sesión: engancha los eventos, deja
+     la fecha del día, aplica permisos, abre la vista inicial y lanza la carga. */
+  function iniciarPanel() {
     registrarEventos();
     document.getElementById("agenda-fecha").value = state.agendaFecha;
+    aplicarPermisos();
     cambiarVista(state.vista);
     cargarTodo();
     // Las respuestas de WhatsApp (1/SI o 2/NO) llegan por el webhook y cambian
@@ -9637,6 +9817,16 @@
       if (document.visibilityState === "visible") revisarCambiosDeTurnos();
     });
     window.addEventListener("focus", revisarCambiosDeTurnos);
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    // ``usuarios.js`` maneja la sesión (login, /auth/me y los permisos). Si por
+    // alguna razón no cargó, se arranca igual para no dejar el panel en blanco.
+    if (window.SesionApp && window.SesionApp.iniciarPanel) {
+      window.SesionApp.iniciarPanel();
+    } else {
+      iniciarPanel();
+    }
   });
   /* --------------------- Puente para módulos externos -------------------- */
   // calendar.js (calendario mensual + panel de disponibilidad) consume esta API
@@ -9645,6 +9835,7 @@
     API,
     state,
     VISTAS,
+    VISTA_MODULO,
     api,
     toast,
     esc,
@@ -9654,6 +9845,12 @@
     colorDe,
     nombreDoctor,
     nombrePaciente,
+    // Sesión y permisos: los usa usuarios.js para el menú y la vista de equipo.
+    puede,
+    puedeAlguna,
+    puedeVista,
+    aplicarPermisos,
+    iniciarPanel,
     editarPaciente,
     isoDe,
     hoyISO,

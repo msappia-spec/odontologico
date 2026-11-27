@@ -207,12 +207,20 @@
   }
   /* ----------------------------- Cliente HTTP ---------------------------- */
   async function api(path, options) {
-    const opts = Object.assign({ headers: { "Content-Type": "application/json" } }, options || {});
+    const opts = Object.assign(
+      { credentials: "same-origin", headers: { "Content-Type": "application/json" } },
+      options || {}
+    );
     const res = await fetch(API + path, opts);
     const texto = await res.text();
     let data = null;
     if (texto) { try { data = JSON.parse(texto); } catch (_) { data = texto; } }
     if (!res.ok) {
+      // La sesión del odontólogo venció o la cuenta se desactivó: se vuelve al
+      // formulario de acceso en lugar de dejar la agenda vacía.
+      if (res.status === 401 && !path.startsWith("/auth/")) {
+        mostrarLoginMovil("Tu sesión expiró. Volvé a ingresar.");
+      }
       // El error conserva el status y el cuerpo: la agenda distingue el 409 de
       // solapamiento del odontólogo del 400 de paciente ya agendado en otra
       // agenda, igual que el modal del panel principal.
@@ -584,6 +592,247 @@
     if (ahora - state.ultimaRelectura < REFRESCO_MS) return;
     state.ultimaRelectura = ahora;
     cargarAgenda(true);
+  }
+
+  /* ------------------------------ Sesión ---------------------------------- */
+  /* La agenda del odontólogo también exige sesión: el panel y la vista móvil
+     comparten la cookie HttpOnly del mismo origen. */
+  let agendaIniciada = false;
+
+  async function verificarSesion() {
+    try {
+      const res = await fetch(API + "/auth/me", { credentials: "same-origin" });
+      return res.ok;
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  function mostrarLoginMovil(mensaje) {
+    const login = $("pantalla-login-movil");
+    if (login) login.classList.remove("hide");
+    ["pantalla-profesional", "pantalla-agenda"].forEach(function (id) {
+      const pantalla = $(id);
+      if (pantalla) pantalla.classList.add("hide");
+    });
+    const error = $("movil-login-error");
+    if (error) {
+      error.textContent = mensaje || "";
+      error.classList.toggle("hide", !mensaje);
+    }
+    const clave = $("movil-password");
+    if (clave) clave.value = "";
+    const email = $("movil-email");
+    if (email && !email.value) setTimeout(function () { email.focus(); }, 60);
+  }
+
+  async function iniciarSesionMovil(evento) {
+    if (evento) evento.preventDefault();
+    const email = ($("movil-email") || {}).value || "";
+    const password = ($("movil-password") || {}).value || "";
+    const error = $("movil-login-error");
+    if (!email.trim() || !password) {
+      if (error) {
+        error.textContent = "Completá el email y la contraseña.";
+        error.classList.remove("hide");
+      }
+      return;
+    }
+    const boton = $("movil-login-submit");
+    if (boton) boton.disabled = true;
+    try {
+      const res = await fetch(API + "/auth/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password: password }),
+      });
+      const texto = await res.text();
+      let datos = null;
+      if (texto) { try { datos = JSON.parse(texto); } catch (_) { datos = texto; } }
+      if (!res.ok) {
+        const detalle = datos && datos.detail;
+        throw new Error(
+          typeof detalle === "string" ? detalle : "No se pudo iniciar sesión."
+        );
+      }
+      const login = $("pantalla-login-movil");
+      if (login) login.classList.add("hide");
+      await iniciarAgenda();
+    } catch (err) {
+      if (error) {
+        error.textContent = err.message;
+        error.classList.remove("hide");
+      }
+    } finally {
+      if (boton) boton.disabled = false;
+    }
+  }
+
+  function registrarLoginMovil() {
+    const form = $("form-login-movil");
+    if (form) form.addEventListener("submit", iniciarSesionMovil);
+    const bio = $("movil-biometria");
+    if (bio) bio.addEventListener("click", iniciarSesionConHuella);
+    prepararBiometria();
+    mostrarLoginMovil("");
+  }
+
+  /* --------------------- Huella digital / Face ID ------------------------ */
+  /* Mismo estándar WebAuthn que el panel: el celular firma el desafío con la
+     clave privada y el backend devuelve la cookie de sesión de siempre. */
+  function bioSoportada() {
+    return !!(
+      window.PublicKeyCredential &&
+      navigator.credentials &&
+      window.isSecureContext
+    );
+  }
+
+  function bioBuffer(texto) {
+    const base64 = String(texto || "").replace(/-/g, "+").replace(/_/g, "/");
+    const relleno = "=".repeat((4 - (base64.length % 4)) % 4);
+    const binario = window.atob(base64 + relleno);
+    const bytes = new Uint8Array(binario.length);
+    for (let i = 0; i < binario.length; i += 1) {
+      bytes[i] = binario.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  function bioBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binario = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      binario += String.fromCharCode(bytes[i]);
+    }
+    return window
+      .btoa(binario)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  }
+
+  function bioSerializar(credencial) {
+    const respuesta = credencial.response || {};
+    const salida = {
+      id: credencial.id,
+      rawId: bioBase64(credencial.rawId),
+      type: credencial.type || "public-key",
+      clientExtensionResults: credencial.getClientExtensionResults
+        ? credencial.getClientExtensionResults()
+        : {},
+      response: {
+        clientDataJSON: bioBase64(respuesta.clientDataJSON),
+        authenticatorData: bioBase64(respuesta.authenticatorData),
+        signature: bioBase64(respuesta.signature),
+        userHandle: respuesta.userHandle ? bioBase64(respuesta.userHandle) : null,
+      },
+    };
+    return salida;
+  }
+
+  function bioOpciones(publicKey) {
+    const opciones = Object.assign({}, publicKey || {});
+    opciones.challenge = bioBuffer(publicKey.challenge);
+    if (Array.isArray(publicKey.allowCredentials)) {
+      opciones.allowCredentials = publicKey.allowCredentials.map(function (c) {
+        return Object.assign({}, c, { id: bioBuffer(c.id) });
+      });
+    }
+    return opciones;
+  }
+
+  function mostrarErrorMovil(mensaje) {
+    const error = $("movil-login-error");
+    if (!error) return;
+    error.textContent = mensaje || "";
+    error.classList.toggle("hide", !mensaje);
+  }
+
+  async function bioPedir(ruta, cuerpo) {
+    const res = await fetch(API + ruta, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cuerpo || {}),
+    });
+    const texto = await res.text();
+    let datos = null;
+    if (texto) { try { datos = JSON.parse(texto); } catch (_) { datos = texto; } }
+    if (!res.ok) {
+      const detalle = datos && datos.detail;
+      throw new Error(
+        typeof detalle === "string" ? detalle : "No se pudo ingresar con huella."
+      );
+    }
+    return datos;
+  }
+
+  async function prepararBiometria() {
+    const boton = $("movil-biometria");
+    const nota = $("movil-biometria-nota");
+    if (!boton) return;
+    let disponible = false;
+    if (bioSoportada()) {
+      try {
+        disponible =
+          await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      } catch (_err) {
+        disponible = false;
+      }
+    }
+    boton.classList.toggle("hide", !disponible);
+    if (nota) {
+      nota.classList.toggle("hide", disponible);
+      nota.textContent = disponible
+        ? ""
+        : "Ingresá con tu contraseña: este dispositivo no tiene huella/Face ID disponible.";
+    }
+  }
+
+  async function iniciarSesionConHuella() {
+    const email = (($("movil-email") || {}).value || "").trim();
+    const boton = $("movil-biometria");
+    if (!bioSoportada()) {
+      mostrarErrorMovil("Este navegador no soporta biometría. Usá tu contraseña.");
+      return;
+    }
+    if (!email) {
+      mostrarErrorMovil("Escribí tu email y volvé a tocar «Ingresar con Huella».");
+      const campo = $("movil-email");
+      if (campo) campo.focus();
+      return;
+    }
+    mostrarErrorMovil("");
+    if (boton) boton.disabled = true;
+    try {
+      const datos = await bioPedir("/auth/webauthn/login/opciones", {
+        email: email,
+      });
+      const publicKey = bioOpciones(datos.publicKey || {});
+      if (!publicKey.allowCredentials || !publicKey.allowCredentials.length) {
+        throw new Error(
+          "Esta cuenta no tiene una huella registrada. Ingresá con tu contraseña y registrala desde el panel."
+        );
+      }
+      const credencial = await navigator.credentials.get({ publicKey: publicKey });
+      await bioPedir("/auth/webauthn/login/verificar", {
+        challenge_token: datos.challenge_token,
+        credential: bioSerializar(credencial),
+      });
+      const login = $("pantalla-login-movil");
+      if (login) login.classList.add("hide");
+      await iniciarAgenda();
+    } catch (err) {
+      const mensaje =
+        err && err.name === "NotAllowedError"
+          ? "Cancelaste el pedido o el celular no reconoció tu huella. Probá de nuevo o usá la contraseña."
+          : err.message || "No se pudo ingresar con huella.";
+      mostrarErrorMovil(mensaje);
+    } finally {
+      if (boton) boton.disabled = false;
+    }
   }
 
   /* ------------------------------ Datos de la API ------------------------- */
@@ -1676,7 +1925,23 @@
 
   /* -------------------------------- Init --------------------------------- */
   async function iniciar() {
-    registrarEventos();
+    // Primero la sesión: sin cookie válida se muestra el formulario de acceso
+    // del profesional (el panel y esta vista comparten el mismo login).
+    const autenticado = await verificarSesion();
+    if (!autenticado) {
+      registrarLoginMovil();
+      return;
+    }
+    await iniciarAgenda();
+  }
+
+  async function iniciarAgenda() {
+    // Los eventos se enganchan una sola vez, pero la carga de datos sí se repite:
+    // el botón «Reintentar» y el re-login deben volver a pedir la agenda.
+    if (!agendaIniciada) {
+      agendaIniciada = true;
+      registrarEventos();
+    }
     try {
       await cargarDatosBase();
     } catch (err) {

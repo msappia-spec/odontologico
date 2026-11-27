@@ -14,6 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover - sólo para tipado/evitar import circular
     from app.models.evolucion_medica import EvolucionMedica
     from app.models.movimiento_caja import MovimientoCaja
     from app.models.turno import Turno
+    from app.models.usuario import Usuario
 
 
 class Doctor(Base):
@@ -84,6 +85,13 @@ class Doctor(Base):
     # un movimiento es un comprobante contable y no se borra con el odontólogo
     # (la baja del profesional es lógica, ``activo = false``).
     movimientos_caja: Mapped[List["MovimientoCaja"]] = relationship(
+        back_populates="doctor",
+        passive_deletes=True,
+    )
+    # Cuentas de acceso vinculadas al profesional (Módulo de usuarios). Sin
+    # ``cascade``: dar de baja a un odontólogo no borra sus credenciales; la
+    # cuenta se desactiva a mano desde «Usuarios y permisos».
+    usuarios: Mapped[List["Usuario"]] = relationship(
         back_populates="doctor",
         passive_deletes=True,
     )

@@ -10,6 +10,7 @@ from app.models.arancel_obra_social import ArancelObraSocial
 from app.models.archivo_adjunto import ArchivoAdjunto
 from app.models.categoria_paciente import CategoriaPaciente
 from app.models.conversacion_whatsapp import ConversacionWhatsApp
+from app.models.credencial_biometrica import CredencialBiometrica
 from app.models.cuenta_corriente import CuentaCorriente, PlanCuotas, TransaccionCC
 from app.models.disponibilidad import DisponibilidadDoctor
 from app.models.disponibilidad_especifica import DisponibilidadEspecifica
@@ -26,6 +27,7 @@ from app.models.paciente import Paciente
 from app.models.presupuesto import Presupuesto, PresupuestoItem
 from app.models.prestacion import Prestacion
 from app.models.turno import Turno
+from app.models.usuario import Usuario
 
 __all__ = [
     "Base",
@@ -34,6 +36,7 @@ __all__ = [
     "ArchivoAdjunto",
     "CategoriaPaciente",
     "ConversacionWhatsApp",
+    "CredencialBiometrica",
     "CuentaCorriente",
     "DetalleMovimientoCaja",
     "DisponibilidadDoctor",
@@ -58,4 +61,5 @@ __all__ = [
     "Proveedor",
     "TransaccionCC",
     "Turno",
+    "Usuario",
 ]

@@ -12,8 +12,12 @@ Modos
   libro de trabajos, adjuntos, caja, movimientos, cuenta corriente con sus
   planes de cuotas y disponibilidad específica). Conserva doctores, obras
   sociales, prestaciones, aranceles, agenda semanal y menú del bot.
-* ``todo``: borra las 25 tablas del proyecto y vuelve a sembrar el menú del FAQ
-  Bot con sus cuatro opciones históricas para que el panel no quede vacío.
+* ``todo``: borra las 29 tablas de datos del proyecto (todas menos ``usuarios``
+  y ``credenciales_biometricas``) y vuelve a sembrar el menú del FAQ Bot con sus
+  cuatro opciones históricas para que el panel no quede vacío. Las **cuentas del
+  panel y sus passkeys se conservan siempre**: si se borraran, nadie podría
+  volver a entrar ni usar la huella hasta ejecutar
+  ``python -m scripts.crear_admin`` y registrar los dispositivos otra vez.
 
 Sin ``--ejecutar`` es un **simulacro**: muestra cuántas filas hay y no escribe
 nada. La limpieza se hace en una sola transacción: si algo falla, la base queda
@@ -86,6 +90,12 @@ TABLAS_OPERATIVAS: tuple[str, ...] = (
     "cuentas_corrientes",
     "pacientes",
 )
+
+#: Tablas que **nunca** se vacían, ni siquiera en el modo ``todo``: las cuentas
+#: del panel son credenciales y auditoría, y sus passkeys (huella / Face ID)
+#: dependen de ellas. Si se borraran, nadie podría volver a entrar hasta
+#: ejecutar ``python -m scripts.crear_admin`` y registrar los dispositivos otra vez.
+TABLAS_PROTEGIDAS: tuple[str, ...] = ("usuarios", "credenciales_biometricas")
 
 #: Variables que pueden contener la cadena de producción. La primera que exista
 #: gana. ``DATABASE_URL_UNPOOLED`` es la conexión directa de Neon y evita el
@@ -174,9 +184,14 @@ def _tablas_para_modo(engine: Engine, modo: str) -> list:
     """
     existentes = set(inspect(engine).get_table_names())
     nombres_operativos = set(TABLAS_OPERATIVAS)
+    protegidas = set(TABLAS_PROTEGIDAS)
 
     if modo == "todo":
-        tablas = list(Base.metadata.sorted_tables)
+        tablas = [
+            tabla
+            for tabla in Base.metadata.sorted_tables
+            if tabla.name not in protegidas
+        ]
     else:
         tablas = [
             tabla
@@ -340,7 +355,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default="operativo",
         help=(
             "operativo: pacientes, turnos, historias y caja (conserva "
-            "catálogos); todo: las 25 tablas y resiembra el menú del bot."
+            "catálogos); todo: las 29 tablas de datos (conserva los usuarios "
+            "del panel y sus huellas registradas) y resiembra el menú del bot."
         ),
     )
     parser.add_argument(
