@@ -1689,12 +1689,9 @@
       const datos = await api("/turnos/sello");
       const sello = datos && datos.sello;
       if (!sello) return;
-      // El primer control sólo memoriza el sello: `cargarTodo()` ya trajo los
-      // turnos y no hace falta volver a pedirlos.
-      if (state.selloTurnos === null) {
-        state.selloTurnos = sello;
-        return;
-      }
+      // Un sello distinto —incluido el primero, que llega como `null`— relee
+      // los turnos: así no se pierde un cambio ocurrido justo después de la
+      // carga inicial.
       if (sello === state.selloTurnos) return;
       state.selloTurnos = sello;
       await refrescarTurnos();
