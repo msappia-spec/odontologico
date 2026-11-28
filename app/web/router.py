@@ -1,8 +1,9 @@
 """Router de la interfaz web (dashboard para la secretaría y vista móvil).
 
 Sirve la página HTML del dashboard (``/``), la **vista móvil del odontólogo**
-(``/medico``) y la **ficha pública de salud** (``/anamnesis/{token}``). Los datos
-se consumen desde el navegador mediante ``fetch`` contra la API de ``/api/v1``.
+(``/medico``), el **portal público de turnos** (``/reservar``) y la **ficha
+pública de salud** (``/anamnesis/{token}``). Los datos se consumen desde el
+navegador mediante ``fetch`` contra la API de ``/api/v1``.
 """
 
 from pathlib import Path
@@ -23,6 +24,10 @@ MEDICO_FILE = STATIC_DIR / "medico.html"
 ANAMNESIS_FILE = STATIC_DIR / "anamnesis.html"
 PRIVACIDAD_FILE = STATIC_DIR / "privacidad.html"
 ELIMINACION_DATOS_FILE = STATIC_DIR / "eliminacion_datos.html"
+# Portal público de autogestión de turnos: lo abre el paciente desde el link que
+# la secretaría comparte por WhatsApp o Instagram. No muestra el menú del ERP ni
+# pide sesión de empleado; consume /api/v1/portal-turnos.
+RESERVAR_FILE = STATIC_DIR / "reservar.html"
 
 # ``include_in_schema=False``: son páginas, no endpoints de la API.
 router = APIRouter(tags=["Interfaz web"], include_in_schema=False)
@@ -66,6 +71,12 @@ def ficha_de_salud(token: str) -> FileResponse:
             "X-Robots-Tag": "noindex, nofollow",
         },
     )
+
+
+@router.get("/reservar")
+def portal_de_turnos() -> FileResponse:
+    """Portal público para que el paciente reserve su turno desde el celular."""
+    return FileResponse(RESERVAR_FILE, media_type="text/html", headers=SIN_CACHE)
 
 
 @router.get("/privacidad")

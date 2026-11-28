@@ -464,6 +464,61 @@ Endpoints (`/api/v1/egresos`):
 
 ---
 
+## 📲 Módulo 7 · Portal público de autogestión de turnos (`/reservar`)
+
+La secretaría comparte un link (`https://<dominio>/reservar`) por WhatsApp o
+Instagram y el paciente reserva **sin usuario ni contraseña**, desde el celular,
+en cuatro pasos: profesional → día y horario → DNI y contacto → confirmación.
+La página es propia (`reservar.html` + `reservar.css` + `reservar.js`), no muestra
+el menú del ERP y consume únicamente los endpoints públicos
+`/api/v1/portal-turnos`.
+
+**Aislamiento y seguridad.**
+
+- El router **no** usa `get_current_user` ni `require_module`: es público a
+  propósito, igual que `/anamnesis/{token}` y el webhook de WAHA.
+- **Rate limiting por IP** con ventana deslizante: `60` lecturas/minuto y `12`
+  operaciones/minuto (configurables). Al superarlo responde `429` con
+  `Retry-After`, el mismo contrato que el login.
+- **Privacidad estricta:** la disponibilidad devuelve sólo horas
+  (`["09:00", "09:30", …]`); la búsqueda por DNI devuelve únicamente el **nombre
+  de pila**, la obra social y el teléfono enmascarado (`***4589`). Nunca salen
+  apellidos, teléfonos completos, motivos ni datos de otros pacientes.
+- **Reserva transaccional:** se bloquea la fila del odontólogo
+  (`SELECT … FOR UPDATE` en PostgreSQL), se **recalculan los horarios** justo
+  antes de guardar y el índice único parcial
+  `uq_turno_doctor_fecha_inicio` es la última barrera contra dos reservas
+  simultáneas. Si algo falla, `rollback` completo (no queda paciente sin turno).
+- **Antiabuso:** un mismo DNI no puede tener más de **2 turnos futuros activos**
+  (`PENDIENTE` o `CONFIRMADO`); el intento responde `409` con `limite_turnos`.
+- **Cancelación autogestionada:** DNI + código corto HMAC (u número de turno),
+  sólo hasta **12 horas antes**. El turno pasa a `CANCELADO` y su bloque vuelve a
+  ofrecerse. Repetir la cancelación es idempotente.
+- **WhatsApp:** si WAHA está configurado (`WAHA_URL` + `WAHA_API_KEY`), se envía
+  la confirmación con fecha, hora, profesional, cobertura y código de
+  cancelación. Un fallo de WhatsApp deja el turno en `FALLIDO` pero **no**
+  revierte la reserva.
+
+| Método | Ruta | Para qué |
+| --- | --- | --- |
+| `GET` | `/portal-turnos/inicial` | Odontólogos activos y obras sociales activas |
+| `GET` | `/portal-turnos/disponibilidad?doctor_id=&fecha=` | Horas libres de ese día (bloquea fechas pasadas) |
+| `GET` | `/portal-turnos/buscar-paciente?dni=` | `nuevo: true` o nombre de pila + cobertura + teléfono enmascarado |
+| `POST` | `/portal-turnos/reservar` | Alta/actualización del paciente y del turno, con re-chequeo concurrente |
+| `POST` | `/portal-turnos/cancelar` | DNI + código; libera el horario si faltan ≥ 12 h |
+
+El motivo que escribe el paciente se guarda en `turnos.motivo_consulta` (columna
+anulable, migración aditiva) y queda disponible en el turno para la agenda y la
+API. En la pestaña **Agenda** del panel, el botón **«Link de turnos»** copia la
+URL pública lista para pegar.
+
+Variables específicas: `PORTAL_MAX_PETICIONES` (60), `PORTAL_MAX_OPERACIONES`
+(12), `PORTAL_VENTANA_SEGUNDOS` (60), `PORTAL_MAX_TURNOS_ACTIVOS` (2),
+`PORTAL_CANCELACION_HORAS` (12), `PORTAL_DURACION_TURNO_MIN` (30) y
+`PORTAL_DESFASE_HORARIO_HORAS` (-3, hora de pared del consultorio).
+
+---
+
 ## 📁 Estructura del proyecto
 
 ```
@@ -472,6 +527,7 @@ Odontologico/
 │   ├── main.py                     # Instancia FastAPI, lifespan, manejador de errores
 │   ├── core/
 │   │   ├── config.py               # Configuración (pydantic-settings / .env)
+│   │   ├── rate_limit.py           # Rate limiting por IP del portal público (ventana deslizante)
 │   │   ├── datetime_utils.py       # Utilidades de fecha/hora (UTC naive)
 │   │   ├── exceptions.py           # Excepciones de dominio -> códigos HTTP
 │   │   ├── money.py                # Redondeo y suma de importes (centavos)
@@ -519,6 +575,7 @@ Odontologico/
 │   │   └── prestacion.py, arancel.py, facturacion.py # Módulo 3: precios, caja y liquidaciones
 │   ├── services/                   # Lógica de negocio
 │   │   ├── turno_service.py        # Alta/consulta, solapamientos y bloques libres
+│   │   ├── portal_turnos_service.py # Módulo 7: portal público, reserva transaccional y cancelación
 │   │   ├── doctor_service.py       # Alta, edición (PUT/PATCH), baja lógica y pago
 │   │   ├── paciente_service.py     # Alta/edición, búsqueda y resolución de la cobertura
 │   │   ├── categoria_paciente_service.py # Catálogo de categorías (CRUD y aviso previo)
@@ -559,10 +616,11 @@ Odontologico/
 │           ├── tareas.py           # Tarea programada de recordatorios
 │           ├── whatsapp.py         # Webhook WAHA (bot + confirmaciones) + recordatorios
 │           ├── whatsapp_menu.py    # FAQ Bot: CRUD del menú que ve el paciente
+│           ├── portal_turnos.py    # Módulo 7: endpoints públicos sin sesión (rate limited)
 │           ├── auth.py             # Login/logout, sesión (/auth/me), módulos y huella/Face ID
 │           └── usuarios.py         # Usuarios y permisos (ADMIN_USUARIOS)
 │   ├── web/
-│   │   └── router.py               # Sirve el panel (raíz /) y la vista móvil (/medico)
+│   │   └── router.py               # Sirve el panel (/), la agenda móvil (/medico) y /reservar
 │   ├── resources/
 │   │   └── historia_clinica_general.pdf # Plantilla de papel de la Historia Clínica General
 │   └── static/                     # Interfaz web (panel de la secretaría + móvil)
@@ -580,7 +638,10 @@ Odontologico/
 │       ├── odontograma.css         # Hoja del papel: arcadas, estado bucal y libro de trabajos
 │       ├── anamnesis.html          # Ficha pública del paciente (Módulo 4)
 │       ├── anamnesis.css           # Estilos de la página pública
-│       └── anamnesis.js            # Token del path, GET/POST y resumen
+│       ├── anamnesis.js            # Token del path, GET/POST y resumen
+│       ├── reservar.html           # Módulo 7: portal público de turnos (4 pasos, mobile-first)
+│       ├── reservar.css            # Estilos del portal (sin el menú del ERP)
+│       └── reservar.js             # Flujo: catálogos, disponibilidad, DNI, reserva y cancelación
 ├── scripts/
 │   ├── seed.py                          # Datos de ejemplo (odontólogas, pacientes y turnos)
 │   ├── seed_nomenclador_cba.py          # Nomenclador Córdoba (prestaciones + valor base)
@@ -598,6 +659,7 @@ Odontologico/
 │   ├── conftest.py                 # Fixtures (SQLite en memoria + TestClient)
 │   ├── test_contrato_http_turnos.py # Contrato HTTP: PATCH de turnos y CORS
 │   ├── test_disponibilidad.py      # Agenda semanal y bloques ofrecidos
+│   ├── test_portal_turnos.py       # Módulo 7: privacidad, reserva, tope, doble reserva y cancelación
 │   ├── test_doctores.py            # Edición, baja lógica y reactivación del doctor
 │   ├── test_historias_clinicas.py  # Módulo 2: alta, cronología e inmutabilidad
 │   ├── test_menu_whatsapp.py       # FAQ Bot: CRUD del menú, vista previa y tipos de respuesta
@@ -675,6 +737,8 @@ uvicorn app.main:app --reload
   (pide login; usá el usuario creado en el paso 5)
 - **Agenda móvil del odontólogo (celular):** <http://127.0.0.1:8000/medico>
   (comparte la sesión del panel; si se abre en otro celular, pide login)
+- **Portal público de turnos:** <http://127.0.0.1:8000/reservar>
+  (no pide login; es el link que se comparte con los pacientes)
 - Documentación interactiva (OpenAPI/Swagger): <http://127.0.0.1:8000/docs>
 - Health-check: <http://127.0.0.1:8000/health>
 
@@ -1537,6 +1601,7 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | `GET`  | `/` | Sirve el **panel principal web** de la secretaría |
+| `GET`  | `/reservar` | **Módulo 7:** portal público de turnos (mobile-first, sin sesión de empleado) |
 | `GET`  | `/docs` | Documentación interactiva (Swagger UI) |
 | `GET`  | `/health` | Chequeo de estado |
 | `GET`  | `/static/*` | Recursos de la interfaz (CSS/JS) |
@@ -1632,6 +1697,11 @@ Prefijo base de la API: `/api/v1` (las rutas de la interfaz web —`/`, `/docs`,
 | `POST` | `/finanzas/plan-cuotas` | **Módulo 5:** abrir un tratamiento financiado (total, entrega inicial del 50 % y cuotas; `422` si la entrega cubre el total) |
 | `POST` | `/finanzas/pagar` | **Módulo 5:** registrar un pago (`CREDITO`), imputable a un plan; devuelve el saldo y el `saldo_a_favor` |
 | `PATCH`| `/finanzas/plan-cuotas/{id}/estado` | **Módulo 5:** `ACTIVO` ↔ `RECOBRABLE` (cobranza); `FINALIZADO` a mano → `422`; cuenta saldada → `409` |
+| `GET`  | `/portal-turnos/inicial` | **Módulo 7:** doctores activos y obras sociales activas (público, rate limited) |
+| `GET`  | `/portal-turnos/disponibilidad` | **Módulo 7:** horas libres de `doctor_id` en `fecha`; fechas pasadas → `422` |
+| `GET`  | `/portal-turnos/buscar-paciente` | **Módulo 7:** `nuevo` o nombre de pila + cobertura + teléfono enmascarado (`***4589`) |
+| `POST` | `/portal-turnos/reservar` | **Módulo 7:** alta/actualización del paciente y turno; tope de 2 futuros, doble reserva → `409` |
+| `POST` | `/portal-turnos/cancelar` | **Módulo 7:** DNI + código HMAC (o id); libera el horario si faltan ≥ 12 h |
 
 > **Métodos soportados.** Cada ruta acepta únicamente los métodos de esta tabla;
 > cualquier otro responde `405 Method Not Allowed` (p. ej. `PUT` o `DELETE` sobre
@@ -2153,7 +2223,7 @@ RP_ORIGIN=""               # origen exacto (http://localhost:8000 o https://…)
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-Cubren (**1065 pruebas**, 1064 aprobadas y 1 omitida): creación y validación de turnos, solapamientos (exacto,
+Cubren (**1092 pruebas**, 1091 aprobadas y 1 omitida): creación y validación de turnos, solapamientos (exacto,
 parcial y contiguo), el **sello de cambios de la agenda**
 (`test_turnos_sello.py`: huella estable sin cambios y distinta al crear,
 confirmar, cancelar o reprogramar; el circuito real `1`/`si` y `2`/`no` del

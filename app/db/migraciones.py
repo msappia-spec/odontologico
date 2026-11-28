@@ -215,6 +215,9 @@ COLUMNAS_NUEVAS: tuple[ColumnaNueva, ...] = (
         "VARCHAR(30) NOT NULL DEFAULT 'SIN_CATEGORIZAR'",
     ),
     ColumnaNueva("pacientes", "categoria_observaciones", "TEXT", "TEXT"),
+    # Portal público de turnos: motivo que escribe el paciente al reservar.
+    # Es una referencia administrativa, no un dato clínico, y es anulable.
+    ColumnaNueva("turnos", "motivo_consulta", "TEXT", "TEXT"),
     # Presupuestos: código de nomenclador de cada trabajo. Es una copia del
     # catálogo de prestaciones y las filas viejas quedan sin código.
     ColumnaNueva(

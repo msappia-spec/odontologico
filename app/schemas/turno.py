@@ -3,10 +3,14 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.datetime_utils import to_naive_utc
 from app.models.enums import EstadoTurno, EstadoWhatsApp
+
+#: Largo máximo del motivo que el paciente escribe al reservar. Es el mismo
+#: límite en el panel y en el portal público para no truncar en silencio.
+MAX_MOTIVO_CONSULTA = 500
 
 
 class TurnoBase(BaseModel):
@@ -14,6 +18,23 @@ class TurnoBase(BaseModel):
     doctor_id: int = Field(..., gt=0)
     fecha_hora_inicio: datetime
     fecha_hora_fin: datetime
+    motivo_consulta: Optional[str] = Field(
+        None,
+        max_length=MAX_MOTIVO_CONSULTA,
+        description=(
+            "Motivo que el paciente escribe al reservar (opcional). No es un "
+            "dato clínico: la secretaría lo ve como referencia en la agenda."
+        ),
+    )
+
+    @field_validator("motivo_consulta", mode="before")
+    @classmethod
+    def _normalizar_motivo(cls, valor):
+        """Recorta espacios y guarda el campo vacío como ``NULL``."""
+        if valor is None:
+            return None
+        texto = str(valor).strip()
+        return texto or None
 
     @model_validator(mode="after")
     def _normalizar_y_validar_rango(self) -> "TurnoBase":
@@ -50,6 +71,16 @@ class TurnoUpdate(BaseModel):
     estado_turno: Optional[EstadoTurno] = None
     estado_whatsapp: Optional[EstadoWhatsApp] = None
     whatsapp_mensaje_id: Optional[str] = None
+    motivo_consulta: Optional[str] = Field(None, max_length=MAX_MOTIVO_CONSULTA)
+
+    @field_validator("motivo_consulta", mode="before")
+    @classmethod
+    def _normalizar_motivo(cls, valor):
+        """Recorta espacios y guarda el campo vacío como ``NULL``."""
+        if valor is None:
+            return None
+        texto = str(valor).strip()
+        return texto or None
 
     @model_validator(mode="after")
     def _normalizar_y_validar_rango(self) -> "TurnoUpdate":

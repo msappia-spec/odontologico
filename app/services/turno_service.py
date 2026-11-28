@@ -175,6 +175,7 @@ def crear_turno(db: Session, data: TurnoCreate) -> Turno:
         fecha_hora_fin=data.fecha_hora_fin,
         estado_turno=data.estado_turno,
         estado_whatsapp=data.estado_whatsapp,
+        motivo_consulta=data.motivo_consulta,
     )
     db.add(turno)
     try:

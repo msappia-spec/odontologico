@@ -57,6 +57,20 @@ def reiniciar_limite_login():
     yield
 
 
+@pytest.fixture(autouse=True)
+def reiniciar_limite_portal():
+    """Aísla el rate limiting del portal público entre pruebas.
+
+    El portal cuenta peticiones por IP en memoria; sin este reset, una prueba
+    con varias llamadas dejaría a la siguiente con HTTP 429 desde "testclient".
+    """
+    from app.core.rate_limit import reiniciar_limites_portal as _reiniciar
+
+    _reiniciar()
+    yield
+    _reiniciar()
+
+
 @pytest.fixture()
 def usuario_autenticado() -> Usuario:
     """Superadmin ficticio que reemplaza a la sesión en las pruebas existentes.

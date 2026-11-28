@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Reservar turno · Franciosi Odontología</title>
+  <meta name="theme-color" content="#0d8578" />
+  <meta name="description" content="Reservá tu turno en Franciosi Odontología en 4 pasos, desde tu celular y sin crear una cuenta." />
+  <link rel="icon" type="image/svg+xml" href="/static/img/favicon-franciosi.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/reservar.css" />
+</head>
+<body>
+  <header class="rp-header">
+    <a class="rp-brand" href="/reservar" aria-label="Franciosi Odontología, inicio del portal de turnos">
+      <img src="/static/img/marca-franciosi.svg" alt="" width="34" height="44" />
+      <span class="rp-brand-texto">
+        <strong>Franciosi</strong>
+        <span>Odontología</span>
+      </span>
+    </a>
+    <a class="rp-header-link" href="#panel-cancelar" id="rp-ir-cancelar">Ya tengo turno</a>
+  </header>
+
+  <main class="rp-main">
+    <section class="rp-hero" aria-labelledby="rp-titulo">
+      <h1 id="rp-titulo">Reservá tu <em>turno</em> online</h1>
+      <p>Elegí profesional, día y horario. En cuatro pasos y desde el celular, sin crear usuario.</p>
+      <div class="rp-badges" aria-hidden="true">
+        <span class="rp-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg>
+          Confirmación inmediata
+        </span>
+        <span class="rp-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.5-.7L3 21l1.4-5.1A8.2 8.2 0 0 1 3 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 9 8.4Z"/></svg>
+          Aviso por WhatsApp
+        </span>
+        <span class="rp-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+          Datos protegidos
+        </span>
+      </div>
+    </section>
+
+    <div id="rp-error" class="rp-alerta hide" role="alert" aria-live="assertive">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+      <span id="rp-error-texto"></span>
+    </div>
+
+    <ol class="rp-stepper" aria-label="Pasos para reservar">
+      <li data-paso-indicador="1" class="activo"><span class="rp-paso-num">1</span>Profesional</li>
+      <li data-paso-indicador="2"><span class="rp-paso-num">2</span>Día y hora</li>
+      <li data-paso-indicador="3"><span class="rp-paso-num">3</span>Tus datos</li>
+      <li data-paso-indicador="4"><span class="rp-paso-num">4</span>Listo</li>
+    </ol>
+
+    <!-- ============================ PASO 1 ============================ -->
+    <section id="rp-paso-1" class="rp-card" aria-labelledby="rp-paso-1-titulo">
+      <div class="rp-card-head">
+        <span class="rp-card-num" aria-hidden="true">1</span>
+        <div>
+          <h2 id="rp-paso-1-titulo">¿Con qué profesional querés atenderte?</h2>
+          <p>Tocá una tarjeta para elegir. Después vas a ver los días y horarios libres.</p>
+        </div>
+      </div>
+      <div id="rp-doctores" class="rp-doctores" role="group" aria-label="Profesionales disponibles">
+        <p class="rp-cargando">Cargando profesionales…</p>
+      </div>
+      <div class="rp-acciones">
+        <span></span>
+        <button type="button" class="rp-btn rp-btn-primario" id="rp-1-siguiente" disabled>
+          Siguiente
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- ============================ PASO 2 ============================ -->
+    <section id="rp-paso-2" class="rp-card hide" aria-labelledby="rp-paso-2-titulo">
+      <div class="rp-card-head">
+        <span class="rp-card-num" aria-hidden="true">2</span>
+        <div>
+          <h2 id="rp-paso-2-titulo">Elegí día y horario</h2>
+          <p>Sólo se muestran los horarios realmente libres de la agenda.</p>
+        </div>
+      </div>
+
+      <div class="rp-elegido">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span id="rp-doctor-elegido">—</span>
+      </div>
+
+      <label class="rp-field-label" for="rp-fecha">Fecha</label>
+      <input type="date" id="rp-fecha" class="rp-field" required />
+      <div id="rp-dias" class="rp-dias" role="group" aria-label="Próximos días"></div>
+
+      <p class="rp-field-label" style="margin-top:.9rem">Horarios libres</p>
+      <div id="rp-horarios" class="rp-horarios" role="group" aria-label="Horarios disponibles">
+        <p class="rp-cargando">Elegí una fecha para ver los horarios.</p>
+      </div>
+
+      <div class="rp-acciones">
+        <button type="button" class="rp-btn rp-btn-texto" id="rp-2-atras">Volver</button>
+        <button type="button" class="rp-btn rp-btn-primario" id="rp-2-siguiente" disabled>
+          Siguiente
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- ============================ PASO 3 ============================ -->
+    <section id="rp-paso-3" class="rp-card hide" aria-labelledby="rp-paso-3-titulo">
+      <div class="rp-card-head">
+        <span class="rp-card-num" aria-hidden="true">3</span>
+        <div>
+          <h2 id="rp-paso-3-titulo">Tus datos de contacto</h2>
+          <p>Empezá por el DNI: si ya sos paciente, completamos tu ficha automáticamente.</p>
+        </div>
+      </div>
+
+      <form id="rp-form-reserva" class="rp-form" novalidate>
+        <div class="rp-campo">
+          <label class="rp-field-label" for="rp-dni">DNI</label>
+          <div class="rp-dni-row">
+            <input id="rp-dni" class="rp-field" inputmode="numeric" autocomplete="off"
+                   placeholder="Ej. 30123456" maxlength="20" required />
+            <button type="button" class="rp-btn-mini" id="rp-buscar-dni">Buscar</button>
+          </div>
+          <small class="rp-ayuda">Sin puntos. Lo usamos para identificar tu ficha y evitar turnos duplicados.</small>
+        </div>
+
+        <div id="rp-paciente-info" class="rp-paciente-info hide" role="status" aria-live="polite"></div>
+
+        <div id="rp-datos-nombre" class="rp-grid-2">
+          <div class="rp-campo">
+            <label class="rp-field-label" for="rp-nombre">Nombre</label>
+            <input id="rp-nombre" class="rp-field" autocomplete="given-name" maxlength="120" placeholder="Tu nombre" />
+          </div>
+          <div class="rp-campo">
+            <label class="rp-field-label" for="rp-apellido">Apellido</label>
+            <input id="rp-apellido" class="rp-field" autocomplete="family-name" maxlength="120" placeholder="Tu apellido" />
+          </div>
+        </div>
+
+        <div class="rp-campo">
+          <label class="rp-field-label" for="rp-telefono">WhatsApp</label>
+          <input id="rp-telefono" class="rp-field" type="tel" inputmode="tel" autocomplete="tel"
+                 maxlength="30" placeholder="Ej. 351 555 1234" required />
+          <small class="rp-ayuda" id="rp-telefono-ayuda">Con código de área. Ahí te llega la confirmación del turno.</small>
+        </div>
+
+        <div class="rp-campo">
+          <label class="rp-field-label" for="rp-obra-social">Obra social o prepaga</label>
+          <select id="rp-obra-social" class="rp-field">
+            <option value="">Particular / sin obra social</option>
+          </select>
+        </div>
+
+        <div class="rp-campo">
+          <label class="rp-field-label" for="rp-motivo">Motivo de la consulta (opcional)</label>
+          <textarea id="rp-motivo" class="rp-field" maxlength="500"
+                    placeholder="Ej. Dolor en una muela, control, limpieza…"></textarea>
+        </div>
+
+        <div class="rp-resumen-mini" id="rp-resumen-elegido" aria-live="polite"></div>
+
+        <div class="rp-acciones">
+          <button type="button" class="rp-btn rp-btn-texto" id="rp-3-atras">Volver</button>
+          <button type="submit" class="rp-btn rp-btn-primario" id="rp-reservar">
+            Confirmar turno
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg>
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ============================ PASO 4 ============================ -->
+    <section id="rp-paso-4" class="rp-card rp-exito hide" aria-labelledby="rp-exito-titulo" aria-live="polite">
+      <div class="rp-exito-icono" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></svg>
+      </div>
+      <h2 id="rp-exito-titulo">¡Turno reservado!</h2>
+      <p>Guardá el código: lo necesitás si querés cancelar.</p>
+
+      <div class="rp-ticket" id="rp-ticket"></div>
+
+      <div class="rp-codigo">
+        <div>
+          <small>Código de cancelación</small>
+          <strong id="rp-codigo-valor">—</strong>
+        </div>
+        <button type="button" id="rp-copiar-codigo">Copiar</button>
+      </div>
+
+      <p class="rp-aviso-wa">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.5-.7L3 21l1.4-5.1A8.2 8.2 0 0 1 3 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 9 8.4Z"/></svg>
+        <span id="rp-aviso-wa-texto">Te enviamos la confirmación por WhatsApp.</span>
+      </p>
+
+      <div class="rp-acciones" style="justify-content:center;flex-wrap:wrap">
+        <button type="button" class="rp-btn rp-btn-suave" id="rp-agendar-otro">Agendar otro turno</button>
+        <button type="button" class="rp-btn rp-btn-peligro" id="rp-cancelar-este">Cancelar turno</button>
+      </div>
+    </section>
+
+    <!-- ====================== CANCELACIÓN PÚBLICA ====================== -->
+    <section id="panel-cancelar" class="rp-card rp-panel-cancelar" aria-labelledby="rp-cancelar-titulo">
+      <div class="rp-card-head">
+        <span class="rp-card-num" aria-hidden="true">×</span>
+        <div>
+          <h2 id="rp-cancelar-titulo">¿Necesitás cancelar un turno?</h2>
+          <p>Ingresá tu DNI y el código que recibiste al reservar. Se puede cancelar hasta 12 horas antes.</p>
+        </div>
+      </div>
+      <form id="rp-form-cancelar" class="rp-form" novalidate>
+        <div class="rp-grid-2">
+          <div class="rp-campo">
+            <label class="rp-field-label" for="rp-cancelar-dni">DNI</label>
+            <input id="rp-cancelar-dni" class="rp-field" inputmode="numeric" maxlength="20"
+                   placeholder="Tu DNI" autocomplete="off" required />
+          </div>
+          <div class="rp-campo">
+            <label class="rp-field-label" for="rp-cancelar-codigo">Código del turno</label>
+            <input id="rp-cancelar-codigo" class="rp-field" maxlength="20"
+                   placeholder="Ej. 3F8A1C2D" autocomplete="off" required />
+          </div>
+        </div>
+        <button type="submit" class="rp-btn rp-btn-peligro rp-btn-ancho" id="rp-confirmar-cancelar">
+          Cancelar mi turno
+        </button>
+      </form>
+      <div id="rp-resultado-cancelar" class="rp-resultado-cancelar hide" role="status" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="rp-footer">
+    <p>
+      Franciosi Odontología · Córdoba, Argentina<br />
+      ¿Problemas para reservar? Escribinos por WhatsApp al consultorio.<br />
+      <a href="/privacidad">Política de privacidad</a> ·
+      <a href="/eliminacion-datos">Eliminación de datos</a>
+    </p>
+  </footer>
+
+  <script src="/static/reservar.js"></script>
+</body>
+</html>
+
+

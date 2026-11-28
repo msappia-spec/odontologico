@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -107,6 +108,12 @@ class Turno(Base):
     whatsapp_mensaje_id: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True, index=True
     )
+
+    # Motivo que el paciente escribe al reservar desde el portal público
+    # (``/reservar``). Es opcional y **no** es un dato clínico: la secretaría lo
+    # ve como referencia al abrir el turno y el profesional lo confirma en la
+    # consulta. Los turnos cargados desde el panel quedan en ``NULL``.
+    motivo_consulta: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relaciones
     paciente: Mapped["Paciente"] = relationship(back_populates="turnos")

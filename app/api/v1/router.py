@@ -12,7 +12,9 @@ Quedan **públicas** a propósito:
 * ``/health`` y las páginas web (no exponen datos);
 * ``POST /whatsapp/webhook`` (lo llama WAHA sin token);
 * ``/anamnesis/{token}`` (la ficha pública que recibe el paciente);
-* ``/tareas/enviar-recordatorios`` (se autentica con ``CRON_SECRET``).
+* ``/tareas/enviar-recordatorios`` (se autentica con ``CRON_SECRET``);
+* ``/portal-turnos/*`` (el portal público ``/reservar``, protegido con rate
+  limiting por IP y con respuestas que no exponen datos de otros pacientes).
 
 Las rutas internas de la ficha de salud (``/anamnesis/panel/...``) y los
 recordatorios del panel declaran el permiso en el propio decorador.
@@ -35,6 +37,7 @@ from app.api.v1.endpoints import (
     obras_sociales,
     odontogramas,
     pacientes,
+    portal_turnos,
     presupuestos,
     prestaciones,
     tareas,
@@ -50,6 +53,12 @@ api_router = APIRouter()
 # --- Sesión y administración de cuentas --------------------------------------
 api_router.include_router(auth.router)
 api_router.include_router(usuarios.router)
+
+# --- Portal público de turnos (sin sesión de empleado) -----------------------
+# Lo usa el paciente desde /reservar. Se protege con rate limiting por IP y con
+# respuestas mínimas (ver app/api/v1/endpoints/portal_turnos.py); NO se le
+# aplica require_module ni get_current_user.
+api_router.include_router(portal_turnos.router)
 
 # --- Operación diaria --------------------------------------------------------
 # Los odontólogos los necesitan también la agenda (filtros y horarios), y el

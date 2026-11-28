@@ -8261,6 +8261,43 @@
     renderFichasSalud();
   }
 
+  /* Enlace público de autogestión de turnos: se copia con el mismo fallback que
+     los enlaces de la ficha de salud y queda listo para pegar en WhatsApp o
+     Instagram. El origen se toma del navegador para que funcione igual en local,
+     en un preview de Vercel y en producción. */
+  function copiarLinkTurnos() {
+    const enlace = `${window.location.origin}/reservar`;
+    const avisar = () =>
+      toast(
+        "exito",
+        "Link de turnos copiado",
+        "Pegalo en WhatsApp o Instagram para que tus pacientes reserven solos."
+      );
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(enlace)
+        .then(avisar)
+        .catch((err) => toast("error", "No se pudo copiar el link", err.message));
+      return;
+    }
+    // Fallback para navegadores viejos o contextos sin Clipboard API.
+    try {
+      const area = document.createElement("textarea");
+      area.value = enlace;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      document.body.removeChild(area);
+      avisar();
+    } catch (err) {
+      toast("error", "No se pudo copiar el link", err.message);
+    }
+  }
+
   async function copiarEnlaceFicha(enlace, paciente) {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -8711,6 +8748,8 @@
 
     document.getElementById("btn-nuevo-turno").addEventListener("click", abrirModal);
     document.getElementById("agenda-nuevo").addEventListener("click", abrirModal);
+    const copiarTurnos = document.getElementById("copiar-link-turnos");
+    if (copiarTurnos) copiarTurnos.addEventListener("click", copiarLinkTurnos);
     document.getElementById("modal-turno-close").addEventListener("click", cerrarModal);
     document.getElementById("modal-turno-cancel").addEventListener("click", cerrarModal);
     document.getElementById("modal-turno").addEventListener("click", function (e) {

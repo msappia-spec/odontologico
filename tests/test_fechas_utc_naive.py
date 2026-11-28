@@ -16,7 +16,9 @@ from types import SimpleNamespace
 
 from sqlalchemy.dialects import postgresql, sqlite
 
+from app.core.config import settings
 from app.core.datetime_utils import dia_semana_de
+from app.db import session as db_session_module
 from app.db.types import UTCDateTime
 from app.models.disponibilidad import DisponibilidadDoctor
 from app.models.turno import Turno
@@ -67,6 +69,45 @@ def test_el_tipo_guarda_siempre_en_utc():
 def test_el_esquema_de_sqlite_no_cambia():
     """El tipo sigue compilando a ``DATETIME`` en SQLite (sin migraciones)."""
     assert UTCDateTime().compile(dialect=sqlite.dialect()) == "DATETIME"
+
+
+def test_la_transaccion_de_postgresql_fija_la_zona_en_utc():
+    """La hora de pared no debe depender del ``timezone`` del servidor.
+
+    Un PostgreSQL local en ``America/Buenos_Aires`` convertiría un turno de las
+    09:00 a 12:00 UTC al guardarlo en ``TIMESTAMPTZ``. Cada transacción fija UTC
+    con ``SET LOCAL`` para que el valor que ve el panel/portal sea el cargado.
+    """
+    sentencias = []
+
+    class ConexionFalsa:
+        dialect = SimpleNamespace(name="postgresql")
+
+        def exec_driver_sql(self, sql):
+            sentencias.append(sql)
+
+    db_session_module._fijar_zona_utc(
+        None, SimpleNamespace(nested=False), ConexionFalsa()
+    )
+
+    assert sentencias == ["SET LOCAL TIME ZONE 'UTC'"]
+
+
+def test_el_engine_de_sqlite_conserva_sus_argumentos(monkeypatch):
+    """SQLite no recibe ``options`` de libpq: sólo el flag de hilos."""
+    llamadas = {}
+
+    def create_engine_falso(url, **kwargs):
+        llamadas["url"] = url
+        llamadas.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(db_session_module, "create_engine", create_engine_falso)
+    monkeypatch.setattr(settings, "database_url", "sqlite:///./odontologico.db")
+
+    db_session_module._crear_engine()
+
+    assert llamadas["connect_args"] == {"check_same_thread": False}
 
 
 def test_las_fechas_del_turno_usan_el_tipo_utc_naive():

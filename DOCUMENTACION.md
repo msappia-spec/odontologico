@@ -16,7 +16,7 @@
 ## 0. Resumen ejecutivo
 
 **Franciosi Odontología** es un sistema de gestión para un consultorio
-odontológico. Cubre seis módulos funcionales:
+odontológico. Cubre siete módulos funcionales:
 
 | Módulo | Función |
 |---|---|
@@ -26,6 +26,7 @@ odontológico. Cubre seis módulos funcionales:
 | **4. Anamnesis** | Ficha pública de salud previa a la consulta, con token HMAC. |
 | **5. Cuenta corriente y financiación** | Saldo del paciente, libro mayor de débitos/créditos, planes de cuotas con entrega inicial y pagos con su medio. |
 | **6. Proveedores y cuentas por pagar** | Mecánicos dentales, insumos y servicios/impuestos: facturas recibidas, pagos (efectivo/transferencia/tarjeta) y saldo con cada acreedor. |
+| **7. Portal público de turnos** | Página `/reservar` sin login de empleado: disponibilidad, alta/actualización del paciente, reserva con control de concurrencia y cancelación. |
 
 **Stack:** Python 3.14, FastAPI 0.143, SQLAlchemy 2.1, Pydantic 2.14,
 SQLite (desarrollo) / PostgreSQL (producción), frontend HTML + CSS + JavaScript
@@ -40,8 +41,8 @@ contador anti-clonación y el nombre del dispositivo. No hay tablas de auditorí
 ni archivos binarios; los pagos existen como libro mayor contable
 (`transacciones_cc`) y como pagos de egresos (`pagos_egresos`), no como pasarela.
 
-**Pruebas:** 44 archivos `test_*.py` (más `conftest.py`) y **1065 casos**
-(1064 aprobados y 1 omitido; suite completa verificada).
+**Pruebas:** 45 archivos `test_*.py` (más `conftest.py`) y **1092 casos**
+(1091 aprobados y 1 omitido; suite completa verificada).
 
 **Conclusión de arquitectura:** es un **monolito modular por capas**, no un
 sistema de microservicios ni un monolito desordenado. La separación de
@@ -89,7 +90,7 @@ Sí es:
 | Transacciones | Cada servicio hace `commit()`; no hay Unit of Work explícita. | Transacciones locales por operación. |
 | Frontend | Panel de 9.951 líneas en `app.js`, más `calendar.js`, `usuarios.js` (sesión y permisos) y `biometria.js` (huella/Face ID); vista móvil, ficha médica, odontograma y PDF de la ficha compartidos. | UI desacoplada por API, con el menú filtrado por módulos. |
 | Despliegue | `vercel.json` declara `framework: fastapi`; un solo deploy. | Escalado y fallos acoplados. |
-| Pruebas | SQLite en memoria + `TestClient`, 44 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
+| Pruebas | SQLite en memoria + `TestClient`, 45 archivos `test_*.py`. | Buena testabilidad de la capa HTTP y servicios. |
 
 ### 1.3. Fortalezas
 
@@ -300,7 +301,7 @@ Odontologico/
 │   ├── crear_admin.py               # Primer superadmin + SECRET_KEY del archivo de entorno
 │   ├── configurar_url_vercel.py     # Guarda DATABASE_URL local de producción
 │   └── publicar.py                  # pytest + git + Vercel + verificación
-├── tests/                           # 44 archivos test_*.py, 1065 casos
+├── tests/                           # 45 archivos test_*.py, 1092 casos
 ├── .env.example                     # Variables documentadas
 ├── requirements.txt                 # Dependencias fijas de producción
 ├── requirements-dev.txt             # pytest + esprima
@@ -822,7 +823,7 @@ Si no hay pendientes, responde `422`.
 
 | Dependencia | Versión | Propósito |
 |---|---:|---|
-| `pytest` | 9.1.1 | Ejecución de la suite de 1065 casos. |
+| `pytest` | 9.1.1 | Ejecución de la suite de 1092 casos. |
 | `esprima` | 4.0.1 | Parser JavaScript usado por pruebas de frontend/contratos. |
 
 ### 4.3. Frontend y herramientas externas
@@ -1052,7 +1053,7 @@ fallo de WhatsApp.
 > del parámetro está en OpenAPI (`{doctor_id}`, `{paciente_id}`,
 > `{obra_social_id}`, `{turno_id}`, `{prestacion_id}`, `{arancel_id}`,
 > `{movimiento_id}`, `{opcion_id}`, `{evolucion_id}`). La validación automática
-> confirma que las **80 combinaciones método + ruta** del OpenAPI están
+> confirma que las **85 combinaciones método + ruta** del OpenAPI están
 > documentadas.
 
 #### 5.4.1. Salud, interfaz y recursos básicos
@@ -1062,6 +1063,7 @@ fallo de WhatsApp.
 | `GET` | `/health` | Estado, nombre y versión de la app. |
 | `GET` | `/` | Panel HTML de la secretaría. |
 | `GET` | `/medico` | Vista HTML móvil del odontólogo. |
+| `GET` | `/reservar` | Portal HTML público de turnos (Módulo 7). |
 | `GET` | `/anamnesis/{token}` | Página HTML pública de la ficha de salud. |
 | `GET` | `/docs` | Swagger UI generado por FastAPI. |
 | `GET` | `/redoc` | ReDoc generado por FastAPI. |
@@ -1279,6 +1281,30 @@ fallo de WhatsApp.
 > antes de enviarlo. Los endpoints siguen disponibles en Swagger (`/docs`) o
 > `curl`.
 
+#### 5.4.8. Portal público de turnos (Módulo 7)
+
+Router **sin** `get_current_user` ni `require_module`, pensado para el paciente
+que abre `/reservar` desde el celular. Se protege con rate limiting por IP
+(`app/core/rate_limit.py`, ventana deslizante) y con respuestas mínimas.
+
+| Método | Ruta | Resumen / regla |
+|---|---|---|
+| `GET` | `/api/v1/portal-turnos/inicial` | Doctores activos (`id`, `nombre`, `especialidad`) y obras sociales activas. Público. |
+| `GET` | `/api/v1/portal-turnos/disponibilidad?doctor_id=&fecha=` | Horas libres (`HH:MM`) con la agenda del Módulo 1 y los turnos vigentes; descarta horas pasadas, fecha pasada → `422`. No expone datos de pacientes. |
+| `GET` | `/api/v1/portal-turnos/buscar-paciente?dni=` | `nuevo: true` o `nombre` de pila + obra social + `telefono_enmascarado` (`***4589`). DNI inválido → `422`; rate limited. |
+| `POST` | `/api/v1/portal-turnos/reservar` | Crea/actualiza paciente y turno. Tope de 2 futuros activos → `409` con `limite_turnos`; doble reserva → `409`; guarda `turno.motivo_consulta`. |
+| `POST` | `/api/v1/portal-turnos/cancelar` | DNI + código HMAC (u id del turno). Sólo ≥ 12 h antes (`PORTAL_CANCELACION_HORAS`); idempotente; libera el bloque. |
+
+> **Concurrencia y privacidad.** `reservar` bloquea la fila del odontólogo con
+> `SELECT … FOR UPDATE` (PostgreSQL), recalcula la disponibilidad dentro de la
+> misma transacción y confirma el turno con el índice único parcial
+> `uq_turno_doctor_fecha_inicio` como última barrera. Cualquier `IntegrityError`
+> hace `rollback` completo. El código de cancelación es un HMAC-SHA256 corto de
+> `turno_id + DNI + SECRET_KEY`: no se persiste y necesita el DNI para usarse.
+> El portal devuelve `429` con `Retry-After` al superar `PORTAL_MAX_PETICIONES`
+> (lecturas) o `PORTAL_MAX_OPERACIONES` (reservas/cancelaciones) por IP en
+> `PORTAL_VENTANA_SEGUNDOS`.
+
 ### 5.5. Interfaz web (`app/web` y `app/static`)
 
 #### `app/web/router.py`
@@ -1287,6 +1313,7 @@ fallo de WhatsApp.
 |---|---|---|
 | `GET /` | `index.html` | Panel principal de la secretaría; `Cache-Control: no-cache, must-revalidate`. |
 | `GET /medico` | `medico.html` | Agenda móvil del odontólogo; `Cache-Control: no-cache, must-revalidate`. |
+| `GET /reservar` | `reservar.html` | Portal público de turnos mobile-first (`reservar.css` + `reservar.js`); no pide sesión y no muestra el menú del ERP. |
 | `GET /anamnesis/{token}` | `anamnesis.html` | Ficha pública; agrega `Cache-Control: no-store`, `Referrer-Policy: no-referrer` y `X-Robots-Tag: noindex`. |
 
 `STATIC_DIR`, `INDEX_FILE`, `MEDICO_FILE` y `ANAMNESIS_FILE` resuelven rutas
@@ -1343,6 +1370,9 @@ absolutas con `pathlib`.
 | `anamnesis.html` | 192 líneas | Página pública: estados de carga/error, contexto del turno y contenedor del cuestionario. |
 | `anamnesis.css` | 493 líneas | Estilos de la ficha pública. |
 | `anamnesis.js` | 348 líneas | Token del path, GET/POST, validación de consentimiento, fusión de filiatorios y render seguro con `textContent`. |
+| `reservar.html` | 251 líneas | Portal público de turnos: flujo guiado de 4 pasos, cancelación y datos de contacto accesibles. |
+| `reservar.css` | 618 líneas | Estilos mobile-first del portal (sin el menú del ERP), con botones táctiles de 50 px. |
+| `reservar.js` | 666 líneas | Catálogos, disponibilidad, búsqueda por DNI, reserva, confirmación con código y cancelación. |
 | `img/marca-franciosi.svg` | — | Marca compacta usada en panel y anamnesis. |
 | `img/logo-franciosi.svg` | — | Logo con nombre usado en `/medico`. |
 | `img/logo-franciosi-horizontal.svg` | — | Variante horizontal de marca. |
@@ -1469,7 +1499,10 @@ python -m pytest --collect-only
 - **Desarrollo/pruebas:** SQLite (`sqlite:///./odontologico.db` o memoria).
 - **Producción:** PostgreSQL a través de `DATABASE_URL` con driver `psycopg` 3.
 - **Vercel sin PostgreSQL:** SQLite en `/tmp/odontologico.db`, efímero.
-- **Engine:** `pool_pre_ping=True`; en SQLite `check_same_thread=False`.
+- **Engine:** `pool_pre_ping=True`; en SQLite `check_same_thread=False`; en
+  PostgreSQL se fija la zona al inicio de cada transacción
+  (`SET LOCAL TIME ZONE 'UTC'`) para que un servidor local en
+  `America/Buenos_Aires` no corra las horas.
 - **Sesión:** `autoflush=False`, `autocommit=False`, `expire_on_commit=False`.
 - **Fechas:** columnas `UTCDateTime`; en PostgreSQL son
   `TIMESTAMP WITH TIME ZONE` y en SQLite `DATETIME`. En Python siempre se
@@ -1801,6 +1834,7 @@ notificación por WhatsApp.
 | `estado_turno` | `VARCHAR(20) / VARCHAR(20)` | No | `'PENDIENTE'` | — | `PENDIENTE`, `CONFIRMADO` o `CANCELADO`; sin `CHECK`. |
 | `estado_whatsapp` | `VARCHAR(20) / VARCHAR(20)` | No | `'PENDIENTE_ENVIO'` | — | `PENDIENTE_ENVIO`, `ENVIADO`, `FALLIDO` o `RESPONDIDO`; sin `CHECK`. |
 | `whatsapp_mensaje_id` | `VARCHAR(128) / VARCHAR(128)` | Sí | `NULL` | **IDX** `ix_turnos_whatsapp_mensaje_id` | Identificador del mensaje saliente de WAHA (auditoría). |
+| `motivo_consulta` | `TEXT / TEXT` | Sí | `NULL` | — | Motivo que el paciente escribe en el portal público (Módulo 7). No es un dato clínico; los turnos del panel quedan en `NULL`. Migración aditiva. |
 
 **Restricciones e índices:**
 
@@ -2560,13 +2594,16 @@ corrección se hace con otro movimiento de signo contrario.
 #### Fechas
 
 - `UTCDateTime` declara `DateTime(timezone=True)`.
-- En PostgreSQL la columna es `TIMESTAMP WITH TIME ZONE`; al leer, se convierte a
-  UTC y se quita `tzinfo`.
+- En PostgreSQL la columna es `TIMESTAMP WITH TIME ZONE`; cada transacción fija
+  `SET LOCAL TIME ZONE 'UTC'` y al leer se convierte a UTC y se quita `tzinfo`.
+  Sin esa fijación, un servidor local en `America/Buenos_Aires` interpretaría un
+  `09:00` naive como 12:00 UTC y el turno se mostraría corrido.
 - En SQLite se guarda como texto `DATETIME` sin zona.
 - Las comparaciones de rango se hacen con `rango_del_dia()` (00:00:00 a
   23:59:59.999999).
-- El frontend interpreta las fechas como hora local del consultorio y envía
-  `datetime` sin zona; el backend las normaliza a UTC naive.
+- El frontend interpreta las fechas como hora de pared del consultorio y envía
+  `datetime` sin zona; con la sesión en UTC el valor guardado y el que se
+  muestra son el mismo.
 - No se almacena la zona horaria del consultorio ni se hacen conversiones de
   horario de verano.
 
@@ -3167,11 +3204,12 @@ Vercel.
 |---|---|---|---|
 | **Resuelto** | Autenticación | Login JWT HS256 (8 h) con cookie `HttpOnly` + `SameSite=Lax`; contraseñas bcrypt; `GET /auth/me` revalida la cuenta. | Mantener `SECRET_KEY` sólo en el entorno y rotarla si se sospecha compromiso. |
 | **Resuelto** | Autorización | `require_module(...)` en cada router y menú dinámico por módulos; superadmin con acceso total; `BORRAR_MOVIMIENTOS` es un permiso aparte. | Revisar los módulos al alta de cada empleado y desactivar (no borrar) las cuentas. |
+| **Resuelto** | Privacidad del portal | La disponibilidad devuelve sólo horas; la búsqueda por DNI, nombre de pila + cobertura + teléfono enmascarado; nunca apellidos, motivos ni datos de terceros. | Mantener la regla al agregar campos al portal y revisar `tests/test_portal_turnos.py`. |
 | **P0** | Firma del webhook | `POST /whatsapp/webhook` no valida `X-Hub-Signature-256`. | Verificar HMAC del body con el secreto de la app de Meta antes de procesar. |
 | **P1** | CORS | `CORS_ORIGINS=["*"]` por defecto. | Restringir a los dominios reales; no usar `*` con credenciales. |
 | **P1** | Secretos | `WHATSAPP_*`, `ANAMNESIS_TOKEN_SECRET`, `DATABASE_URL` en entorno. | Mantener en Vercel/GitHub Secrets; rotar; nunca commitear `.env`. |
 | **P1** | Enlaces de anamnesis | Token determinístico sin vencimiento. | Evaluar expiración/rotación; mientras el turno exista, el enlace sigue válido. |
-| **P1** | Rate limiting | Login limitado a 5 fallos/min por IP y por cuenta (HTTP 429 + `Retry-After`); el ingreso con huella usa contadores propios. Los contadores son por proceso. | Complementar con límites en el proxy/CDN y del webhook/anamnesis. |
+| **P1** | Rate limiting | Login limitado a 5 fallos/min por IP y por cuenta (HTTP 429 + `Retry-After`); el ingreso con huella usa contadores propios. El portal público limita 60 lecturas/min y 12 operaciones/min por IP. Los contadores son por proceso. | Complementar con límites en el proxy/CDN para webhook y anamnesis. |
 | **P1** | Auditoría | No se registra quién modificó pacientes, historias o caja. | Tabla de auditoría y usuario autenticado. |
 | **P1** | Logs | Algunos logs incluyen teléfono y texto del paciente. | Minimizar PII, redactar teléfonos/textos clínicos y definir retención. |
 | **P2** | Cabeceras | Sólo se agregan headers en la página de anamnesis. | CSP, `X-Content-Type-Options`, `X-Frame-Options`, HSTS en producción. |
@@ -3353,6 +3391,13 @@ También avisa si el `.env` no define `DATABASE_URL`.
 | `WHATSAPP_CODIGO_PAIS` | `549` | Prefijo para enlaces `wa.me`. |
 | `PUBLIC_BASE_URL` | vacío | Base absoluta de enlaces públicos. |
 | `ANAMNESIS_TOKEN_SECRET` | vacío | Secreto HMAC de la ficha. |
+| `PORTAL_MAX_PETICIONES` | `60` | Lecturas por IP y ventana en el portal público. |
+| `PORTAL_MAX_OPERACIONES` | `12` | Reservas/cancelaciones por IP y ventana. |
+| `PORTAL_VENTANA_SEGUNDOS` | `60` | Ventana deslizante del rate limiting del portal. |
+| `PORTAL_MAX_TURNOS_ACTIVOS` | `2` | Tope de turnos futuros (`PENDIENTE`/`CONFIRMADO`) por DNI. |
+| `PORTAL_CANCELACION_HORAS` | `12` | Antelación mínima para cancelar desde el portal. |
+| `PORTAL_DURACION_TURNO_MIN` | `30` | Ancho del bloque reservado por el paciente. |
+| `PORTAL_DESFASE_HORARIO_HORAS` | `-3` | Desfase respecto de UTC para interpretar la hora de pared del consultorio (Argentina). |
 | `VERCEL` / `VERCEL_URL` / `VERCEL_PROJECT_PRODUCTION_URL` | provistas por Vercel | Detección de entorno y URL pública. |
 
 **Envío real:** requiere `WAHA_URL` y `WAHA_API_KEY`. Sin `WAHA_API_KEY` los
@@ -3445,7 +3490,7 @@ python -m pytest tests/test_facturacion.py -q
 - La suite no usa la base real.
 - WhatsApp se simula.
 - Los tests de deploy/publicación usan fakes y no tocan Git, Vercel ni la red.
-- Resultado actual: **1065 tests** (1064 aprobados y 1 omitido).
+- Resultado actual: **1092 tests** (1091 aprobados y 1 omitido).
 
 ### 8.5. Publicación
 
@@ -3725,7 +3770,7 @@ git ls-files
 
 **Fecha de última verificación:** 23/11/2026.
 **Versión de la app:** 1.0.0.
-**Resultado de la suite:** 1065 tests (1064 aprobados y 1 omitido).
+**Resultado de la suite:** 1092 tests (1091 aprobados y 1 omitido).
 
 ### 10.5. Conclusión
 

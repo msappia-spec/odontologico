@@ -194,6 +194,32 @@ class Settings(BaseSettings):
     #: Tiempo máximo que el navegador espera la biometría (milisegundos).
     webauthn_timeout_ms: int = 60000
 
+    # --- Portal público de turnos (``/reservar``) ---
+    # Límites antiabuso por IP. El portal NO exige sesión de empleado, así que
+    # estas ventanas son la primera barrera contra bots: las lecturas (doctores,
+    # disponibilidad, DNI) tienen un tope amplio y las reservas/cancelaciones uno
+    # más estricto. Los contadores son en memoria y por proceso (ver
+    # ``app.core.rate_limit``); en serverless complementan, no reemplazan, el
+    # control de concurrencia de la base.
+    portal_max_peticiones: int = 60
+    portal_max_operaciones: int = 12
+    portal_ventana_segundos: int = 60
+    # Cantidad máxima de turnos futuros vigentes (PENDIENTE o CONFIRMADO) que un
+    # mismo DNI puede tener al mismo tiempo desde el portal.
+    portal_max_turnos_activos: int = 2
+    # Antelación mínima (en horas) para que el paciente pueda cancelar solo.
+    portal_cancelacion_horas: int = 12
+    # Duración de cada turno reservado desde el portal. Coincide con el bloque
+    # que ofrece la agenda del Módulo 1 (30 minutos).
+    portal_duracion_turno_min: int = 30
+    # Desfase respecto de UTC con el que el portal interpreta "ahora" para
+    # descartar horarios ya pasados. La agenda del ERP guarda la **hora de pared
+    # del consultorio** (el panel envía ``2026-11-30T09:00`` sin zona), así que
+    # comparar contra UTC ocultaría los turnos de la mañana en Argentina
+    # (UTC-3). Se expresa en horas y no con ``zoneinfo`` para no depender de la
+    # base de zonas horarias en Windows; Argentina no aplica horario de verano.
+    portal_desfase_horario_horas: int = -3
+
     # --- Ficha de salud pública (anamnesis) ---
     # Base absoluta con la que se arma el enlace que recibe el paciente por
     # WhatsApp (``https://mi-consultorio.com/anamnesis/<token>``). Si no se

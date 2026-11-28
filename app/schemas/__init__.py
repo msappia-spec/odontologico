@@ -71,6 +71,17 @@ from app.schemas.obra_social import (
     ObraSocialUpdate,
 )
 from app.schemas.paciente import PacienteCreate, PacienteRead, PacienteUpdate
+from app.schemas.portal_turnos import (
+    PortalCancelacionCreate,
+    PortalCancelacionRead,
+    PortalDisponibilidadRead,
+    PortalDoctorRead,
+    PortalInicialRead,
+    PortalObraSocialRead,
+    PortalPacienteRead,
+    PortalReservaCreate,
+    PortalReservaRead,
+)
 from app.schemas.presupuesto import (
     PresupuestoCreate,
     PresupuestoEnviadoWhatsApp,
@@ -162,6 +173,15 @@ __all__ = [
     "PacienteCreate",
     "PacienteRead",
     "PacienteUpdate",
+    "PortalCancelacionCreate",
+    "PortalCancelacionRead",
+    "PortalDisponibilidadRead",
+    "PortalDoctorRead",
+    "PortalInicialRead",
+    "PortalObraSocialRead",
+    "PortalPacienteRead",
+    "PortalReservaCreate",
+    "PortalReservaRead",
     "PresupuestoCreate",
     "PresupuestoEnviadoWhatsApp",
     "PresupuestoEnvioWhatsApp",
